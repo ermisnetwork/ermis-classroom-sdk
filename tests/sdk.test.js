@@ -67,6 +67,5 @@ describe('Client Configuration', () => {
     const clientConfig = client.getConfig();
     expect(clientConfig.host).toBe('test.com:9999');
     expect(clientConfig.reconnectAttempts).toBeDefined();
-    expect(clientConfig.autoSaveCredentials).toBeDefined();
   });
 });

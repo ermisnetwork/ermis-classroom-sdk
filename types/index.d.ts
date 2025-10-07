@@ -22,7 +22,6 @@ export interface ClientConfig {
 }
 
 export interface ConnectionOptions {
-  autoSaveCredentials?: boolean;
   [key: string]: any;
 }
 

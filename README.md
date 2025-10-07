@@ -90,7 +90,6 @@ const client = ErmisClassroom.create({
   host: "server.com:9999",
   apiUrl: "https://server.com:9999/meeting", // optional
   webtpUrl: "https://server.com:4455/meeting/wt", // optional
-  autoSaveCredentials: true, // default: true
   reconnectAttempts: 3, // default: 3
   reconnectDelay: 2000, // default: 2000ms
   debug: false, // default: false
@@ -105,7 +104,6 @@ Connect and authenticate in one step.
 const client = await ErmisClassroom.connect(
   "https://server.com:9999",
   "user@email.com",
-  { autoSaveCredentials: true }
 );
 ```
 
@@ -947,9 +945,6 @@ const client = ErmisClassroom.create({
   host: "server.com:9999",
   apiUrl: "https://server.com:9999/meeting",
   webtpUrl: "https://server.com:4455/meeting/wt",
-
-  // Authentication
-  autoSaveCredentials: true,
 
   // Connection
   reconnectAttempts: 5,
