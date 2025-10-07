@@ -1,0 +1,678 @@
+ body {
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      color: #fff;
+      min-height: 100vh;
+
+      @media (max-width: 768px) {
+        .main-container {
+          flex-direction: column;
+        }
+
+        .sidebar {
+          width: 100%;
+          height: auto;
+          max-height: 50vh;
+        }
+
+        .video-tile {
+          width: 100%;
+          max-width: 300px;
+        }
+
+        .login-form {
+          margin: 1rem;
+          padding: 2rem;
+        }
+
+        .login-title {
+          font-size: 1.5rem;
+        }
+      }
+    }
+
+
+
+    .app-header {
+      background: rgba(0, 0, 0, 0.2);
+      backdrop-filter: blur(10px);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    .app-title {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin: 0;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .main-container {
+      display: flex;
+      height: calc(100vh - 80px);
+    }
+
+    .sidebar {
+      width: 350px;
+      background: rgba(0, 0, 0, 0.15);
+      backdrop-filter: blur(10px);
+      padding: 1.5rem;
+      overflow-y: auto;
+      border-right: 1px solid rgba(255, 255, 255, 0.1);
+      max-height: 100vh;
+    }
+
+    .meeting-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    .control-section {
+      margin-bottom: 2rem;
+    }
+
+    .control-title {
+      font-size: 1.2rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: #fff;
+      text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 0.75rem;
+      border: none;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      font-size: 1rem;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(10px);
+    }
+
+    .form-group input:focus {
+      outline: none;
+      background: rgba(255, 255, 255, 0.2);
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+    }
+
+    .form-group input::placeholder {
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .btn {
+      background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 600;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 25px rgba(255, 107, 107, 0.4);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+      box-shadow: 0 4px 15px rgba(79, 172, 254, 0.3);
+    }
+
+    .btn-primary:hover {
+      box-shadow: 0 8px 25px rgba(79, 172, 254, 0.4);
+    }
+
+    .room-list {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .room-item {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .room-item:hover {
+      background: rgba(255, 255, 255, 0.2);
+      transform: translateX(5px);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    .room-name {
+      font-weight: 600;
+      font-size: 1.1rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .room-code {
+      font-size: 0.9rem;
+      color: rgba(255, 255, 255, 0.8);
+      font-family: monospace;
+      background: rgba(0, 0, 0, 0.2);
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      display: inline-block;
+    }
+
+    .room-type {
+      float: right;
+      font-size: 0.8rem;
+      color: rgba(255, 255, 255, 0.7);
+      text-transform: uppercase;
+    }
+
+    .meeting-container {
+      display: none;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+      align-items: flex-start;
+      width: 100%;
+      max-width: 1200px;
+    }
+
+    .meeting-container.active {
+      display: flex;
+    }
+
+
+
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .error {
+      color: #ff6b6b;
+      font-weight: 500;
+    }
+
+    .success {
+      color: #51cf66;
+      font-weight: 500;
+    }
+
+    .current-room-info {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      padding: 1rem;
+      border-radius: 12px;
+      margin-bottom: 1rem;
+      display: none;
+    }
+
+    .current-room-info.active {
+      display: block;
+    }
+
+    .current-room-name {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
+    .members-count {
+      font-size: 0.9rem;
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .leave-btn {
+      background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+      margin-top: 0.5rem;
+      padding: 0.5rem 1rem;
+      font-size: 0.9rem;
+    }
+
+    .welcome-message {
+      text-align: center;
+      font-size: 1.3rem;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 2rem;
+    }
+
+    .login-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(20px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    .login-overlay.hidden {
+      display: none;
+    }
+
+    .login-form {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 20px;
+      padding: 3rem;
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+
+    .login-title {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      color: #fff;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .login-subtitle {
+      font-size: 1rem;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 2rem;
+      line-height: 1.5;
+    }
+
+    .login-input {
+      width: 100%;
+      padding: 1rem;
+      border: none;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      font-size: 1.1rem;
+      margin-bottom: 1.5rem;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(10px);
+      border: 2px solid transparent;
+    }
+
+    .login-input:focus {
+      outline: none;
+      background: rgba(255, 255, 255, 0.2);
+      border-color: rgba(79, 172, 254, 0.5);
+      box-shadow: 0 0 0 4px rgba(79, 172, 254, 0.1);
+    }
+
+    .login-input::placeholder {
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .login-btn {
+      width: 100%;
+      background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+      color: white;
+      border: none;
+      padding: 1rem;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 1.1rem;
+      font-weight: 600;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 4px 20px rgba(79, 172, 254, 0.3);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .login-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(79, 172, 254, 0.4);
+    }
+
+    .login-btn:active {
+      transform: translateY(0);
+    }
+
+    .login-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: scale(0.9);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+
+    /* .video-tile {
+      background: rgba(0, 0, 0, 0.8);
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+      position: relative;
+      width: 320px;
+      height: 180px;
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      cursor: pointer;
+      border: 2px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .video-tile:hover {
+      transform: scale(1.05);
+      box-shadow: 0 12px 48px rgba(0, 0, 0, 0.4);
+    }
+
+    .video-tile.fullscreen {
+      position: fixed !important;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100vw !important;
+      height: 100vh !important;
+      z-index: 1000;
+      margin: 0 !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      background: #000;
+      border: none;
+    }
+
+    .video-tile video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #111;
+      display: block;
+    }
+
+    .video-tile.fullscreen video {
+      object-fit: contain;
+    }
+
+    .video-tile .user-label {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+      color: #fff;
+      font-size: 1rem;
+      padding: 1rem;
+      text-align: left;
+      z-index: 2;
+      pointer-events: none;
+      font-weight: 600;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+    }
+
+    .video-tile .status {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      font-size: 0.85rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 20px;
+      z-index: 2;
+      pointer-events: none;
+      backdrop-filter: blur(10px);
+      font-weight: 500;
+    } */
+
+    /* start of dev */
+    .meeting-container {
+      display: none;
+      width: 100%;
+      max-width: 1200px;
+      gap: 1rem;
+    }
+
+    .meeting-container.active {
+      display: flex;
+    }
+
+    .main-video-area {
+      flex: 2;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .sidebar-videos {
+      flex: 1;
+      /* display: flex;
+      flex-direction: column; */
+      /* gap: 1rem; */
+      max-width: 300px;
+      overflow-y: auto;
+      max-height: 80vh;
+    }
+
+    .sidebar-videos .video-tile {
+      margin-bottom: 1rem;
+    }
+
+    .video-tile {
+      background: rgba(0, 0, 0, 0.8);
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+      position: relative;
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      cursor: pointer;
+      border: 2px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .video-tile.pinned {
+      width: 100%;
+      height: 400px;
+      border-color: #4facfe;
+    }
+
+    .video-tile:not(.pinned) {
+      width: 100%;
+      height: 150px;
+    }
+
+    .video-tile.pinned .pin-btn {
+      background: rgba(79, 172, 254, 0.8);
+    }
+
+    /* end of dev */
+
+    /* pin btn style */
+
+    .pin-btn {
+      padding: 6px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .pin-btn:hover {
+      background: rgba(0, 0, 0, 0.9);
+      transform: scale(1.1);
+    }
+
+    /* tile controls style */
+
+    .controls {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+    }
+
+    .mic-btn,
+    .cam-btn {
+      padding: 8px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.2s;
+    }
+
+    .mic-btn:hover,
+    .cam-btn:hover {
+      background: rgba(0, 0, 0, 0.8);
+    }
+
+    .mic-btn.muted {
+      background: rgba(255, 0, 0, 0.6);
+    }
+
+    .cam-btn.disabled {
+      background: rgba(255, 0, 0, 0.6);
+    }
+
+
+    .subscriber-controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      gap: 8px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .video-tile:hover .subscriber-controls {
+      opacity: 1;
+    }
+
+    .audio-btn {
+      padding: 6px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      font-size: 0;
+    }
+
+    .audio-btn:hover {
+      background: rgba(0, 0, 0, 0.9);
+      transform: scale(1.1);
+    }
+
+    .audio-btn.muted {
+      background: rgba(255, 0, 0, 0.7);
+    }
+
+    @media (max-width: 768px) {
+      .meeting-container.active {
+        flex-direction: column;
+      }
+
+      .main-video-area {
+        flex: none;
+        height: 60vh;
+      }
+
+      .sidebar-videos {
+        flex: none;
+        flex-direction: row;
+        max-width: none;
+        overflow-x: auto;
+      }
+    }
+
+
+    .video-tile .user-label {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+      color: #fff;
+      font-size: 1rem;
+      padding: 1rem;
+      text-align: left;
+      z-index: 2;
+      pointer-events: none;
+      font-weight: 600;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+    }
+
+    .video-tile .status {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      font-size: 0.85rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 20px;
+      z-index: 2;
+      pointer-events: none;
+      backdrop-filter: blur(10px);
+      font-weight: 500;
+    }
+
+    .video-tile video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #111;
+      display: block;
+    }

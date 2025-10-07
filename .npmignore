@@ -1,0 +1,54 @@
+# Development files
+*.log
+*.tmp
+*.temp
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts (exclude from source, only include dist/)
+rollup.config.js
+.babelrc
+.eslintrc*
+jest.config.js
+tsconfig.json
+
+# Testing
+tests/
+coverage/
+*.test.js
+*.spec.js
+
+# Documentation build
+docs/
+api_documentation.md
+
+# Development scripts
+rebuild.sh
+
+# Examples and demos (optional - you might want to include these)
+examples/
+demo.html
+demo1.html
+
+# Node modules and lock files
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Git and CI
+.git/
+.github/
+.gitignore
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Temporary directories
+tmp/
+temp/
