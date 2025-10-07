@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import ErmisClassroom, { Participant, Room } from '@tuannt591/ermis-classroom-sdk';
+import ErmisClassroom, { Participant, Room } from 'ermis-classroom-sdk';
 import styled from 'styled-components';
 import {
   MdMic,
