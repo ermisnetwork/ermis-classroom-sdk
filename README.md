@@ -41,6 +41,7 @@ A powerful and easy-to-use SDK for building online classroom applications with r
 - 📦 **Breakout Rooms** - Split participants into smaller sub-rooms
 - 📌 **Pin Participants** - Highlight specific participants
 - 🎤 **Media Controls** - Toggle camera/microphone for self and others
+- 💬 **Real-time Chat** - Send messages, typing indicators, message management
 - 🔄 **Auto Reconnection** - Automatic reconnection on network issues
 - 📱 **Device Management** - List and select cameras/microphones
 - 🎯 **Event-Driven Architecture** - React to all classroom events
@@ -131,6 +132,26 @@ await me.toggleCamera();
 // Check status
 console.log('Mic:', me.isAudioEnabled);
 console.log('Camera:', me.isVideoEnabled);
+```
+
+### 5. Send Chat Messages
+
+```javascript
+// Listen for incoming messages
+client.on(ErmisClassroom.events.MESSAGE_RECEIVED, (event) => {
+  console.log(`${event.sender.userId}: ${event.message.text}`);
+});
+
+// Send a message
+await client.sendMessage('Hello everyone!', {
+  senderName: 'John Doe'
+});
+
+// Send typing indicator
+await client.sendTypingIndicator(true);
+
+// Get message history
+const messages = client.getMessages(50);
 ```
 
 ---
@@ -490,6 +511,15 @@ ErmisClassroom.events.SUB_ROOM_SWITCHED
 ErmisClassroom.events.LOCAL_STREAM_READY
 ErmisClassroom.events.REMOTE_STREAM_READY
 ErmisClassroom.events.STREAM_REMOVED
+
+// Chat Events
+ErmisClassroom.events.MESSAGE_SENT
+ErmisClassroom.events.MESSAGE_RECEIVED
+ErmisClassroom.events.MESSAGE_DELETED
+ErmisClassroom.events.MESSAGE_UPDATED
+ErmisClassroom.events.TYPING_STARTED
+ErmisClassroom.events.TYPING_STOPPED
+ErmisClassroom.events.CHAT_HISTORY_LOADED
 
 // Error Events
 ErmisClassroom.events.ERROR

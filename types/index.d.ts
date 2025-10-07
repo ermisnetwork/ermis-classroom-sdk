@@ -66,6 +66,52 @@ export interface StreamRemovedEvent {
   participant: ParticipantInfo;
 }
 
+export interface ChatMessage {
+  id: string;
+  text: string;
+  senderId: string;
+  senderName: string;
+  roomId: string;
+  timestamp: number;
+  updatedAt?: number;
+  metadata: Record<string, any>;
+}
+
+export interface MessageSentEvent {
+  room: Room;
+  message: ChatMessage;
+}
+
+export interface MessageReceivedEvent {
+  room: Room;
+  message: ChatMessage;
+  sender: ParticipantInfo | null;
+}
+
+export interface MessageDeletedEvent {
+  room: Room;
+  messageId: string;
+  senderId: string;
+}
+
+export interface MessageUpdatedEvent {
+  room: Room;
+  messageId: string;
+  text: string;
+  senderId: string;
+}
+
+export interface TypingEvent {
+  room: Room;
+  userId: string;
+  user?: ParticipantInfo;
+}
+
+export interface SendMessageOptions {
+  senderName?: string;
+  customData?: Record<string, any>;
+}
+
 export interface User {
   id: string;
   token: string;
@@ -166,9 +212,11 @@ export declare class Room extends EventEmitter {
   participants: Map<string, Participant>;
   localParticipant: Participant | null;
   pinnedParticipant: Participant | null;
+  messages: ChatMessage[];
+  typingUsers: Map<string, any>;
 
   constructor(config: any);
-  
+
   join(userId: string): Promise<JoinResult>;
   leave(): Promise<void>;
   createSubRoom(config: SubRoomConfig): Promise<SubRoom>;
@@ -180,6 +228,14 @@ export declare class Room extends EventEmitter {
   pinParticipant(userId: string): boolean;
   unpinParticipant(): boolean;
   getInfo(): RoomInfo;
+
+  sendMessage(text: string, metadata?: SendMessageOptions): Promise<ChatMessage>;
+  deleteMessage(messageId: string): Promise<boolean>;
+  updateMessage(messageId: string, newText: string, metadata?: SendMessageOptions): Promise<boolean>;
+  sendTypingIndicator(isTyping?: boolean): Promise<void>;
+  getMessages(limit?: number): ChatMessage[];
+  getTypingUsers(): any[];
+  clearMessages(): void;
 }
 
 // SubRoom class
@@ -224,7 +280,7 @@ export declare class ApiClient {
 // Ermis Client
 export declare class ErmisClient extends EventEmitter {
   constructor(config: ClientConfig);
-  
+
   authenticate(userId: string): Promise<User>;
   manualAuthenticate(userId: string, token: string): void;
   logout(): Promise<void>;
@@ -241,6 +297,14 @@ export declare class ErmisClient extends EventEmitter {
   getState(): any;
   getConfig(): ClientConfig;
   cleanup(): Promise<void>;
+
+  sendMessage(text: string, metadata?: SendMessageOptions): Promise<ChatMessage>;
+  deleteMessage(messageId: string): Promise<boolean>;
+  updateMessage(messageId: string, newText: string, metadata?: SendMessageOptions): Promise<boolean>;
+  sendTypingIndicator(isTyping?: boolean): Promise<void>;
+  getMessages(limit?: number): ChatMessage[];
+  getTypingUsers(): any[];
+  clearMessages(): void;
 }
 
 // Main SDK class
@@ -268,6 +332,13 @@ export declare class ErmisClassroom {
     readonly LOCAL_STREAM_READY: 'localStreamReady';
     readonly REMOTE_STREAM_READY: 'remoteStreamReady';
     readonly STREAM_REMOVED: 'streamRemoved';
+    readonly MESSAGE_SENT: 'messageSent';
+    readonly MESSAGE_RECEIVED: 'messageReceived';
+    readonly MESSAGE_DELETED: 'messageDeleted';
+    readonly MESSAGE_UPDATED: 'messageUpdated';
+    readonly TYPING_STARTED: 'typingStarted';
+    readonly TYPING_STOPPED: 'typingStopped';
+    readonly CHAT_HISTORY_LOADED: 'chatHistoryLoaded';
     readonly ERROR: 'error';
   };
 
@@ -301,9 +372,6 @@ export declare class ErmisClassroom {
   static create(config: ClientConfig): ErmisClient;
   static connect(serverUrl: string, userId: string, options?: ConnectionOptions): Promise<ErmisClient>;
 }
-
-// Named exports
-export { ErmisClient, Room, SubRoom, Participant, ApiClient, EventEmitter };
 
 // Default export
 export default ErmisClassroom;
