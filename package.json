@@ -13,7 +13,6 @@
     "README.md",
     "LICENSE"
   ],
-  "type": "module",
   "scripts": {
     "build": "rollup -c rollup.config.js",
     "build:dev": "rollup -c rollup.config.js",
