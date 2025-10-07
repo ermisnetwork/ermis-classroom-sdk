@@ -1,6 +1,6 @@
 {
   "name": "ermis-classroom-sdk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Ermis Classroom SDK for virtual classroom and meeting integration",
   "main": "dist/ermis-classroom.cjs.js",
   "module": "dist/ermis-classroom.esm.js",
@@ -28,7 +28,7 @@
     "docs": "typedoc src/ --out docs/",
     "clean": "rimraf dist/",
     "prepublishOnly": "npm run clean && npm run build:prod && npm run test",
-    "demo": "http-server demo/ -p 8080 -o"
+    "demo": "cd examples/vite && yarn dev"
   },
   "keywords": [
     "video-calling",

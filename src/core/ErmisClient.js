@@ -105,6 +105,34 @@ class ErmisClient extends EventEmitter {
     }
   }
 
+    /**
+   * Set authentication directly without calling API
+   */
+  manualAuthenticate(userId, token) {
+    if (!userId || !token) {
+      throw new Error("userId and token are required");
+    }
+
+    // Set auth to API client
+    this.apiClient.setAuth(token, userId);
+
+    // Update state
+    this.state.user = {
+      id: userId,
+      token,
+      authenticatedAt: Date.now(),
+    };
+    this.state.isAuthenticated = true;
+
+    // Update connection status
+    this._setConnectionStatus("connected");
+
+    // Emit event
+    this.emit("authenticated", { user: this.state.user });
+
+    this._debug("Auth set directly:", this.state.user);
+  }
+
   /**
    * Logout user
    */

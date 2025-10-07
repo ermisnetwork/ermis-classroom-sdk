@@ -179,8 +179,6 @@ export declare class Room extends EventEmitter {
   getParticipants(): Participant[];
   pinParticipant(userId: string): boolean;
   unpinParticipant(): boolean;
-  setUIContainers(mainVideoArea: HTMLElement, sidebarArea: HTMLElement): void;
-  renderParticipantTiles(): void;
   getInfo(): RoomInfo;
 }
 
@@ -228,6 +226,7 @@ export declare class ErmisClient extends EventEmitter {
   constructor(config: ClientConfig);
   
   authenticate(userId: string): Promise<User>;
+  manualAuthenticate(userId: string, token: string): void;
   logout(): Promise<void>;
   createRoom(config: RoomConfig): Promise<Room>;
   joinRoom(roomCode: string): Promise<JoinResult>;
@@ -237,7 +236,6 @@ export declare class ErmisClient extends EventEmitter {
   joinSubRoom(subRoomCode: string): Promise<JoinResult>;
   returnToMainRoom(): Promise<Room>;
   switchSubRoom(targetSubRoomCode: string): Promise<JoinResult>;
-  setUIContainers(mainVideoArea: HTMLElement, sidebarArea: HTMLElement): void;
   getCurrentRoom(): Room | null;
   getRoom(roomId: string): Room | null;
   getState(): any;
