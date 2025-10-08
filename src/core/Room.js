@@ -676,7 +676,7 @@ class Room extends EventEmitter {
       onStatus: (msg, isError) => {
         participant.setConnectionStatus(isError ? "failed" : "connected");
       },
-      audioWorkletUrl: "workers/audio-worklet1.js",
+      audioWorkletUrl: "/workers/audio-worklet1.js",
       mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
     });
     // Add to audio mixer

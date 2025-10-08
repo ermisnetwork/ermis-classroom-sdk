@@ -15,9 +15,9 @@ class Subscriber extends EventEmitter {
     this.isOwnStream = config.isOwnStream || false;
 
     // Media configuration
-    this.mediaWorkerUrl = config.mediaWorkerUrl || "workers/media-worker-ab.js";
+    this.mediaWorkerUrl = config.mediaWorkerUrl || "/workers/media-worker-ab.js";
     this.audioWorkletUrl =
-      config.audioWorkletUrl || "workers/audio-worklet1.js";
+      config.audioWorkletUrl || "/workers/audio-worklet1.js";
     this.mstgPolyfillUrl =
       config.mstgPolyfillUrl || "/polyfills/MSTG_polyfill.js";
 
