@@ -89,6 +89,15 @@ class ErmisClassroom {
       REMOTE_STREAM_READY: "remoteStreamReady",
       STREAM_REMOVED: "streamRemoved",
 
+      // Chat events
+      MESSAGE_SENT: "messageSent",
+      MESSAGE_RECEIVED: "messageReceived",
+      MESSAGE_DELETED: "messageDeleted",
+      MESSAGE_UPDATED: "messageUpdated",
+      TYPING_STARTED: "typingStarted",
+      TYPING_STOPPED: "typingStopped",
+      CHAT_HISTORY_LOADED: "chatHistoryLoaded",
+
       // Error events
       ERROR: "error",
     };

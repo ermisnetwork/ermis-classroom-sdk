@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2015",
+    "lib": ["ES2015", "DOM"],
+    "module": "commonjs",
+    "declaration": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "esModuleInterop": true,
+    "moduleResolution": "node"
+  },
+  "include": ["types/**/*"],
+  "exclude": ["node_modules", "dist", "examples"]
+}
+

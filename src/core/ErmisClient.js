@@ -514,6 +514,62 @@ class ErmisClient extends EventEmitter {
     this.config.debug = false;
   }
 
+  async sendMessage(text, metadata = {}) {
+    if (!this.state.currentRoom) {
+      throw new Error("No active room. Join a room first.");
+    }
+
+    return await this.state.currentRoom.sendMessage(text, metadata);
+  }
+
+  async deleteMessage(messageId) {
+    if (!this.state.currentRoom) {
+      throw new Error("No active room. Join a room first.");
+    }
+
+    return await this.state.currentRoom.deleteMessage(messageId);
+  }
+
+  async updateMessage(messageId, newText, metadata = {}) {
+    if (!this.state.currentRoom) {
+      throw new Error("No active room. Join a room first.");
+    }
+
+    return await this.state.currentRoom.updateMessage(messageId, newText, metadata);
+  }
+
+  async sendTypingIndicator(isTyping = true) {
+    if (!this.state.currentRoom) {
+      return;
+    }
+
+    return await this.state.currentRoom.sendTypingIndicator(isTyping);
+  }
+
+  getMessages(limit = 100) {
+    if (!this.state.currentRoom) {
+      return [];
+    }
+
+    return this.state.currentRoom.getMessages(limit);
+  }
+
+  getTypingUsers() {
+    if (!this.state.currentRoom) {
+      return [];
+    }
+
+    return this.state.currentRoom.getTypingUsers();
+  }
+
+  clearMessages() {
+    if (!this.state.currentRoom) {
+      return;
+    }
+
+    this.state.currentRoom.clearMessages();
+  }
+
   /**
    * Cleanup client resources
    */
@@ -560,18 +616,23 @@ class ErmisClient extends EventEmitter {
       "streamRemoved",
       "audioToggled",
       "videoToggled",
+      "messageSent",
+      "messageReceived",
+      "messageDeleted",
+      "messageUpdated",
+      "typingStarted",
+      "typingStopped",
       "error",
     ];
 
     eventsToForward.forEach((event) => {
       room.on(event, (data) => {
         this.emit(
-          // `room${event.charAt(0).toUpperCase() + event.slice(1)}`,
           event,
           data
         );
       });
-    });    
+    });
   }
 
   /**

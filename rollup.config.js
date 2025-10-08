@@ -142,7 +142,7 @@ const buildConfigs = [
     ...baseConfig,
     output: {
       file: "dist/ermis-classroom.cjs.js",
-      format: "cjs", 
+      format: "cjs",
       banner,
       sourcemap: true,
       exports: "auto",

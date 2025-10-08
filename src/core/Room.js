@@ -38,6 +38,10 @@ class Room extends EventEmitter {
     // Connection info
     this.membershipId = null;
     this.streamId = null;
+
+    // Chat management
+    this.messages = [];
+    this.typingUsers = new Map();
   }
 
   /**
@@ -252,6 +256,170 @@ class Room extends EventEmitter {
       this.emit("error", { room: this, error, action: "returnToMainRoom" });
       throw error;
     }
+  }
+
+  async sendMessage(text, metadata = {}) {
+    if (!this.isActive) {
+      throw new Error("Cannot send message: room is not active");
+    }
+
+    if (!this.localParticipant?.publisher) {
+      throw new Error("Cannot send message: publisher not available");
+    }
+
+    if (!text || typeof text !== "string" || text.trim().length === 0) {
+      throw new Error("Message text is required and must be a non-empty string");
+    }
+
+    try {
+      const messageId = this._generateMessageId();
+      const message = {
+        id: messageId,
+        text: text.trim(),
+        senderId: this.localParticipant.userId,
+        senderName: metadata.senderName || this.localParticipant.userId,
+        roomId: this.id,
+        timestamp: Date.now(),
+        metadata: metadata.customData || {},
+      };
+
+      const messageEvent = {
+        type: "message",
+        ...message,
+      };
+
+      await this.localParticipant.publisher.sendEvent(messageEvent);
+
+      this.messages.push(message);
+
+      this.emit("messageSent", {
+        room: this,
+        message,
+      });
+
+      return message;
+    } catch (error) {
+      this.emit("error", { room: this, error, action: "sendMessage" });
+      throw error;
+    }
+  }
+
+  async deleteMessage(messageId) {
+    if (!this.isActive) {
+      throw new Error("Cannot delete message: room is not active");
+    }
+
+    if (!this.localParticipant?.publisher) {
+      throw new Error("Cannot delete message: publisher not available");
+    }
+
+    try {
+      const deleteEvent = {
+        type: "messageDelete",
+        messageId,
+        senderId: this.localParticipant.userId,
+        roomId: this.id,
+        timestamp: Date.now(),
+      };
+
+      await this.localParticipant.publisher.sendEvent(deleteEvent);
+
+      this.messages = this.messages.filter((m) => m.id !== messageId);
+
+      this.emit("messageDeleted", {
+        room: this,
+        messageId,
+      });
+
+      return true;
+    } catch (error) {
+      this.emit("error", { room: this, error, action: "deleteMessage" });
+      throw error;
+    }
+  }
+
+  async updateMessage(messageId, newText, metadata = {}) {
+    if (!this.isActive) {
+      throw new Error("Cannot update message: room is not active");
+    }
+
+    if (!this.localParticipant?.publisher) {
+      throw new Error("Cannot update message: publisher not available");
+    }
+
+    if (!newText || typeof newText !== "string" || newText.trim().length === 0) {
+      throw new Error("New message text is required and must be a non-empty string");
+    }
+
+    try {
+      const updateEvent = {
+        type: "messageUpdate",
+        messageId,
+        text: newText.trim(),
+        senderId: this.localParticipant.userId,
+        roomId: this.id,
+        timestamp: Date.now(),
+        metadata: metadata.customData || {},
+      };
+
+      await this.localParticipant.publisher.sendEvent(updateEvent);
+
+      const messageIndex = this.messages.findIndex((m) => m.id === messageId);
+      if (messageIndex !== -1) {
+        this.messages[messageIndex].text = newText.trim();
+        this.messages[messageIndex].updatedAt = Date.now();
+        this.messages[messageIndex].metadata = {
+          ...this.messages[messageIndex].metadata,
+          ...updateEvent.metadata,
+        };
+      }
+
+      this.emit("messageUpdated", {
+        room: this,
+        messageId,
+        text: newText.trim(),
+      });
+
+      return true;
+    } catch (error) {
+      this.emit("error", { room: this, error, action: "updateMessage" });
+      throw error;
+    }
+  }
+
+  async sendTypingIndicator(isTyping = true) {
+    if (!this.isActive) {
+      return;
+    }
+
+    if (!this.localParticipant?.publisher) {
+      return;
+    }
+
+    try {
+      const typingEvent = {
+        type: isTyping ? "typingStart" : "typingStop",
+        userId: this.localParticipant.userId,
+        roomId: this.id,
+        timestamp: Date.now(),
+      };
+
+      await this.localParticipant.publisher.sendEvent(typingEvent);
+    } catch (error) {
+      console.error("Failed to send typing indicator:", error);
+    }
+  }
+
+  getMessages(limit = 100) {
+    return this.messages.slice(-limit);
+  }
+
+  getTypingUsers() {
+    return Array.from(this.typingUsers.values());
+  }
+
+  clearMessages() {
+    this.messages = [];
   }
 
   /**
@@ -562,13 +730,97 @@ class Room extends EventEmitter {
     if (event.type === "leave") {
       const participant = this.participants.get(event.participant.user_id);
       if (participant) {
-        // Sau đó cleanup participant
         this.removeParticipant(event.participant.user_id);
 
-        // Nếu người bị remove là pinned participant, auto-pin local
         if (!this.pinnedParticipant && this.localParticipant) {
           this.pinParticipant(this.localParticipant.userId);
         }
+      }
+    }
+
+    if (event.type === "message") {
+      const message = {
+        id: event.id,
+        text: event.text,
+        senderId: event.senderId,
+        senderName: event.senderName,
+        roomId: event.roomId,
+        timestamp: event.timestamp,
+        metadata: event.metadata || {},
+      };
+
+      this.messages.push(message);
+
+      const sender = this.getParticipant(event.senderId);
+
+      this.emit("messageReceived", {
+        room: this,
+        message,
+        sender: sender ? sender.getInfo() : null,
+      });
+    }
+
+    if (event.type === "messageDelete") {
+      this.messages = this.messages.filter((m) => m.id !== event.messageId);
+
+      this.emit("messageDeleted", {
+        room: this,
+        messageId: event.messageId,
+        senderId: event.senderId,
+      });
+    }
+
+    if (event.type === "messageUpdate") {
+      const messageIndex = this.messages.findIndex((m) => m.id === event.messageId);
+      if (messageIndex !== -1) {
+        this.messages[messageIndex].text = event.text;
+        this.messages[messageIndex].updatedAt = event.timestamp;
+        this.messages[messageIndex].metadata = {
+          ...this.messages[messageIndex].metadata,
+          ...event.metadata,
+        };
+      }
+
+      this.emit("messageUpdated", {
+        room: this,
+        messageId: event.messageId,
+        text: event.text,
+        senderId: event.senderId,
+      });
+    }
+
+    if (event.type === "typingStart") {
+      if (event.userId !== this.localParticipant?.userId) {
+        this.typingUsers.set(event.userId, {
+          userId: event.userId,
+          timestamp: event.timestamp,
+        });
+
+        this.emit("typingStarted", {
+          room: this,
+          userId: event.userId,
+          user: this.getParticipant(event.userId)?.getInfo(),
+        });
+
+        setTimeout(() => {
+          this.typingUsers.delete(event.userId);
+          this.emit("typingStopped", {
+            room: this,
+            userId: event.userId,
+          });
+        }, 5000);
+      }
+    }
+
+    if (event.type === "typingStop") {
+      if (event.userId !== this.localParticipant?.userId) {
+        this.typingUsers.delete(event.userId);
+
+        this.emit("typingStopped", {
+          room: this,
+          userId: event.userId,
+          user: this.getParticipant(event.userId)?.getInfo(),
+        });
       }
     }
   }
@@ -634,6 +886,11 @@ class Room extends EventEmitter {
     this.participants.clear();
     this.localParticipant = null;
     this.pinnedParticipant = null;
+    this.typingUsers.clear();
+  }
+
+  _generateMessageId() {
+    return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
   /**
