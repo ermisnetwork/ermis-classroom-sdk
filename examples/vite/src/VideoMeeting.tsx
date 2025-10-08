@@ -67,7 +67,7 @@ const MainVideoStyled = styled.div<{ $totalParticipants: number }>`
     object-fit: cover;
     background: #111;
     border-radius: 4px;
-    transform: rotate(180deg);
+    transform: scaleX(-1);
   }
 `;
 
@@ -104,7 +104,7 @@ const ParticipantVideoContainer = styled.div<{
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transform: rotate(180deg);
+    transform: scaleX(-1);
   }
 
   &:hover .participant-actions {
