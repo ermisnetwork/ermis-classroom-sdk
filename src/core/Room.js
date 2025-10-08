@@ -636,7 +636,7 @@ class Room extends EventEmitter {
     const publisher = new Publisher({
       publishUrl,
       streamType: "camera",
-      streamId: "camera_stream",
+      streamId: this.streamId,
       width: 1280,
       height: 720,
       framerate: 30,
@@ -656,7 +656,7 @@ class Room extends EventEmitter {
       this.emit("localStreamReady", {
         ...data,
         participant: this.localParticipant.getInfo(),
-        roomId: this.id
+        roomId: this.id,
       });
     });
 
@@ -689,7 +689,7 @@ class Room extends EventEmitter {
       this.emit("remoteStreamReady", {
         ...data,
         participant: participant.getInfo(),
-        roomId: this.id
+        roomId: this.id,
       });
     });
 
@@ -823,6 +823,90 @@ class Room extends EventEmitter {
         });
       }
     }
+    if (event.type === "start_share_screen") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant && participant.userId !== this.localParticipant?.userId) {
+        participant.isScreenSharing = true;
+        this.emit("remoteScreenShareStarted", { room: this, participant });
+      }
+    }
+
+    if (event.type === "stop_share_screen") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant && participant.userId !== this.localParticipant?.userId) {
+        participant.isScreenSharing = false;
+        this.emit("remoteScreenShareStopped", { room: this, participant });
+      }
+    }
+
+    if (event.type === "mic_on") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant) {
+        participant.updateMicStatus(true);
+        this.emit("remoteAudioStatusChanged", {
+          room: this,
+          participant,
+          enabled: true,
+        });
+      }
+    }
+
+    if (event.type === "mic_off") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant) {
+        participant.updateMicStatus(false);
+        this.emit("remoteAudioStatusChanged", {
+          room: this,
+          participant,
+          enabled: false,
+        });
+      }
+    }
+
+    if (event.type === "camera_on") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant) {
+        participant.updateCameraStatus(true);
+        this.emit("remoteVideoStatusChanged", {
+          room: this,
+          participant,
+          enabled: true,
+        });
+      }
+    }
+
+    if (event.type === "camera_off") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant) {
+        participant.updateCameraStatus(false);
+        this.emit("remoteVideoStatusChanged", {
+          room: this,
+          participant,
+          enabled: false,
+        });
+      }
+    }
+
+    if (event.type === "pin_for_everyone") {
+      console.log(`Pin for everyone event received:`, event.participant);
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant) {
+        this.pinParticipant(participant.userId);
+        this.emit("participantPinnedForEveryone", { room: this, participant });
+      }
+    }
+
+    if (event.type === "unpin_for_everyone") {
+      console.log(`Unpin for everyone event received`);
+      if (this.pinnedParticipant) {
+        const participant = this.pinnedParticipant;
+        this.unpinParticipant();
+        this.emit("participantUnpinnedForEveryone", {
+          room: this,
+          participant,
+        });
+      }
+    }
   }
 
   _setupParticipantEvents(participant) {
@@ -832,6 +916,22 @@ class Room extends EventEmitter {
       } else if (this.pinnedParticipant === p) {
         this.unpinParticipant();
       }
+    });
+
+    participant.on("audioToggled", ({ participant: p, enabled }) => {
+      this.emit("audioToggled", {
+        room: this,
+        participant: p,
+        enabled,
+      });
+    });
+
+    participant.on("videoToggled", ({ participant: p, enabled }) => {
+      this.emit("videoToggled", {
+        room: this,
+        participant: p,
+        enabled,
+      });
     });
 
     participant.on("error", ({ participant: p, error, action }) => {
@@ -903,7 +1003,7 @@ class Room extends EventEmitter {
         this.emit("localStreamReady", {
           ...data,
           participant: this.localParticipant.getInfo(),
-          roomId: this.id
+          roomId: this.id,
         });
       });
     }
@@ -915,7 +1015,7 @@ class Room extends EventEmitter {
           this.emit("remoteStreamReady", {
             ...data,
             participant: participant.getInfo(),
-            roomId: this.id
+            roomId: this.id,
           });
         });
 

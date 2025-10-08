@@ -1,4 +1,4 @@
-// Type definitions for @tuannt591/ermis-classroom-sdk
+// Type definitions for ermis-classroom-sdk
 // Project: https://github.com/tuannt591/ermis-classroom-sdk
 // Definitions by: Ermis Team <https://github.com/tuannt591>
 
@@ -22,6 +22,7 @@ export interface ClientConfig {
 }
 
 export interface ConnectionOptions {
+  autoSaveCredentials?: boolean;
   [key: string]: any;
 }
 
@@ -127,6 +128,7 @@ export interface ParticipantInfo {
   isAudioEnabled: boolean;
   isVideoEnabled: boolean;
   isPinned: boolean;
+  isScreenSharing: boolean;
   connectionStatus: string;
 }
 
@@ -186,14 +188,18 @@ export declare class Participant extends EventEmitter {
   isAudioEnabled: boolean;
   isVideoEnabled: boolean;
   isPinned: boolean;
+  isScreenSharing: boolean;
   connectionStatus: string;
+  screenSubscriber: any;
 
   constructor(config: any);
-  
+
   toggleMicrophone(): Promise<void>;
   toggleCamera(): Promise<void>;
   toggleRemoteAudio(): Promise<void>;
   togglePin(): void;
+  updateMicStatus(enabled: boolean): void;
+  updateCameraStatus(enabled: boolean): void;
   setConnectionStatus(status: string): void;
   setPublisher(publisher: any): void;
   setSubscriber(subscriber: any): void;
@@ -227,6 +233,8 @@ export declare class Room extends EventEmitter {
   getParticipants(): Participant[];
   pinParticipant(userId: string): boolean;
   unpinParticipant(): boolean;
+  setUIContainers(mainVideoArea: HTMLElement, sidebarArea: HTMLElement): void;
+  renderParticipantTiles(): void;
   getInfo(): RoomInfo;
 
   sendMessage(text: string, metadata?: SendMessageOptions): Promise<ChatMessage>;
@@ -248,7 +256,7 @@ export declare class SubRoom extends Room {
   isTemporary: boolean;
 
   constructor(config: any);
-  
+
   joinFromMain(userId: string): Promise<JoinResult>;
   returnToMainRoom(): Promise<Room>;
   switchToSubRoom(targetSubRoom: SubRoom): Promise<JoinResult>;
@@ -267,7 +275,7 @@ export declare class SubRoom extends Room {
 // API Client
 export declare class ApiClient {
   constructor(config: any);
-  
+
   authenticate(userId: string): Promise<User>;
   createRoom(config: RoomConfig): Promise<any>;
   joinRoom(roomCode: string): Promise<any>;
@@ -292,6 +300,7 @@ export declare class ErmisClient extends EventEmitter {
   joinSubRoom(subRoomCode: string): Promise<JoinResult>;
   returnToMainRoom(): Promise<Room>;
   switchSubRoom(targetSubRoomCode: string): Promise<JoinResult>;
+  setUIContainers(mainVideoArea: HTMLElement, sidebarArea: HTMLElement): void;
   getCurrentRoom(): Room | null;
   getRoom(roomId: string): Room | null;
   getState(): any;
@@ -310,28 +319,36 @@ export declare class ErmisClient extends EventEmitter {
 // Main SDK class
 export declare class ErmisClassroom {
   static readonly version: string;
-  
+
   static readonly events: {
-    readonly CLIENT_AUTHENTICATED: 'authenticated';
-    readonly CLIENT_AUTHENTICATION_FAILED: 'authenticationFailed';
-    readonly CLIENT_LOGGED_OUT: 'loggedOut';
-    readonly CLIENT_CONNECTION_STATUS_CHANGED: 'connectionStatusChanged';
-    readonly ROOM_CREATED: 'roomCreated';
-    readonly ROOM_JOINED: 'roomJoined';
-    readonly ROOM_LEFT: 'roomLeft';
-    readonly PARTICIPANT_ADDED: 'participantAdded';
-    readonly PARTICIPANT_REMOVED: 'participantRemoved';
-    readonly PARTICIPANT_PINNED: 'participantPinned';
-    readonly PARTICIPANT_UNPINNED: 'participantUnpinned';
-    readonly AUDIO_TOGGLED: 'audioToggled';
-    readonly VIDEO_TOGGLED: 'videoToggled';
-    readonly SUB_ROOM_CREATED: 'subRoomCreated';
-    readonly SUB_ROOM_JOINED: 'subRoomJoined';
-    readonly SUB_ROOM_LEFT: 'subRoomLeft';
-    readonly SUB_ROOM_SWITCHED: 'subRoomSwitched';
-    readonly LOCAL_STREAM_READY: 'localStreamReady';
-    readonly REMOTE_STREAM_READY: 'remoteStreamReady';
-    readonly STREAM_REMOVED: 'streamRemoved';
+    readonly CLIENT_AUTHENTICATED: "authenticated";
+    readonly CLIENT_AUTHENTICATION_FAILED: "authenticationFailed";
+    readonly CLIENT_LOGGED_OUT: "loggedOut";
+    readonly CLIENT_CONNECTION_STATUS_CHANGED: "connectionStatusChanged";
+    readonly ROOM_CREATED: "roomCreated";
+    readonly ROOM_JOINED: "roomJoined";
+    readonly ROOM_LEFT: "roomLeft";
+    readonly PARTICIPANT_ADDED: "participantAdded";
+    readonly PARTICIPANT_REMOVED: "participantRemoved";
+    readonly PARTICIPANT_PINNED: "participantPinned";
+    readonly PARTICIPANT_UNPINNED: "participantUnpinned";
+    readonly AUDIO_TOGGLED: "audioToggled";
+    readonly VIDEO_TOGGLED: "videoToggled";
+    readonly REMOTE_AUDIO_STATUS_CHANGED: "remoteAudioStatusChanged";
+    readonly REMOTE_VIDEO_STATUS_CHANGED: "remoteVideoStatusChanged";
+    readonly SCREEN_SHARE_STARTED: "screenShareStarted";
+    readonly SCREEN_SHARE_STOPPED: "screenShareStopped";
+    readonly REMOTE_SCREEN_SHARE_STARTED: "remoteScreenShareStarted";
+    readonly REMOTE_SCREEN_SHARE_STOPPED: "remoteScreenShareStopped";
+    readonly PARTICIPANT_PINNED_FOR_EVERYONE: "participantPinnedForEveryone";
+    readonly PARTICIPANT_UNPINNED_FOR_EVERYONE: "participantUnpinnedForEveryone";
+    readonly SUB_ROOM_CREATED: "subRoomCreated";
+    readonly SUB_ROOM_JOINED: "subRoomJoined";
+    readonly SUB_ROOM_LEFT: "subRoomLeft";
+    readonly SUB_ROOM_SWITCHED: "subRoomSwitched";
+    readonly LOCAL_STREAM_READY: "localStreamReady";
+    readonly REMOTE_STREAM_READY: "remoteStreamReady";
+    readonly STREAM_REMOVED: "streamRemoved";
     readonly MESSAGE_SENT: 'messageSent';
     readonly MESSAGE_RECEIVED: 'messageReceived';
     readonly MESSAGE_DELETED: 'messageDeleted';
@@ -339,7 +356,7 @@ export declare class ErmisClassroom {
     readonly TYPING_STARTED: 'typingStarted';
     readonly TYPING_STOPPED: 'typingStopped';
     readonly CHAT_HISTORY_LOADED: 'chatHistoryLoaded';
-    readonly ERROR: 'error';
+    readonly ERROR: "error";
   };
 
   static readonly MediaDevices: {
@@ -349,29 +366,36 @@ export declare class ErmisClassroom {
   };
 
   static readonly RoomTypes: {
-    readonly MAIN: 'main';
-    readonly BREAKOUT: 'breakout';
-    readonly PRESENTATION: 'presentation';
-    readonly DISCUSSION: 'discussion';
+    readonly MAIN: "main";
+    readonly BREAKOUT: "breakout";
+    readonly PRESENTATION: "presentation";
+    readonly DISCUSSION: "discussion";
   };
 
   static readonly ConnectionStatus: {
-    readonly DISCONNECTED: 'disconnected';
-    readonly CONNECTING: 'connecting';
-    readonly CONNECTED: 'connected';
-    readonly FAILED: 'failed';
+    readonly DISCONNECTED: "disconnected";
+    readonly CONNECTING: "connecting";
+    readonly CONNECTED: "connected";
+    readonly FAILED: "failed";
   };
 
   static readonly ParticipantRoles: {
-    readonly OWNER: 'owner';
-    readonly MODERATOR: 'moderator';
-    readonly PARTICIPANT: 'participant';
-    readonly OBSERVER: 'observer';
+    readonly OWNER: "owner";
+    readonly MODERATOR: "moderator";
+    readonly PARTICIPANT: "participant";
+    readonly OBSERVER: "observer";
   };
 
   static create(config: ClientConfig): ErmisClient;
-  static connect(serverUrl: string, userId: string, options?: ConnectionOptions): Promise<ErmisClient>;
+  static connect(
+    serverUrl: string,
+    userId: string,
+    options?: ConnectionOptions
+  ): Promise<ErmisClient>;
 }
+
+// Named exports
+export { ErmisClient, Room, SubRoom, Participant, ApiClient, EventEmitter };
 
 // Default export
 export default ErmisClassroom;

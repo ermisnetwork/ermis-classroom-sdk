@@ -1,0 +1,17 @@
+{
+  "name": "raptorq-wasm",
+  "collaborators": [
+    "hoang <nvhoangwru@gmail.com>"
+  ],
+  "version": "0.1.0",
+  "files": [
+    "raptorq_wasm_bg.wasm",
+    "raptorq_wasm.js",
+    "raptorq_wasm.d.ts"
+  ],
+  "module": "raptorq_wasm.js",
+  "types": "raptorq_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

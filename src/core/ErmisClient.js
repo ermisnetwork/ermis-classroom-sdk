@@ -12,12 +12,12 @@ class ErmisClient extends EventEmitter {
 
     // Configuration
     this.config = {
-      host: config.host || "daibo.ermis.network:9999",
+      host: config.host || "daibo.ermis.network:9992",
       apiUrl:
         config.apiUrl ||
-        `https://${config.host || "daibo.ermis.network:9999"}/meeting`,
+        `https://${config.host || "daibo.ermis.network:9992"}/meeting`,
       webtpUrl:
-        config.webtpUrl || "https://daibo.ermis.network:4455/meeting/wt",
+        config.webtpUrl || "https://daibo.ermis.network:4458/meeting/wt",
       reconnectAttempts: config.reconnectAttempts || 3,
       reconnectDelay: config.reconnectDelay || 2000,
       debug: config.debug || false,
@@ -105,9 +105,9 @@ class ErmisClient extends EventEmitter {
     }
   }
 
-    /**
-   * Set authentication directly without calling API
-   */
+  /**
+ * Set authentication directly without calling API
+ */
   manualAuthenticate(userId, token) {
     if (!userId || !token) {
       throw new Error("userId and token are required");
@@ -610,12 +610,18 @@ class ErmisClient extends EventEmitter {
       "participantRemoved",
       "participantPinned",
       "participantUnpinned",
+      "participantPinnedForEveryone",
+      "participantUnpinnedForEveryone",
       "subRoomCreated",
       "localStreamReady",
       "remoteStreamReady",
       "streamRemoved",
       "audioToggled",
       "videoToggled",
+      "remoteAudioStatusChanged",
+      "remoteVideoStatusChanged",
+      "remoteScreenShareStarted",
+      "remoteScreenShareStopped",
       "messageSent",
       "messageReceived",
       "messageDeleted",

@@ -1,13 +1,24 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import ErmisClassroom, { Participant, Room } from '@tuannt591/ermis-classroom-sdk';
-import styled from 'styled-components';
-
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import ErmisClassroom, {
+  Participant,
+  Room,
+} from "ermis-classroom-sdk";
+import styled from "styled-components";
+import {
+  MdMic,
+  MdMicOff,
+  MdVideocam,
+  MdVideocamOff,
+  MdCallEnd,
+} from "react-icons/md";
 
 // Styled Components
 const Container = styled.div`
   padding: 30px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: #f5f5f5;
+  width: 100%;
+  height: 100%;
 `;
 
 const LoginSection = styled.div`
@@ -25,21 +36,24 @@ const VideoContainer = styled.div`
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   position: relative;
   width: 100%;
+  height: 100%;
 `;
 
 const MainVideoStyled = styled.div<{ $totalParticipants: number }>`
-  height: 500px;
+  width: 100%;
+  height: 100%;
   background: #000;
   position: relative;
   display: grid;
-  grid-template-columns: ${props => {
-    if (props.$totalParticipants === 1) return '1fr';
-    if (props.$totalParticipants === 2) return '1fr';
-    return 'repeat(3, 1fr)';
+  grid-template-columns: ${(props) => {
+    if (props.$totalParticipants === 1 || props.$totalParticipants === 0)
+      return "1fr";
+    if (props.$totalParticipants === 2) return "repeat(2, 1fr)";
+    return "repeat(3, 1fr)";
   }};
-  grid-template-rows: ${props => {
-    if (props.$totalParticipants <= 2) return '1fr';
-    return 'repeat(auto-fit, minmax(150px, 1fr))';
+  grid-template-rows: ${(props) => {
+    if (props.$totalParticipants === 1) return "1fr";
+    return "repeat(auto-fit, minmax(150px, 1fr))";
   }};
   gap: 4px;
   padding: 4px;
@@ -53,13 +67,18 @@ const MainVideoStyled = styled.div<{ $totalParticipants: number }>`
   }
 `;
 
-const ParticipantVideoContainer = styled.div<{ $isSmall?: boolean; $isLocal?: boolean }>`
+const ParticipantVideoContainer = styled.div<{
+  $isSmall?: boolean;
+  $isLocal?: boolean;
+}>`
   position: relative;
   background: #111;
   border-radius: 4px;
   overflow: hidden;
   min-height: 150px;
-  ${props => props.$isSmall && `
+  ${(props) =>
+    props.$isSmall &&
+    `
     position: absolute;
     bottom: 20px;
     right: 20px;
@@ -68,7 +87,7 @@ const ParticipantVideoContainer = styled.div<{ $isSmall?: boolean; $isLocal?: bo
     z-index: 10;
     border: 2px solid white;
   `}
-  
+
   video {
     width: 100%;
     height: 100%;
@@ -78,9 +97,9 @@ const ParticipantVideoContainer = styled.div<{ $isSmall?: boolean; $isLocal?: bo
 
 const ParticipantInfo = styled.div`
   position: absolute;
-  bottom: 5px;
+  top: 5px;
   right: 5px;
-  background: rgba(0,0,0,0.8);
+  background: rgba(0, 0, 0, 0.8);
   color: white;
   padding: 4px 8px;
   border-radius: 3px;
@@ -100,10 +119,9 @@ const OwnerBadge = styled.span`
   font-weight: bold;
 `;
 
-
-
-const Button = styled.button<{ variant?: 'primary' | 'danger' }>`
-  background: ${props => props.variant === 'danger' ? '#dc3545' : '#007bff'};
+const Button = styled.button<{ variant?: "primary" | "danger" }>`
+  background: ${(props) =>
+    props.variant === "danger" ? "#dc3545" : "#007bff"};
   color: white;
   border: none;
   padding: 10px 20px;
@@ -141,21 +159,23 @@ const ControlsContainer = styled.div`
   z-index: 20;
 `;
 
-const ControlButton = styled.button<{ isActive?: boolean; variant?: 'mic' | 'video' | 'leave' }>`
-  width: 50px;
-  height: 50px;
+const ControlButton = styled.button<{
+  $isActive?: boolean;
+  variant?: "mic" | "video" | "leave";
+}>`
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  font-weight: bold;
   transition: all 0.3s ease;
-  
-  ${props => {
-    if (props.variant === 'leave') {
+  padding: 0;
+
+  ${(props) => {
+    if (props.variant === "leave") {
       return `
         background: #dc3545;
         color: white;
@@ -166,7 +186,7 @@ const ControlButton = styled.button<{ isActive?: boolean; variant?: 'mic' | 'vid
       `;
     }
 
-    if (props.isActive) {
+    if (props.$isActive) {
       return `
         background: #28a745;
         color: white;
@@ -186,7 +206,7 @@ const ControlButton = styled.button<{ isActive?: boolean; variant?: 'mic' | 'vid
       }
     `;
   }}
-  
+
   &:disabled {
     opacity: 0.6;
     cursor: not-allowed;
@@ -200,7 +220,7 @@ const LocalVideoOverlay = styled.div`
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.7);
+  background: #000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -210,15 +230,18 @@ const LocalVideoOverlay = styled.div`
 
 // Main Component
 const VideoMeeting: React.FC = () => {
-  const [userId, setUserId] = useState('tuannt20591@gmail.com');
-  const [roomCode, setRoomCode] = useState('5faf-bgj5-mhsy');
+  const [userId, setUserId] = useState("tuannt20591@gmail.com");
+  const [roomCode, setRoomCode] = useState("5fay-jmyt-jvqn");
   const [isConnected, setIsConnected] = useState(false);
   const [isInRoom, setIsInRoom] = useState(false);
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
-  const [participants, setParticipants] = useState<Map<string, Participant>>(new Map());
+  const [participants, setParticipants] = useState<Map<string, Participant>>(
+    new Map()
+  );
   const [isLoading, setIsLoading] = useState(false);
-
-  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
+  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(
+    new Map()
+  );
   const [isMicEnabled, setIsMicEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
 
@@ -231,11 +254,11 @@ const VideoMeeting: React.FC = () => {
   useEffect(() => {
     if (!clientRef.current) {
       clientRef.current = ErmisClassroom.create({
-        host: "daibo.ermis.network:9999",
+        host: "daibo.ermis.network:9992",
         debug: true,
+        webtpUrl: "https://daibo.ermis.network:4458/meeting/wt",
       });
 
-      // clientRef.current.enableStreamOutput();
       // Setup event listeners ngay khi tạo client
       setupEventListeners(clientRef.current);
     }
@@ -253,7 +276,7 @@ const VideoMeeting: React.FC = () => {
   const setupEventListeners = useCallback((client: any) => {
     const events = ErmisClassroom.events || {};
 
-    console.log('--client--', client);
+    console.log("--client--", client);
 
     // Lắng nghe local stream (camera của bạn)
     client.on(events.LOCAL_STREAM_READY, (event: any) => {
@@ -265,57 +288,120 @@ const VideoMeeting: React.FC = () => {
 
     // Lắng nghe remote streams (video của participants khác)
     client.on(events.REMOTE_STREAM_READY, (event: any) => {
-      setRemoteStreams(prev => {
+      setRemoteStreams((prev) => {
         const updated = new Map(prev);
         updated.set(event.participant.userId, event.stream);
         return updated;
       });
     });
 
-    // Lắng nghe khi remote stream bị remove
-    client.on(events.STREAM_REMOVED, (event: any) => {
-      console.log('-----remoteStreamRemoved---------', event);
-
-      setRemoteStreams(prev => {
-        const updated = new Map(prev);
-        updated.delete(event.participant.userId);
-        return updated;
-      });
-    });
-
     // Room events
     client.on(events.ROOM_JOINED, (data: any) => {
-      console.log('--------ROOM_JOINED-------', data);
+      console.log("--------ROOM_JOINED-------", data);
     });
 
     // Participant events
     client.on(events.PARTICIPANT_ADDED, (data: any) => {
-      console.log('-------PARTICIPANT_ADDED------', data);
-      setParticipants(prev => new Map(prev.set(data.participant.userId, data.participant)));
+      console.log("-------PARTICIPANT_ADDED------", data);
+      setParticipants(
+        (prev) => new Map(prev.set(data.participant.userId, data.participant))
+      );
     });
 
-    // client.on(events.PARTICIPANT_REMOVED || 'participantRemoved', ({ participant }: { participant: any }) => {
-    //   console.log('Participant left:', participant.userId);
-    //   setParticipants(prev => {
-    //     const updated = new Map(prev);
-    //     updated.delete(participant.userId);
-    //     return updated;
-    //   });
-    // });
+    client.on(events.PARTICIPANT_REMOVED, (data: any) => {
+      console.log("-------PARTICIPANT_REMOVED------", data);
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        updated.delete(data.participant.userId);
+        return updated;
+      });
+      setRemoteStreams((prev) => {
+        const updated = new Map(prev);
+        updated.delete(data.participant.userId);
+        return updated;
+      });
+    });
 
-    // client.on(events.PARTICIPANT_PINNED || 'participantPinned', ({ participant }: { participant: any }) => {
-    //   console.log('Participant pinned:', participant.userId);
-    //   setParticipants(prev => {
-    //     const updated = new Map(prev);
-    //     const updatedParticipant = { ...participant, isPinned: true };
-    //     updated.set(participant.userId, updatedParticipant);
-    //     return updated;
-    //   });
-    // });
+    client.on(events.ROOM_LEFT, (data: any) => {
+      console.log("-------ROOM_LEFT------", data);
+    });
 
-    // client.on(events.ERROR || 'error', ({ error, action }: { error: Error, action: string }) => {
-    //   console.error(`SDK Error in ${action}:`, error.message);
-    // });
+    // Remote participant mic/camera status changes
+    client.on(events.REMOTE_AUDIO_STATUS_CHANGED, (data: any) => {
+      console.log("-------REMOTE_AUDIO_STATUS_CHANGED------", data);
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        const participant = updated.get(data.participant.userId);
+        if (participant) {
+          participant.isAudioEnabled = data.enabled;
+          updated.set(data.participant.userId, participant);
+        }
+        return updated;
+      });
+    });
+
+    client.on(events.REMOTE_VIDEO_STATUS_CHANGED, (data: any) => {
+      console.log("-------REMOTE_VIDEO_STATUS_CHANGED------", data);
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        const participant = updated.get(data.participant.userId);
+        if (participant) {
+          participant.isVideoEnabled = data.enabled;
+          updated.set(data.participant.userId, participant);
+        }
+        return updated;
+      });
+    });
+
+    // Screen sharing events
+    client.on(events.SCREEN_SHARE_STARTED, (data: any) => {
+      console.log("-------SCREEN_SHARE_STARTED------", data);
+    });
+
+    client.on(events.SCREEN_SHARE_STOPPED, (data: any) => {
+      console.log("-------SCREEN_SHARE_STOPPED------", data);
+    });
+
+    client.on(events.REMOTE_SCREEN_SHARE_STARTED, (data: any) => {
+      console.log("-------REMOTE_SCREEN_SHARE_STARTED------", data);
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        const participant = updated.get(data.participant.userId);
+        if (participant) {
+          participant.isScreenSharing = true;
+          updated.set(data.participant.userId, participant);
+        }
+        return updated;
+      });
+    });
+
+    client.on(events.REMOTE_SCREEN_SHARE_STOPPED, (data: any) => {
+      console.log("-------REMOTE_SCREEN_SHARE_STOPPED------", data);
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        const participant = updated.get(data.participant.userId);
+        if (participant) {
+          participant.isScreenSharing = false;
+          updated.set(data.participant.userId, participant);
+        }
+        return updated;
+      });
+    });
+
+    // Pin for everyone events
+    client.on(events.PARTICIPANT_PINNED_FOR_EVERYONE, (data: any) => {
+      console.log("-------PARTICIPANT_PINNED_FOR_EVERYONE------", data);
+      // Update UI to reflect pin status
+    });
+
+    client.on(events.PARTICIPANT_UNPINNED_FOR_EVERYONE, (data: any) => {
+      console.log("-------PARTICIPANT_UNPINNED_FOR_EVERYONE------", data);
+      // Update UI to reflect unpin status
+    });
+
+    client.on(events.ERROR, (data: any) => {
+      console.error(`SDK Error in ${data.action}:`, data.error.message);
+    });
   }, []);
 
   // Login and authenticate
@@ -328,10 +414,9 @@ const VideoMeeting: React.FC = () => {
       await clientRef.current.authenticate(userId);
 
       setIsConnected(true);
-
     } catch (error) {
-      console.error('Authentication failed:', error);
-      alert('Authentication failed');
+      console.error("Authentication failed:", error);
+      alert("Authentication failed");
     } finally {
       setIsLoading(false);
     }
@@ -355,36 +440,25 @@ const VideoMeeting: React.FC = () => {
       });
       setParticipants(participantMap);
     } catch (error) {
-      console.error('Failed to join room:', error);
-      alert('Failed to join room');
+      console.error("Failed to join room:", error);
+      alert("Failed to join room");
     } finally {
       setIsLoading(false);
     }
   };
 
-
-
   // Toggle microphone
   const handleToggleMicrophone = async () => {
-    const localParticipant = currentRoom?.localParticipant;
-    await localParticipant?.toggleMicrophone();
-    setIsMicEnabled(!!localParticipant?.isAudioEnabled);
+    const p = participants.get(userId);
+    await p?.toggleMicrophone();
+    setIsMicEnabled(!!p?.isAudioEnabled);
   };
 
   // Toggle camera
   const handleToggleCamera = async () => {
-    if (!clientRef.current || !isInRoom) return;
-
-    try {
-      if (isVideoEnabled) {
-        await clientRef.current.disableVideo();
-      } else {
-        await clientRef.current.enableVideo();
-      }
-      setIsVideoEnabled(!isVideoEnabled);
-    } catch (error) {
-      console.error('Failed to toggle camera:', error);
-    }
+    const p = participants.get(userId);
+    await p?.toggleCamera();
+    setIsVideoEnabled(!!p?.isVideoEnabled);
   };
 
   // Leave room
@@ -400,90 +474,43 @@ const VideoMeeting: React.FC = () => {
       setIsMicEnabled(true);
       setIsVideoEnabled(true);
     } catch (error) {
-      console.error('Failed to leave room:', error);
+      console.error("Failed to leave room:", error);
     }
   };
-
-  console.log('---participants---', participants);
 
   // Function to render participant videos based on layout rules
   const renderParticipantVideos = () => {
     const totalParticipants = participants.size + 1; // +1 for local user
-    const remoteParticipantsList = Array.from(participants.values()).filter(p => !p.isLocal);
-    
+    const remoteParticipantsList = Array.from(participants.values()).filter(
+      (p) => !p.isLocal
+    );
+
     if (totalParticipants === 1) {
       // Only local user - show full screen
       return (
         <ParticipantVideoContainer key="local">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-          />
+          <video ref={localVideoRef} autoPlay playsInline muted />
           {!isVideoEnabled && (
             <LocalVideoOverlay>
-              📹
+              <MdVideocamOff />
             </LocalVideoOverlay>
           )}
           <ParticipantInfo>
             You ({userId})
-            {!isMicEnabled && <span>🔇</span>}
-            {currentRoom?.localParticipant?.role === 'owner' && <OwnerBadge>OWNER</OwnerBadge>}
+            {!isMicEnabled && (
+              <span>
+                <MdMicOff />
+              </span>
+            )}
+            {currentRoom?.localParticipant?.role === "owner" && (
+              <OwnerBadge>OWNER</OwnerBadge>
+            )}
           </ParticipantInfo>
         </ParticipantVideoContainer>
       );
     }
-    
-    if (totalParticipants === 2) {
-      // 2 participants - remote full, local bottom right small
-      const remoteParticipant = remoteParticipantsList[0];
-      const remoteStream = remoteStreams.get(remoteParticipant.userId);
-      
-      return (
-        <>
-          {/* Remote participant full screen */}
-          <ParticipantVideoContainer key={remoteParticipant.userId}>
-            <video
-              autoPlay
-              playsInline
-              ref={(videoElement) => {
-                if (videoElement && remoteStream) {
-                  videoElement.srcObject = remoteStream;
-                }
-              }}
-            />
-            <ParticipantInfo>
-              {remoteParticipant.userId}
-              {!remoteParticipant.isAudioEnabled && <span>🔇</span>}
-              {remoteParticipant.role === 'owner' && <OwnerBadge>OWNER</OwnerBadge>}
-            </ParticipantInfo>
-          </ParticipantVideoContainer>
-          
-          {/* Local participant small in bottom right */}
-          <ParticipantVideoContainer key="local" $isSmall={true}>
-            <video
-              ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
-            />
-            {!isVideoEnabled && (
-              <LocalVideoOverlay>
-                📹
-              </LocalVideoOverlay>
-            )}
-            <ParticipantInfo>
-              You
-              {!isMicEnabled && <span>🔇</span>}
-              {currentRoom?.localParticipant?.role === 'owner' && <OwnerBadge>OWNER</OwnerBadge>}
-            </ParticipantInfo>
-          </ParticipantVideoContainer>
-        </>
-      );
-    }
-    
-    // 3+ participants - 3 columns, local first
+
+    // 2+ participants - 3 columns, local first
     const allParticipants = [
       {
         userId: userId,
@@ -491,40 +518,51 @@ const VideoMeeting: React.FC = () => {
         isAudioEnabled: isMicEnabled,
         isVideoEnabled: isVideoEnabled,
         role: currentRoom?.localParticipant?.role,
-        stream: null
+        stream: null,
       },
-      ...remoteParticipantsList.map(p => ({
+      ...remoteParticipantsList.map((p) => ({
         ...p,
-        stream: remoteStreams.get(p.userId)
-      }))
+        stream: remoteStreams.get(p.userId),
+      })),
     ];
-    
+
     return allParticipants.map((participant) => (
       <ParticipantVideoContainer key={participant.userId}>
         <video
           autoPlay
           playsInline
           muted={participant.isLocal}
-          ref={participant.isLocal ? localVideoRef : (videoElement) => {
-            if (videoElement && participant.stream) {
-              videoElement.srcObject = participant.stream;
-            }
-          }}
+          ref={
+            participant.isLocal
+              ? localVideoRef
+              : (videoElement) => {
+                if (videoElement && participant.stream) {
+                  videoElement.srcObject = participant.stream;
+                }
+              }
+          }
         />
-        {participant.isLocal && !isVideoEnabled && (
+        {/* Show camera off overlay for both local and remote */}
+        {!participant.isVideoEnabled && (
           <LocalVideoOverlay>
-            📹
+            <MdVideocamOff />
           </LocalVideoOverlay>
         )}
         <ParticipantInfo>
-          {participant.isLocal ? 'You' : participant.userId}
-          {!participant.isAudioEnabled && <span>🔇</span>}
-          {participant.role === 'owner' && <OwnerBadge>OWNER</OwnerBadge>}
+          {participant.isLocal ? "You" : participant.userId}
+          {!participant.isAudioEnabled && (
+            <span>
+              <MdMicOff />
+            </span>
+          )}
+          {participant.role === "owner" && <OwnerBadge>OWNER</OwnerBadge>}
+          {(participant as any).isScreenSharing && (
+            <span title="Sharing screen">📺</span>
+          )}
         </ParticipantInfo>
       </ParticipantVideoContainer>
     ));
   };
-
 
   return (
     <Container>
@@ -539,7 +577,7 @@ const VideoMeeting: React.FC = () => {
             placeholder="Enter your email"
           />
           <Button onClick={handleLogin} disabled={isLoading}>
-            {isLoading ? 'Connecting...' : 'Connect'}
+            {isLoading ? "Connecting..." : "Connect"}
           </Button>
         </LoginSection>
       )}
@@ -553,95 +591,54 @@ const VideoMeeting: React.FC = () => {
             value={roomCode}
             onChange={(e) => setRoomCode(e.target.value)}
             placeholder="Enter room code"
-            onKeyPress={(e) => e.key === 'Enter' && handleJoinRoom()}
+            onKeyPress={(e) => e.key === "Enter" && handleJoinRoom()}
           />
           <Button onClick={handleJoinRoom} disabled={isLoading}>
-            {isLoading ? 'Joining...' : 'Join Room'}
+            {isLoading ? "Joining..." : "Join Room"}
           </Button>
         </LoginSection>
       )}
 
-      {/* Video Meeting Area */}
-      <div style={{ marginBottom: '20px', textAlign: 'center' }}>
-        <h2>Room: {currentRoom?.name}</h2>
-      </div>
-
       <VideoContainer>
-          <MainVideoStyled $totalParticipants={participants.size + 1}>
-            {renderParticipantVideos()}
-          </MainVideoStyled>
+        <MainVideoStyled $totalParticipants={participants.size}>
+          {renderParticipantVideos()}
+        </MainVideoStyled>
 
-          {/* Control Buttons */}
-          {isInRoom && (
-            <ControlsContainer>
-              <ControlButton
-                variant="mic"
-                isActive={isMicEnabled}
-                onClick={handleToggleMicrophone}
-                title={isMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
-              >
-                {isMicEnabled ? '🎤' : '🔇'}
-              </ControlButton>
+        {/* Control Buttons */}
+        {isInRoom && (
+          <ControlsContainer>
+            <ControlButton
+              variant="mic"
+              $isActive={isMicEnabled}
+              onClick={handleToggleMicrophone}
+              title={isMicEnabled ? "Mute microphone" : "Unmute microphone"}
+            >
+              {isMicEnabled ? <MdMic size={20} /> : <MdMicOff size={20} />}
+            </ControlButton>
 
-              <ControlButton
-                variant="video"
-                isActive={isVideoEnabled}
-                onClick={handleToggleCamera}
-                title={isVideoEnabled ? 'Turn off camera' : 'Turn on camera'}
-              >
-                {isVideoEnabled ? '📹' : '📷'}
-              </ControlButton>
+            <ControlButton
+              variant="video"
+              $isActive={isVideoEnabled}
+              onClick={handleToggleCamera}
+              title={isVideoEnabled ? "Turn off camera" : "Turn on camera"}
+            >
+              {isVideoEnabled ? (
+                <MdVideocam size={20} />
+              ) : (
+                <MdVideocamOff size={20} />
+              )}
+            </ControlButton>
 
-              <ControlButton
-                variant="leave"
-                onClick={handleLeaveRoom}
-                title="Leave room"
-              >
-                📞
-              </ControlButton>
-            </ControlsContainer>
-          )}
-        </VideoContainer>
-
-
-          <h3>Participants ({participants.size})</h3>
-          <ParticipantList>
-            {/* Local user */}
-            <ParticipantItem isLocal={true}>
-              <div>
-                <strong>
-                  {userId} (You)
-                  <span style={{ marginLeft: '8px' }}>
-                    {isMicEnabled ? '🎤' : '🔇'}
-                    {isVideoEnabled ? '📹' : '📷'}
-                  </span>
-                </strong>
-              </div>
-            </ParticipantItem>
-
-            {/* Remote participants */}
-            {Array.from(participants.values()).filter(p => !p.isLocal).map((participant) => (
-              <ParticipantItem
-                key={participant.userId}
-                isLocal={participant.isLocal}
-                isPinned={participant.isPinned}
-              >
-                <div>
-                  <strong>
-                    {participant.userId}
-                    {participant.role === 'owner' ? ' 👑' :
-                      participant.role === 'moderator' ? ' �' : ''}
-                    <span style={{ marginLeft: '8px' }}>
-                      {participant.isAudioEnabled ? '🎤' : '🔇'}
-                      {participant.isVideoEnabled ? '�' : '📷'}
-                    </span>
-                  </strong>
-                </div>
-              </ParticipantItem>
-            ))}
-          </ParticipantList>
-        </ParticipantSidebar>
-      </MeetingArea>
+            <ControlButton
+              variant="leave"
+              onClick={handleLeaveRoom}
+              title="Leave room"
+            >
+              <MdCallEnd size={20} />
+            </ControlButton>
+          </ControlsContainer>
+        )}
+      </VideoContainer>
     </Container>
   );
 };

@@ -7,7 +7,7 @@ import EventEmitter from "../events/EventEmitter.js";
 export default class Publisher extends EventEmitter {
   constructor(options = {}) {
     super();
-    
+
     // Validate required options
     if (!options.publishUrl) {
       throw new Error("publishUrl is required");
@@ -51,9 +51,9 @@ export default class Publisher extends EventEmitter {
     // Callbacks
     this.onStatusUpdate =
       options.onStatusUpdate || ((message, isError) => console.log(message));
-    this.onStreamStart = options.onStreamStart || (() => {});
-    this.onStreamStop = options.onStreamStop || (() => {});
-    this.onServerEvent = options.onServerEvent || ((event) => {});
+    this.onStreamStart = options.onStreamStart || (() => { });
+    this.onStreamStop = options.onStreamStop || (() => { });
+    this.onServerEvent = options.onServerEvent || ((event) => { });
 
     // Initialize modules
     this.wasmInitialized = false;
@@ -194,54 +194,100 @@ export default class Publisher extends EventEmitter {
   }
 
   // Toggle camera
-  toggleCamera() {
+  async toggleCamera() {
     if (this.cameraEnabled) {
-      this.turnOffCamera();
+      await this.turnOffCamera();
     } else {
-      this.turnOnCamera();
+      await this.turnOnCamera();
     }
   }
 
   // Toggle mic
-  toggleMic() {
+  async toggleMic() {
     if (this.micEnabled) {
-      this.turnOffMic();
+      await this.turnOffMic();
     } else {
-      this.turnOnMic();
+      await this.turnOnMic();
     }
   }
 
   // Turn off camera (stop encoding video frames)
-  turnOffCamera() {
+  async turnOffCamera() {
+    if (!this.cameraEnabled) return;
+
     this.cameraEnabled = false;
     this.onStatusUpdate("Camera turned off");
+
+    // Send camera_off event to server
+    await this.sendMeetingEvent("camera_off");
   }
 
   // Turn on camera (resume encoding video frames)
-  turnOnCamera() {
+  async turnOnCamera() {
+    if (this.cameraEnabled) return;
+
     this.cameraEnabled = true;
-    // if (
-    //   this.stream &&
-    //   this.stream.getVideoTracks().length > 0 &&
-    //   this.videoElement
-    // ) {
-    //   const videoOnlyStream = new MediaStream();
-    //   videoOnlyStream.addTrack(this.stream.getVideoTracks()[0]);
-    //   this.videoElement.srcObject = videoOnlyStream;
-    // }
     this.onStatusUpdate("Camera turned on");
+
+    // Send camera_on event to server
+    await this.sendMeetingEvent("camera_on");
   }
 
   // Turn off mic (stop encoding audio chunks)
-  turnOffMic() {
+  async turnOffMic() {
+    if (!this.micEnabled) return;
+
     this.micEnabled = false;
     this.onStatusUpdate("Mic turned off");
+
+    // Send mic_off event to server
+    await this.sendMeetingEvent("mic_off");
   }
 
   // Turn on mic (resume encoding audio chunks)
-  turnOnMic() {
+  async turnOnMic() {
+    if (this.micEnabled) return;
+
     this.micEnabled = true;
     this.onStatusUpdate("Mic turned on");
+
+    // Send mic_on event to server
+    await this.sendMeetingEvent("mic_on");
+  }
+
+  /**
+   * Send meeting control event to server
+   */
+  async sendMeetingEvent(eventType, targetStreamId = null) {
+    if (!eventType) return;
+
+    if (!this.isChannelOpen || !this.eventStream) {
+      console.warn(`Skipping ${eventType} event: Event stream not ready`);
+      return;
+    }
+    console.log("[Meeting Event] Sender stream ID:", this.streamId);
+
+    const eventMessage = {
+      type: eventType,
+      sender_stream_id: this.streamId,
+      timestamp: Date.now(),
+    };
+
+    if (
+      (eventType === "pin_for_everyone" ||
+        eventType === "unpin_for_everyone") &&
+      targetStreamId
+    ) {
+      eventMessage.target_stream_id = targetStreamId;
+    }
+
+    try {
+      await this.sendEvent(eventMessage);
+      console.log(`Sent meeting event:`, eventMessage);
+    } catch (error) {
+      console.error(`Failed to send meeting event ${eventType}:`, error);
+      this.onStatusUpdate(`Failed to notify server about ${eventType}`, true);
+    }
   }
 
   async getMediaStream() {
@@ -844,7 +890,7 @@ export default class Publisher extends EventEmitter {
 
     const packet = new Uint8Array(
       HEADER_SIZE +
-        (data instanceof ArrayBuffer ? data.byteLength : data.length)
+      (data instanceof ArrayBuffer ? data.byteLength : data.length)
     );
     // type mapping
     // video-360p-key = 0
@@ -880,6 +926,392 @@ export default class Publisher extends EventEmitter {
     return btoa(binary);
   }
 
+  /**
+   * Start screen sharing
+   */
+  async startShareScreen(stream) {
+    if (!stream) {
+      throw new Error("No stream provided for screen sharing");
+    }
+
+    this.screenStream = stream;
+    this.isScreenSharing = true;
+
+    const channelName = "screen_share_1080p";
+
+    try {
+      // Create WebTransport stream for screen share
+      await this.createBidirectionalStream(channelName);
+
+      // Send start_share_screen event
+      const startEvent = {
+        type: "start_share_screen",
+        sender_stream_id: this.streamId,
+      };
+      await this.sendEvent(startEvent);
+
+      const videoTrack = stream.getVideoTracks()[0];
+      const audioTrack = stream.getAudioTracks()[0];
+
+      if (!videoTrack) {
+        throw new Error("No video track found in screen share stream");
+      }
+
+      // Setup screen share video encoder
+      const screenConfig = this.subStreams.find(
+        (s) => s.channelName === channelName
+      );
+
+      const screenEncoder = new VideoEncoder({
+        output: (chunk, metadata) =>
+          this.handleScreenVideoChunk(chunk, metadata, channelName),
+        error: (e) =>
+          this.onStatusUpdate(`Screen encoder error: ${e.message}`, true),
+      });
+
+      const encoderConfig = {
+        codec: this.currentConfig.codec,
+        width: screenConfig.width,
+        height: screenConfig.height,
+        bitrate: screenConfig.bitrate,
+        framerate: screenConfig.framerate,
+        latencyMode: "realtime",
+        hardwareAcceleration: "prefer-hardware",
+      };
+
+      screenEncoder.configure(encoderConfig);
+
+      this.screenVideoEncoder = {
+        encoder: screenEncoder,
+        config: encoderConfig,
+        metadataReady: false,
+        videoDecoderConfig: null,
+      };
+
+      // Setup screen share audio if available
+      if (audioTrack) {
+        const audioRecorderOptions = {
+          encoderApplication: 2051,
+          encoderComplexity: 0,
+          encoderFrameSize: 20,
+          timeSlice: 100,
+        };
+
+        this.screenAudioRecorder = await this.initAudioRecorder(
+          audioTrack,
+          audioRecorderOptions
+        );
+
+        this.screenAudioRecorder.ondataavailable = (typedArray) =>
+          this.handleScreenAudioChunk(typedArray, channelName);
+
+        await this.screenAudioRecorder.start({
+          timeSlice: audioRecorderOptions.timeSlice,
+        });
+
+        this.screenAudioBaseTime = 0;
+        this.screenAudioSamplesSent = 0;
+      }
+
+      // Start video processing
+      const triggerWorker = new Worker("polyfills/triggerWorker.js");
+      triggerWorker.postMessage({ frameRate: screenConfig.framerate });
+
+      this.screenVideoProcessor = new MediaStreamTrackProcessor(
+        videoTrack,
+        triggerWorker,
+        true
+      );
+
+      const reader = this.screenVideoProcessor.readable.getReader();
+      let frameCounter = 0;
+
+      // Handle video track ending
+      videoTrack.onended = () => {
+        this.stopShareScreen();
+      };
+
+      // Process screen share video frames
+      (async () => {
+        try {
+          while (this.isScreenSharing) {
+            const result = await reader.read();
+            if (result.done) break;
+
+            const frame = result.value;
+
+            if (!window.screenBaseTimestamp) {
+              window.screenBaseTimestamp = frame.timestamp;
+            }
+
+            frameCounter++;
+            const keyFrame = frameCounter % 30 === 0;
+
+            if (this.screenVideoEncoder.encoder.encodeQueueSize <= 2) {
+              this.screenVideoEncoder.encoder.encode(frame, { keyFrame });
+            }
+
+            frame.close();
+          }
+        } catch (error) {
+          this.onStatusUpdate(
+            `Screen share video error: ${error.message}`,
+            true
+          );
+          console.error("Screen share video error:", error);
+        }
+      })();
+
+      this.onStatusUpdate("Screen sharing started");
+    } catch (error) {
+      this.onStatusUpdate(
+        `Failed to start screen share: ${error.message}`,
+        true
+      );
+      this.stopShareScreen();
+      throw error;
+    }
+  }
+
+  /**
+   * Stop screen sharing
+   */
+  async stopShareScreen() {
+    if (!this.isScreenSharing) {
+      return;
+    }
+
+    try {
+      this.isScreenSharing = false;
+
+      const channelName = "screen_share_1080p";
+
+      // Send stop event to server
+      const stopEvent = {
+        type: "stop_share_screen",
+        sender_stream_id: this.streamId,
+      };
+      await this.sendEvent(stopEvent);
+
+      // Stop and close video encoder
+      if (this.screenVideoEncoder && this.screenVideoEncoder.encoder) {
+        if (this.screenVideoEncoder.encoder.state !== "closed") {
+          await this.screenVideoEncoder.encoder.flush();
+          this.screenVideoEncoder.encoder.close();
+        }
+        this.screenVideoEncoder = null;
+      }
+
+      // Stop audio recorder
+      if (
+        this.screenAudioRecorder &&
+        typeof this.screenAudioRecorder.stop === "function"
+      ) {
+        await this.screenAudioRecorder.stop();
+        this.screenAudioRecorder = null;
+      }
+
+      // Close screen share stream
+      const streamData = this.publishStreams.get(channelName);
+      if (streamData && streamData.writer) {
+        await streamData.writer.close();
+        this.publishStreams.delete(channelName);
+      }
+
+      // Stop all tracks in screen stream
+      if (this.screenStream) {
+        this.screenStream.getTracks().forEach((track) => track.stop());
+        this.screenStream = null;
+      }
+
+      // Reset state
+      this.screenAudioBaseTime = 0;
+      this.screenAudioSamplesSent = 0;
+      this.screenAudioConfig = null;
+      window.screenBaseTimestamp = null;
+
+      this.onStatusUpdate("Screen sharing stopped");
+    } catch (error) {
+      this.onStatusUpdate(
+        `Error stopping screen share: ${error.message}`,
+        true
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Handle screen share video chunks
+   */
+  handleScreenVideoChunk(chunk, metadata, channelName) {
+    if (!this.screenVideoEncoder) return;
+
+    const streamData = this.publishStreams.get(channelName);
+    if (!streamData) return;
+
+    // Handle metadata
+    if (
+      metadata &&
+      metadata.decoderConfig &&
+      !this.screenVideoEncoder.metadataReady
+    ) {
+      this.screenVideoEncoder.videoDecoderConfig = {
+        codec: metadata.decoderConfig.codec,
+        codedWidth: metadata.decoderConfig.codedWidth,
+        codedHeight: metadata.decoderConfig.codedHeight,
+        frameRate: this.screenVideoEncoder.config.framerate,
+        description: metadata.decoderConfig.description,
+      };
+      this.screenVideoEncoder.metadataReady = true;
+
+      console.log(
+        "Screen video config ready:",
+        this.screenVideoEncoder.videoDecoderConfig
+      );
+
+      this.sendScreenDecoderConfigs(channelName);
+    }
+
+    if (!streamData.configSent) return;
+
+    const chunkData = new ArrayBuffer(chunk.byteLength);
+    chunk.copyTo(chunkData);
+    const type = chunk.type === "key" ? 4 : 5; // screen_share_1080p key/delta
+
+    const packet = this.createPacketWithHeader(
+      chunkData,
+      chunk.timestamp,
+      type
+    );
+
+    this.sendOverStream(channelName, packet);
+  }
+
+  /**
+   * Handle screen share audio chunks
+   */
+  handleScreenAudioChunk(typedArray, channelName) {
+    if (!this.isScreenSharing || !typedArray || typedArray.byteLength === 0)
+      return;
+
+    const streamData = this.publishStreams.get(channelName);
+    if (!streamData) return;
+
+    try {
+      const dataArray = new Uint8Array(typedArray);
+
+      // Check for Opus header
+      if (
+        dataArray.length >= 4 &&
+        dataArray[0] === 79 &&
+        dataArray[1] === 103 &&
+        dataArray[2] === 103 &&
+        dataArray[3] === 83
+      ) {
+        if (!this.screenAudioConfig) {
+          const description = this.createPacketWithHeader(
+            dataArray,
+            performance.now() * 1000,
+            6
+          );
+
+          this.screenAudioConfig = {
+            codec: "opus",
+            sampleRate: 48000,
+            numberOfChannels: 2,
+            description: description,
+          };
+
+          console.log("Screen audio config ready:", this.screenAudioConfig);
+          this.sendScreenDecoderConfigs(channelName);
+        }
+
+        // Initialize timing
+        if (this.screenAudioBaseTime === 0 && window.screenBaseTimestamp) {
+          this.screenAudioBaseTime = window.screenBaseTimestamp;
+          this.screenAudioSamplesSent = 0;
+        } else if (
+          this.screenAudioBaseTime === 0 &&
+          !window.screenBaseTimestamp
+        ) {
+          this.screenAudioBaseTime = performance.now() * 1000;
+          this.screenAudioSamplesSent = 0;
+        }
+
+        const timestamp =
+          this.screenAudioBaseTime +
+          Math.floor((this.screenAudioSamplesSent * 1000000) / 48000);
+
+        if (streamData.configSent) {
+          const packet = this.createPacketWithHeader(dataArray, timestamp, 6);
+          this.sendOverStream(channelName, packet);
+        }
+
+        this.screenAudioSamplesSent += 960;
+      }
+    } catch (error) {
+      console.error("Failed to send screen audio data:", error);
+    }
+  }
+
+  /**
+   * Send screen share decoder configs
+   */
+  async sendScreenDecoderConfigs(channelName) {
+    const streamData = this.publishStreams.get(channelName);
+    if (!streamData || streamData.configSent) return;
+
+    const hasAudio = this.screenAudioRecorder !== null;
+    const videoReady =
+      this.screenVideoEncoder && this.screenVideoEncoder.metadataReady;
+    const audioReady = !hasAudio || this.screenAudioConfig;
+
+    if (!videoReady || !audioReady) {
+      return;
+    }
+
+    try {
+      const vConfigUint8 = new Uint8Array(
+        this.screenVideoEncoder.videoDecoderConfig.description
+      );
+      const vConfigBase64 = this.uint8ArrayToBase64(vConfigUint8);
+
+      const config = {
+        type: "DecoderConfigs",
+        channelName: channelName,
+        videoConfig: {
+          codec: this.screenVideoEncoder.videoDecoderConfig.codec,
+          codedWidth: this.screenVideoEncoder.videoDecoderConfig.codedWidth,
+          codedHeight: this.screenVideoEncoder.videoDecoderConfig.codedHeight,
+          frameRate: this.screenVideoEncoder.videoDecoderConfig.frameRate,
+          description: vConfigBase64,
+        },
+      };
+
+      if (this.screenAudioConfig) {
+        const aConfigBase64 = this.uint8ArrayToBase64(
+          new Uint8Array(this.screenAudioConfig.description)
+        );
+
+        config.audioConfig = {
+          codec: this.screenAudioConfig.codec,
+          sampleRate: this.screenAudioConfig.sampleRate,
+          numberOfChannels: this.screenAudioConfig.numberOfChannels,
+          description: aConfigBase64,
+        };
+      }
+
+      console.log("Sending screen share decoder configs:", config);
+      const packet = new TextEncoder().encode(JSON.stringify(config));
+      await this.sendOverStream(channelName, packet);
+
+      streamData.configSent = true;
+      this.onStatusUpdate(`Screen share configs sent for: ${channelName}`);
+    } catch (error) {
+      console.error(`Failed to send screen share configs:`, error);
+    }
+  }
+
   async stop() {
     if (!this.isPublishing) {
       return;
@@ -887,6 +1319,11 @@ export default class Publisher extends EventEmitter {
 
     try {
       this.isPublishing = false;
+
+      // Stop screen sharing if active
+      if (this.isScreenSharing) {
+        await this.stopShareScreen();
+      }
 
       // Close video encoders
       for (const [quality, encoderObj] of this.videoEncoders) {

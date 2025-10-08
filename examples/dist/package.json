@@ -1,0 +1,162 @@
+{
+  "name": "ermis-classroom-sdk",
+  "version": "1.0.2",
+  "description": "Ermis Classroom SDK for virtual classroom and meeting integration",
+  "main": "dist/ermis-classroom.cjs.js",
+  "module": "dist/ermis-classroom.esm.js",
+  "browser": "dist/ermis-classroom.js",
+  "types": "types/index.d.ts",
+  "files": [
+    "dist/",
+    "src/",
+    "types/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rollup -c rollup.config.js",
+    "build:dev": "rollup -c rollup.config.js",
+    "build:prod": "npm run build",
+    "dev": "rollup -c rollup.config.js --watch",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "type-check": "tsc --noEmit",
+    "docs": "typedoc src/ --out docs/",
+    "clean": "rimraf dist/",
+    "prepublishOnly": "npm run clean && npm run build:prod && npm run test",
+    "demo": "cd examples/vite && yarn dev"
+  },
+  "keywords": [
+    "video-calling",
+    "webrtc",
+    "classroom",
+    "meeting",
+    "virtual-classroom",
+    "breakout-rooms",
+    "ermis",
+    "sdk"
+  ],
+  "author": {
+    "name": "Ermis Team",
+    "email": "developer@ermis.network",
+    "url": "https://ermis.network"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ermisnetwork/ermis-classroom-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ermisnetwork/ermis-classroom-sdk/issues"
+  },
+  "homepage": "https://github.com/ermisnetwork/ermis-classroom-sdk#readme",
+  "devDependencies": {
+    "@babel/core": "^7.22.0",
+    "@babel/preset-env": "^7.22.0",
+    "@rollup/plugin-babel": "^6.0.0",
+    "@rollup/plugin-commonjs": "^25.0.0",
+    "@rollup/plugin-json": "^6.0.0",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@rollup/plugin-replace": "^5.0.0",
+    "@rollup/plugin-terser": "^0.4.0",
+    "@types/jest": "^29.5.0",
+    "@typescript-eslint/eslint-plugin": "^5.59.0",
+    "@typescript-eslint/parser": "^5.59.0",
+    "eslint": "^8.40.0",
+    "http-server": "^14.1.1",
+    "jest": "^29.5.0",
+    "jest-environment-jsdom": "^29.5.0",
+    "rimraf": "^5.0.0",
+    "rollup": "^3.21.0",
+    "rollup-plugin-copy": "^3.4.0",
+    "typedoc": "^0.24.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "typescript": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "browserslist": [
+    "defaults",
+    "not IE 11",
+    "not op_mini all"
+  ],
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=7.0.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "import": "./dist/ermis-classroom.esm.js",
+      "require": "./dist/ermis-classroom.cjs.js",
+      "browser": "./dist/ermis-classroom.js",
+      "default": "./dist/ermis-classroom.esm.js"
+    },
+    "./opus_decoder/*": "./dist/opus_decoder/*",
+    "./polyfills/*": "./dist/polyfills/*",
+    "./raptorQ/*": "./dist/raptorQ/*",
+    "./workers/*": "./dist/workers/*",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": [
+      "<rootDir>/tests/setup.js"
+    ],
+    "testMatch": [
+      "<rootDir>/tests/**/*.test.js"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/**/*.test.js"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 50,
+        "functions": 50,
+        "lines": 50,
+        "statements": 50
+      }
+    },
+    "transform": {
+      "^.+\\.js$": "babel-jest"
+    },
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    },
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/examples/",
+      "/dist/"
+    ]
+  },
+  "eslintConfig": {
+    "extends": [
+      "@typescript-eslint/recommended"
+    ],
+    "parser": "@typescript-eslint/parser",
+    "plugins": [
+      "@typescript-eslint"
+    ],
+    "rules": {
+      "no-unused-vars": "error",
+      "no-console": "warn",
+      "prefer-const": "error"
+    },
+    "env": {
+      "browser": true,
+      "es2022": true,
+      "node": true
+    }
+  }
+}

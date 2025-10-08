@@ -23,6 +23,10 @@ class Participant extends EventEmitter {
     this.publisher = null;
     this.subscriber = null;
 
+    // Screen share state
+    this.isScreenSharing = config.isScreenSharing || false;
+    this.screenSubscriber = null;
+
     // Status
     this.connectionStatus = "disconnected"; // 'connecting', 'connected', 'disconnected', 'failed'
   }
@@ -111,7 +115,7 @@ class Participant extends EventEmitter {
         console.warn("Pin participant, switch to high quality");
       }
     }
-    
+
     this.isPinned = !this.isPinned;
     this.emit("pinToggled", { participant: this, pinned: this.isPinned });
   }
@@ -163,6 +167,28 @@ class Participant extends EventEmitter {
   }
 
   /**
+   * Update microphone status from server event
+   */
+  updateMicStatus(enabled) {
+    this.isAudioEnabled = enabled;
+    this.emit("remoteAudioStatusChanged", {
+      participant: this,
+      enabled: this.isAudioEnabled,
+    });
+  }
+
+  /**
+   * Update camera status from server event
+   */
+  updateCameraStatus(enabled) {
+    this.isVideoEnabled = enabled;
+    this.emit("remoteVideoStatusChanged", {
+      participant: this,
+      enabled: this.isVideoEnabled,
+    });
+  }
+
+  /**
    * Cleanup participant resources
    */
   cleanup() {
@@ -175,6 +201,12 @@ class Participant extends EventEmitter {
     if (this.subscriber) {
       this.subscriber.stop();
       this.subscriber = null;
+    }
+
+    // Stop screen subscriber
+    if (this.screenSubscriber) {
+      this.screenSubscriber.stop();
+      this.screenSubscriber = null;
     }
 
     this.setConnectionStatus("disconnected");
@@ -196,6 +228,7 @@ class Participant extends EventEmitter {
       isAudioEnabled: this.isAudioEnabled,
       isVideoEnabled: this.isVideoEnabled,
       isPinned: this.isPinned,
+      isScreenSharing: this.isScreenSharing,
       connectionStatus: this.connectionStatus,
     };
   }
