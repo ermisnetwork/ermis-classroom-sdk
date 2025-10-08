@@ -18,6 +18,7 @@ class Participant extends EventEmitter {
     this.isAudioEnabled = true;
     this.isVideoEnabled = true;
     this.isPinned = false;
+    this.isHandRaised = false;
 
     // Media components
     this.publisher = null;
@@ -121,6 +122,36 @@ class Participant extends EventEmitter {
   }
 
   /**
+   * Toggle raise hand (local only)
+   */
+  async toggleRaiseHand() {
+    if (!this.isLocal || !this.publisher) return;
+
+    try {
+      if (this.isHandRaised) {
+        await this.publisher.lowerHand();
+      } else {
+        await this.publisher.raiseHand();
+      }
+      this.isHandRaised = !this.isHandRaised;
+      this.emit("handRaiseToggled", {
+        participant: this,
+        enabled: this.isHandRaised,
+      });
+      console.log("toggleRaiseHand", this.isHandRaised);
+
+    } catch (error) {
+      console.log("toggleRaiseHand error", error);
+
+      this.emit("error", {
+        participant: this,
+        error,
+        action: "toggleRaiseHand",
+      });
+    }
+  }
+
+  /**
    * Update connection status
    */
   setConnectionStatus(status) {
@@ -189,6 +220,17 @@ class Participant extends EventEmitter {
   }
 
   /**
+   * Update hand raise status from server event
+   */
+  updateHandRaiseStatus(enabled) {
+    this.isHandRaised = enabled;
+    this.emit("remoteHandRaisingStatusChanged", {
+      participant: this,
+      enabled: this.isHandRaised,
+    });
+  }
+
+  /**
    * Cleanup participant resources
    */
   cleanup() {
@@ -227,6 +269,7 @@ class Participant extends EventEmitter {
       isLocal: this.isLocal,
       isAudioEnabled: this.isAudioEnabled,
       isVideoEnabled: this.isVideoEnabled,
+      isHandRaised: this.isHandRaised,
       isPinned: this.isPinned,
       isScreenSharing: this.isScreenSharing,
       connectionStatus: this.connectionStatus,

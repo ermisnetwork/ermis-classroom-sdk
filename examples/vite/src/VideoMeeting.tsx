@@ -13,6 +13,7 @@ import {
   MdPushPin,
   MdOutlinePushPin,
 } from "react-icons/md";
+import { MdPanTool } from "react-icons/md";
 
 // Styled Components
 const Container = styled.div`
@@ -409,6 +410,7 @@ const VideoMeeting: React.FC = () => {
   );
   const [isMicEnabled, setIsMicEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+  const [isHandRaised, setIsHandRaised] = useState(false);
   const [pinMenuOpen, setPinMenuOpen] = useState<string | null>(null); // Stores participantId of open menu
   const [pinType, setPinType] = useState<'local' | 'everyone' | null>(null); // Track pin type
   const [showPinConfirm, setShowPinConfirm] = useState(false); // Confirmation dialog
@@ -573,6 +575,23 @@ const VideoMeeting: React.FC = () => {
       }
     });
 
+    // Local participant hand raise toggle event
+    client.on("handRaiseToggled", (data: any) => {
+      console.log("-------LOCAL_HAND_RAISE_TOGGLED------", data);
+      if (data.participant.isLocal) {
+        setIsHandRaised(data.enabled);
+        setParticipants((prev) => {
+          const updated = new Map(prev);
+          const participant = updated.get(data.participant.userId);
+          if (participant) {
+            participant.isHandRaised = data.enabled;
+            updated.set(data.participant.userId, participant);
+          }
+          return updated;
+        });
+      }
+    });
+
     // Screen sharing events
     client.on(events.SCREEN_SHARE_STARTED, (data: any) => {
       console.log("-------SCREEN_SHARE_STARTED------", data);
@@ -625,6 +644,20 @@ const VideoMeeting: React.FC = () => {
       setParticipants((prev) => new Map(prev));
     });
 
+    // Remote hand raising status changes
+    client.on(events.REMOTE_HAND_RAISING_STATUS_CHANGED, (data: any) => {
+      console.log("-------REMOTE_HAND_RAISING_STATUS_CHANGED------", data);
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        const participant = updated.get(data.participant.userId);
+        if (participant) {
+          participant.isHandRaised = data.raised;
+          updated.set(data.participant.userId, participant);
+        }
+        return updated;
+      });
+    });
+
     client.on(events.ERROR, (data: any) => {
       console.error(`SDK Error in ${data.action}:`, data.error.message);
     });
@@ -664,10 +697,11 @@ const VideoMeeting: React.FC = () => {
       result.participants.forEach((participant: Participant) => {
         participantMap.set(participant.userId, participant);
 
-        // Update local mic and camera status if this is the local participant
+        // Update local mic, camera and hand raise status if this is the local participant
         if (participant.isLocal) {
           setIsMicEnabled(participant.isAudioEnabled);
           setIsVideoEnabled(participant.isVideoEnabled);
+          setIsHandRaised((participant as any).isHandRaised || false);
         }
       });
       setParticipants(participantMap);
@@ -713,6 +747,23 @@ const VideoMeeting: React.FC = () => {
     });
   };
 
+  // Toggle raise hand
+  const handleToggleRaiseHand = async () => {
+    const p = participants.get(userId);
+    if (!p) return;
+
+    await p.toggleRaiseHand();
+    // Update local state immediately after toggle
+    setIsHandRaised(p.isHandRaised);
+
+    // Update participant in map to trigger re-render
+    setParticipants(prev => {
+      const updated = new Map(prev);
+      updated.set(userId, p);
+      return updated;
+    });
+  };
+
   // Leave room
   const handleLeaveRoom = async () => {
     if (!clientRef.current || !isInRoom) return;
@@ -725,6 +776,7 @@ const VideoMeeting: React.FC = () => {
       setRemoteStreams(new Map());
       setIsMicEnabled(true);
       setIsVideoEnabled(true);
+      setIsHandRaised(false);
     } catch (error) {
       console.error("Failed to leave room:", error);
     }
@@ -947,6 +999,11 @@ const VideoMeeting: React.FC = () => {
             {(participant as any).isScreenSharing && (
               <span title="Sharing screen">📺</span>
             )}
+            {(participant as any).isHandRaised && (
+              <span title="Hand raised" style={{ color: "#ffa500" }}>
+                <MdPanTool />
+              </span>
+            )}
             {isPinned && (
               <span title="Pinned" style={{ color: "#ffd700" }}>
                 <MdPushPin />
@@ -1062,6 +1119,14 @@ const VideoMeeting: React.FC = () => {
               ) : (
                 <MdVideocamOff size={20} />
               )}
+            </ControlButton>
+
+            <ControlButton
+              $isActive={isHandRaised}
+              onClick={handleToggleRaiseHand}
+              title={isHandRaised ? "Lower hand" : "Raise hand"}
+            >
+              <MdPanTool size={20} />
             </ControlButton>
 
             <ControlButton

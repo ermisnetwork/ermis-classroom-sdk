@@ -45,6 +45,7 @@ export default class Publisher extends EventEmitter {
 
     this.cameraEnabled = true;
     this.micEnabled = true;
+    this.isHandRaised = false;
     this.hasCamera = options.hasCamera !== undefined ? options.hasCamera : true;
     this.hasMic = options.hasMic !== undefined ? options.hasMic : true;
 
@@ -211,6 +212,21 @@ export default class Publisher extends EventEmitter {
     }
   }
 
+  // Toggle raise hand
+  async toggleRaiseHand() {
+    const currentState = this.isHandRaised || false;
+
+    if (currentState) {
+      await this.lowerHand();
+      this.isHandRaised = false;
+    } else {
+      await this.raiseHand();
+      this.isHandRaised = true;
+    }
+
+    return this.isHandRaised;
+  }
+
   // Turn off camera (stop encoding video frames)
   async turnOffCamera() {
     if (!this.cameraEnabled) return;
@@ -260,6 +276,25 @@ export default class Publisher extends EventEmitter {
   async unpinForEveryone(targetStreamId) {
     await this.sendMeetingEvent("unpin_for_everyone", targetStreamId);
   }
+
+  // Raise hand
+  async raiseHand() {
+    if (this.isHandRaised) return;
+
+    this.isHandRaised = true;
+    await this.sendMeetingEvent("raise_hand");
+    this.onStatusUpdate("Hand raised");
+  }
+
+  // Lower hand
+  async lowerHand() {
+    if (!this.isHandRaised) return;
+
+    this.isHandRaised = false;
+    await this.sendMeetingEvent("lower_hand");
+    this.onStatusUpdate("Hand lowered");
+  }
+
   /**
    * Send meeting control event to server
    */

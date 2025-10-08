@@ -261,6 +261,7 @@ class Participant extends EventEmitter$1 {
     this.isAudioEnabled = true;
     this.isVideoEnabled = true;
     this.isPinned = false;
+    this.isHandRaised = false;
 
     // Media components
     this.publisher = null;
@@ -367,6 +368,33 @@ class Participant extends EventEmitter$1 {
   }
 
   /**
+   * Toggle raise hand (local only)
+   */
+  async toggleRaiseHand() {
+    if (!this.isLocal || !this.publisher) return;
+    try {
+      if (this.isHandRaised) {
+        await this.publisher.lowerHand();
+      } else {
+        await this.publisher.raiseHand();
+      }
+      this.isHandRaised = !this.isHandRaised;
+      this.emit("handRaiseToggled", {
+        participant: this,
+        enabled: this.isHandRaised
+      });
+      console.log("toggleRaiseHand", this.isHandRaised);
+    } catch (error) {
+      console.log("toggleRaiseHand error", error);
+      this.emit("error", {
+        participant: this,
+        error,
+        action: "toggleRaiseHand"
+      });
+    }
+  }
+
+  /**
    * Update connection status
    */
   setConnectionStatus(status) {
@@ -438,6 +466,17 @@ class Participant extends EventEmitter$1 {
   }
 
   /**
+   * Update hand raise status from server event
+   */
+  updateHandRaiseStatus(enabled) {
+    this.isHandRaised = enabled;
+    this.emit("remoteHandRaisingStatusChanged", {
+      participant: this,
+      enabled: this.isHandRaised
+    });
+  }
+
+  /**
    * Cleanup participant resources
    */
   cleanup() {
@@ -475,6 +514,7 @@ class Participant extends EventEmitter$1 {
       isLocal: this.isLocal,
       isAudioEnabled: this.isAudioEnabled,
       isVideoEnabled: this.isVideoEnabled,
+      isHandRaised: this.isHandRaised,
       isPinned: this.isPinned,
       isScreenSharing: this.isScreenSharing,
       connectionStatus: this.connectionStatus
@@ -527,6 +567,7 @@ class Publisher extends EventEmitter$1 {
     this.isPublishing = false;
     this.cameraEnabled = true;
     this.micEnabled = true;
+    this.isHandRaised = false;
     this.hasCamera = options.hasCamera !== undefined ? options.hasCamera : true;
     this.hasMic = options.hasMic !== undefined ? options.hasMic : true;
 
@@ -671,6 +712,19 @@ class Publisher extends EventEmitter$1 {
     }
   }
 
+  // Toggle raise hand
+  async toggleRaiseHand() {
+    const currentState = this.isHandRaised || false;
+    if (currentState) {
+      await this.lowerHand();
+      this.isHandRaised = false;
+    } else {
+      await this.raiseHand();
+      this.isHandRaised = true;
+    }
+    return this.isHandRaised;
+  }
+
   // Turn off camera (stop encoding video frames)
   async turnOffCamera() {
     if (!this.cameraEnabled) return;
@@ -709,6 +763,28 @@ class Publisher extends EventEmitter$1 {
 
     // Send mic_on event to server
     await this.sendMeetingEvent("mic_on");
+  }
+  async pinForEveryone(targetStreamId) {
+    await this.sendMeetingEvent("pin_for_everyone", targetStreamId);
+  }
+  async unpinForEveryone(targetStreamId) {
+    await this.sendMeetingEvent("unpin_for_everyone", targetStreamId);
+  }
+
+  // Raise hand
+  async raiseHand() {
+    if (this.isHandRaised) return;
+    this.isHandRaised = true;
+    await this.sendMeetingEvent("raise_hand");
+    this.onStatusUpdate("Hand raised");
+  }
+
+  // Lower hand
+  async lowerHand() {
+    if (!this.isHandRaised) return;
+    this.isHandRaised = false;
+    await this.sendMeetingEvent("lower_hand");
+    this.onStatusUpdate("Hand lowered");
   }
 
   /**
@@ -3366,6 +3442,28 @@ class Room extends EventEmitter$1 {
         });
       }
     }
+    if (event.type === "raise_hand") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant) {
+        participant.updateHandRaiseStatus(true);
+        this.emit("remoteHandRaisingStatusChanged", {
+          room: this,
+          participant,
+          raised: true
+        });
+      }
+    }
+    if (event.type === "lower_hand") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant) {
+        participant.updateHandRaiseStatus(false);
+        this.emit("remoteHandRaisingStatusChanged", {
+          room: this,
+          participant,
+          raised: false
+        });
+      }
+    }
   }
   _setupParticipantEvents(participant) {
     participant.on("pinToggled", ({
@@ -3377,6 +3475,36 @@ class Room extends EventEmitter$1 {
       } else if (this.pinnedParticipant === p) {
         this.unpinParticipant();
       }
+    });
+    participant.on("audioToggled", ({
+      participant: p,
+      enabled
+    }) => {
+      this.emit("audioToggled", {
+        room: this,
+        participant: p,
+        enabled
+      });
+    });
+    participant.on("videoToggled", ({
+      participant: p,
+      enabled
+    }) => {
+      this.emit("videoToggled", {
+        room: this,
+        participant: p,
+        enabled
+      });
+    });
+    participant.on("handRaiseToggled", ({
+      participant: p,
+      enabled
+    }) => {
+      this.emit("handRaiseToggled", {
+        room: this,
+        participant: p,
+        enabled
+      });
     });
     participant.on("error", ({
       participant: p,
@@ -4536,7 +4664,7 @@ class ErmisClient extends EventEmitter$1 {
    */
   _setupRoomEvents(room) {
     // Forward room events to client
-    const eventsToForward = ["roomJoined", "roomLeft", "participantAdded", "participantRemoved", "participantPinned", "participantUnpinned", "subRoomCreated", "localStreamReady", "remoteStreamReady", "streamRemoved", "audioToggled", "videoToggled", "messageSent", "messageReceived", "messageDeleted", "messageUpdated", "typingStarted", "typingStopped", "error"];
+    const eventsToForward = ["roomJoined", "roomLeft", "participantAdded", "participantRemoved", "participantPinned", "participantUnpinned", "participantPinnedForEveryone", "participantUnpinnedForEveryone", "subRoomCreated", "localStreamReady", "remoteStreamReady", "streamRemoved", "audioToggled", "videoToggled", "handRaiseToggled", "remoteAudioStatusChanged", "remoteVideoStatusChanged", "remoteHandRaisingStatusChanged", "remoteScreenShareStarted", "remoteScreenShareStopped", "messageSent", "messageReceived", "messageDeleted", "messageUpdated", "typingStarted", "typingStopped", "error"];
     eventsToForward.forEach(event => {
       room.on(event, data => {
         this.emit(event, data);
@@ -4688,9 +4816,12 @@ class ErmisClassroom {
       PARTICIPANT_UNPINNED: "participantUnpinned",
       AUDIO_TOGGLED: "audioToggled",
       VIDEO_TOGGLED: "videoToggled",
+      HAND_RAISE_TOGGLED: "handRaiseToggled",
       // Remote participant status events
       REMOTE_AUDIO_STATUS_CHANGED: "remoteAudioStatusChanged",
       REMOTE_VIDEO_STATUS_CHANGED: "remoteVideoStatusChanged",
+      // Hand raising events
+      REMOTE_HAND_RAISING_STATUS_CHANGED: "remoteHandRaisingStatusChanged",
       // Screen sharing events
       SCREEN_SHARE_STARTED: "screenShareStarted",
       SCREEN_SHARE_STOPPED: "screenShareStopped",

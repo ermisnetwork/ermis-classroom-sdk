@@ -77,11 +77,14 @@ class ErmisClassroom {
       PARTICIPANT_UNPINNED: "participantUnpinned",
       AUDIO_TOGGLED: "audioToggled",
       VIDEO_TOGGLED: "videoToggled",
+      HAND_RAISE_TOGGLED: "handRaiseToggled",
 
       // Remote participant status events
       REMOTE_AUDIO_STATUS_CHANGED: "remoteAudioStatusChanged",
       REMOTE_VIDEO_STATUS_CHANGED: "remoteVideoStatusChanged",
 
+      // Hand raising events
+      REMOTE_HAND_RAISING_STATUS_CHANGED: "remoteHandRaisingStatusChanged",
       // Screen sharing events
       SCREEN_SHARE_STARTED: "screenShareStarted",
       SCREEN_SHARE_STOPPED: "screenShareStopped",
@@ -91,6 +94,7 @@ class ErmisClassroom {
       // Pin for everyone events
       PARTICIPANT_PINNED_FOR_EVERYONE: "participantPinnedForEveryone",
       PARTICIPANT_UNPINNED_FOR_EVERYONE: "participantUnpinnedForEveryone",
+
 
       // Sub room events
       SUB_ROOM_CREATED: "subRoomCreated",
