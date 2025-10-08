@@ -19,7 +19,7 @@ class Subscriber extends EventEmitter {
     this.audioWorkletUrl =
       config.audioWorkletUrl || "workers/audio-worklet1.js";
     this.mstgPolyfillUrl =
-      config.mstgPolyfillUrl || "polyfills/MSTG_polyfill.js";
+      config.mstgPolyfillUrl || "/polyfills/MSTG_polyfill.js";
 
     // State
     this.isStarted = false;

@@ -426,7 +426,7 @@ export default class Publisher extends EventEmitter {
 
     await this.sendPublisherState();
 
-    const workerInterval = new Worker("polyfills/intervalWorker.js");
+    const workerInterval = new Worker("/polyfills/intervalWorker.js");
     workerInterval.postMessage({ interval: 1000 });
     let lastPingTime = Date.now();
 
@@ -608,7 +608,7 @@ export default class Publisher extends EventEmitter {
       encoderObj.encoder.configure(encoderObj.config);
     });
 
-    const triggerWorker = new Worker("polyfills/triggerWorker.js");
+    const triggerWorker = new Worker("/polyfills/triggerWorker.js");
     triggerWorker.postMessage({ frameRate: this.currentConfig.framerate });
 
     const track = this.stream.getVideoTracks()[0];
@@ -1019,7 +1019,7 @@ export default class Publisher extends EventEmitter {
       }
 
       // Start video processing
-      const triggerWorker = new Worker("polyfills/triggerWorker.js");
+      const triggerWorker = new Worker("/polyfills/triggerWorker.js");
       triggerWorker.postMessage({ frameRate: screenConfig.framerate });
 
       this.screenVideoProcessor = new MediaStreamTrackProcessor(
