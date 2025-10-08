@@ -122,14 +122,12 @@ class ErmisClassroom {
   }
 
   /**
-   * Media device utilities (optional helpers)
-   * Note: You can also use navigator.mediaDevices directly
+   * Media device utilities
    */
   static get MediaDevices() {
     return {
       /**
        * Get available media devices
-       * @deprecated Use navigator.mediaDevices.enumerateDevices() directly
        */
       async getDevices() {
         if (!navigator.mediaDevices?.enumerateDevices) {
@@ -147,7 +145,6 @@ class ErmisClassroom {
 
       /**
        * Get user media with constraints
-       * @deprecated Use navigator.mediaDevices.getUserMedia() directly
        */
       async getUserMedia(constraints = { video: true, audio: true }) {
         if (!navigator.mediaDevices?.getUserMedia) {
@@ -159,7 +156,6 @@ class ErmisClassroom {
 
       /**
        * Check for media permissions
-       * @deprecated Use navigator.permissions.query() directly
        */
       async checkPermissions() {
         const permissions = {};

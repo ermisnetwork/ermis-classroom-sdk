@@ -67,6 +67,7 @@ const MainVideoStyled = styled.div<{ $totalParticipants: number }>`
     object-fit: cover;
     background: #111;
     border-radius: 4px;
+    transform: rotate(180deg);
   }
 `;
 
@@ -103,6 +104,7 @@ const ParticipantVideoContainer = styled.div<{
     width: 100%;
     height: 100%;
     object-fit: cover;
+    transform: rotate(180deg);
   }
 
   &:hover .participant-actions {
@@ -415,8 +417,6 @@ const VideoMeeting: React.FC = () => {
   const [pinType, setPinType] = useState<'local' | 'everyone' | null>(null); // Track pin type
   const [showPinConfirm, setShowPinConfirm] = useState(false); // Confirmation dialog
   const [pendingPinAction, setPendingPinAction] = useState<{ userId: string, type: 'local' } | null>(null);
-  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
-  const [mediaError, setMediaError] = useState<string | null>(null);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -442,19 +442,8 @@ const VideoMeeting: React.FC = () => {
         // Add any cleanup logic here if needed
         // clientRef.current.disconnect();
       }
-      // Stop media stream tracks
-      if (mediaStream) {
-        mediaStream.getTracks().forEach(track => track.stop());
-      }
     };
   }, []);
-
-  // Request media stream when connected
-  useEffect(() => {
-    if (isConnected && !mediaStream) {
-      requestMediaStream();
-    }
-  }, [isConnected]);
 
   // Close pin menu when clicking outside
   useEffect(() => {
@@ -676,36 +665,6 @@ const VideoMeeting: React.FC = () => {
     });
   }, []);
 
-  // Request media stream
-  const requestMediaStream = async () => {
-    try {
-      setMediaError(null);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-      });
-      setMediaStream(stream);
-
-      // Show preview in local video
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-    } catch (error: any) {
-      console.error("Failed to get media stream:", error);
-      let errorMessage = "Failed to access camera/microphone";
-
-      if (error.name === 'NotAllowedError') {
-        errorMessage = "Camera/microphone access denied. Please grant permissions.";
-      } else if (error.name === 'NotFoundError') {
-        errorMessage = "No camera or microphone found.";
-      } else if (error.name === 'NotReadableError') {
-        errorMessage = "Camera/microphone is already in use.";
-      }
-
-      setMediaError(errorMessage);
-    }
-  };
-
   // Login and authenticate
   const handleLogin = async () => {
     if (!clientRef.current) return;
@@ -727,16 +686,10 @@ const VideoMeeting: React.FC = () => {
   // Join room
   const handleJoinRoom = async () => {
     if (!clientRef.current) return;
-
-    if (!mediaStream) {
-      alert("Please allow camera/microphone access first");
-      return;
-    }
-
     try {
       setIsLoading(true);
 
-      const result: any = await clientRef.current.joinRoom(roomCode, mediaStream);
+      const result: any = await clientRef.current.joinRoom(roomCode);
 
       setCurrentRoom(result.room);
       setIsInRoom(true);
@@ -826,11 +779,6 @@ const VideoMeeting: React.FC = () => {
       setIsMicEnabled(true);
       setIsVideoEnabled(true);
       setIsHandRaised(false);
-
-      // Show preview again after leaving
-      if (localVideoRef.current && mediaStream) {
-        localVideoRef.current.srcObject = mediaStream;
-      }
     } catch (error) {
       console.error("Failed to leave room:", error);
     }
@@ -1132,69 +1080,6 @@ const VideoMeeting: React.FC = () => {
       {isConnected && !isInRoom && (
         <LoginSection>
           <h2>Enter Room</h2>
-
-          {/* Media Stream Status */}
-          {mediaError && (
-            <div style={{
-              padding: '10px',
-              background: '#f8d7da',
-              color: '#721c24',
-              borderRadius: '4px',
-              marginBottom: '10px'
-            }}>
-              {mediaError}
-              <Button
-                onClick={requestMediaStream}
-                style={{ marginLeft: '10px', padding: '5px 10px' }}
-              >
-                Retry
-              </Button>
-            </div>
-          )}
-
-          {!mediaStream && !mediaError && (
-            <div style={{
-              padding: '10px',
-              background: '#d1ecf1',
-              color: '#0c5460',
-              borderRadius: '4px',
-              marginBottom: '10px'
-            }}>
-              Requesting camera/microphone access...
-            </div>
-          )}
-
-          {mediaStream && (
-            <div style={{
-              padding: '10px',
-              background: '#d4edda',
-              color: '#155724',
-              borderRadius: '4px',
-              marginBottom: '10px'
-            }}>
-              ✓ Camera and microphone ready
-            </div>
-          )}
-
-          {/* Preview Video */}
-          {mediaStream && (
-            <div style={{
-              marginBottom: '10px',
-              background: '#000',
-              borderRadius: '4px',
-              overflow: 'hidden',
-              maxWidth: '400px'
-            }}>
-              <video
-                ref={localVideoRef}
-                autoPlay
-                playsInline
-                muted
-                style={{ width: '100%', display: 'block' }}
-              />
-            </div>
-          )}
-
           <Input
             type="text"
             value={roomCode}
@@ -1202,7 +1087,7 @@ const VideoMeeting: React.FC = () => {
             placeholder="Enter room code"
             onKeyPress={(e) => e.key === "Enter" && handleJoinRoom()}
           />
-          <Button onClick={handleJoinRoom} disabled={isLoading || !mediaStream}>
+          <Button onClick={handleJoinRoom} disabled={isLoading}>
             {isLoading ? "Joining..." : "Join Room"}
           </Button>
         </LoginSection>

@@ -33,7 +33,6 @@ export interface RoomConfig {
   type?: string;
   autoJoin?: boolean;
   maxParticipants?: number;
-  mediaStream?: MediaStream; // Required if autoJoin is true (default)
 }
 
 export interface SubRoomConfig {
@@ -196,8 +195,6 @@ export declare class Participant extends EventEmitter {
   isScreenSharing: boolean;
   connectionStatus: string;
   screenSubscriber: any;
-  publisher: any;
-  subscriber: any;
 
   constructor(config: any);
 
@@ -232,9 +229,8 @@ export declare class Room extends EventEmitter {
 
   constructor(config: any);
 
-  join(userId: string, mediaStream: MediaStream): Promise<JoinResult>;
+  join(userId: string): Promise<JoinResult>;
   leave(): Promise<void>;
-  switchToSubRoom(subRoomCode: string, mediaStream: MediaStream): Promise<any>;
   createSubRoom(config: SubRoomConfig): Promise<SubRoom>;
   getSubRooms(): Promise<SubRoom[]>;
   addParticipant(memberData: any, userId: string): Participant;
@@ -267,9 +263,9 @@ export declare class SubRoom extends Room {
 
   constructor(config: any);
 
-  joinFromMain(userId: string, mediaStream: MediaStream): Promise<JoinResult>;
+  joinFromMain(userId: string): Promise<JoinResult>;
   returnToMainRoom(): Promise<Room>;
-  switchToSubRoom(targetSubRoomCode: string, mediaStream: MediaStream): Promise<any>;
+  switchToSubRoom(targetSubRoom: SubRoom): Promise<JoinResult>;
   inviteParticipant(userId: string): Promise<any>;
   assignParticipant(userId: string): Promise<any>;
   broadcastMessage(message: string, type?: string): Promise<any>;
@@ -287,11 +283,11 @@ export declare class ApiClient {
   constructor(config: any);
 
   authenticate(userId: string): Promise<User>;
-  createRoom(name: string, type?: string): Promise<any>;
+  createRoom(config: RoomConfig): Promise<any>;
   joinRoom(roomCode: string): Promise<any>;
-  leaveRoom(roomId: string, membershipId: string): Promise<void>;
-  listRooms(page?: number, perPage?: number): Promise<any>;
-  createSubRoom(parentRoomId: string, config: SubRoomConfig): Promise<any>;
+  leaveRoom(): Promise<void>;
+  getRooms(options?: any): Promise<any[]>;
+  createSubRoom(config: SubRoomConfig): Promise<any>;
   joinSubRoom(subRoomCode: string): Promise<any>;
 }
 
@@ -303,7 +299,7 @@ export declare class ErmisClient extends EventEmitter {
   manualAuthenticate(userId: string, token: string): void;
   logout(): Promise<void>;
   createRoom(config: RoomConfig): Promise<Room>;
-  joinRoom(roomCode: string, mediaStream: MediaStream): Promise<JoinResult>;
+  joinRoom(roomCode: string): Promise<JoinResult>;
   leaveRoom(): Promise<void>;
   getRooms(options?: any): Promise<RoomInfo[]>;
   createSubRoom(config: SubRoomConfig): Promise<SubRoom>;
@@ -405,6 +401,9 @@ export declare class ErmisClassroom {
     options?: ConnectionOptions
   ): Promise<ErmisClient>;
 }
+
+// Named exports
+export { ErmisClient, Room, SubRoom, Participant, ApiClient, EventEmitter };
 
 // Default export
 export default ErmisClassroom;
