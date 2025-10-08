@@ -167,6 +167,8 @@ class ErmisClient extends EventEmitter {
 
   /**
    * Create a new room
+   * @param {Object} config - Room configuration
+   * @param {MediaStream} [config.mediaStream] - MediaStream for auto-join (required if autoJoin is true)
    */
   async createRoom(config) {
     this._ensureAuthenticated();
@@ -197,7 +199,10 @@ class ErmisClient extends EventEmitter {
 
       // Auto-join if specified
       if (config.autoJoin !== false) {
-        await this.joinRoom(room.code);
+        if (!config.mediaStream) {
+          throw new Error("MediaStream is required for auto-join. Please provide config.mediaStream or set autoJoin to false");
+        }
+        await this.joinRoom(room.code, config.mediaStream);
       }
 
       return room;
@@ -209,9 +214,15 @@ class ErmisClient extends EventEmitter {
 
   /**
    * Join a room by code
+   * @param {string} roomCode - Room code to join
+   * @param {MediaStream} mediaStream - MediaStream from getUserMedia() or getDisplayMedia() (required)
    */
-  async joinRoom(roomCode) {
+  async joinRoom(roomCode, mediaStream) {
     this._ensureAuthenticated();
+
+    if (!mediaStream) {
+      throw new Error("MediaStream is required to join a room. Please provide a MediaStream from getUserMedia() or getDisplayMedia()");
+    }
 
     try {
       this.emit("joiningRoom", { roomCode });
@@ -237,8 +248,8 @@ class ErmisClient extends EventEmitter {
         this._setupRoomEvents(room);
       }
 
-      // Join the room
-      const joinResult = await room.join(this.state.user.id);
+      // Join the room with the provided MediaStream
+      const joinResult = await room.join(this.state.user.id, mediaStream);
 
       // Update state
       this.state.currentRoom = room;

@@ -157,6 +157,31 @@ class Participant extends EventEmitter {
   }
 
   /**
+   * Update media stream (local only)
+   * @param {MediaStream} newStream - The new MediaStream to use
+   */
+  updateMediaStream(newStream) {
+    if (!this.isLocal || !this.publisher) {
+      throw new Error("Can only update media stream for local participant with active publisher");
+    }
+
+    try {
+      this.publisher.updateMediaStream(newStream);
+      this.emit("mediaStreamUpdated", {
+        participant: this,
+        stream: newStream,
+      });
+    } catch (error) {
+      this.emit("error", {
+        participant: this,
+        error,
+        action: "updateMediaStream",
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Set subscriber instance
    */
   setSubscriber(subscriber) {
