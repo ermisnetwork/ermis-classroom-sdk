@@ -19,15 +19,27 @@ A powerful and easy-to-use SDK for building online classroom applications with r
 - [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Media Stream Management](#media-stream-management)
+  - [Overview](#overview)
+  - [Supported Configurations](#supported-configurations)
+  - [Getting Media Streams](#getting-media-streams)
+  - [Device Selection](#device-selection)
+  - [Switching Devices](#switching-devices)
+  - [Screen Sharing](#screen-sharing)
+  - [Adding Tracks Dynamically](#adding-tracks-dynamically)
+  - [Observer Mode](#observer-mode-no-cameramic)
+  - [Graceful Degradation](#graceful-degradation)
+  - [Error Handling](#error-handling)
 - [Core Concepts](#core-concepts)
 - [API Reference](#api-reference)
   - [Client Initialization](#client-initialization)
   - [Room Management](#room-management)
   - [Sub-Room Management](#sub-room-management)
   - [Participant Management](#participant-management)
-  - [Media Devices](#media-devices)
+  - [Media Devices](#media-devices-optional-helpers)
   - [Events](#events)
 - [Best Practices](#best-practices)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -65,38 +77,77 @@ yarn add ermis-classroom-sdk
 
 ## Quick Start
 
-### 1. Initial SDK
+> **⚠️ Important:** You must provide your own MediaStream when joining rooms. This gives you full control over camera/microphone access, device selection, and stream configuration.
+
+### 1. Get Media Stream
+
+The SDK supports various media configurations:
+
+```javascript
+// Full video call (video + audio)
+const stream = await navigator.mediaDevices.getUserMedia({
+  video: { width: 1280, height: 720, frameRate: 30 },
+  audio: { echoCancellation: true, noiseSuppression: true }
+});
+
+// Audio only (no camera)
+const audioStream = await navigator.mediaDevices.getUserMedia({
+  video: false,
+  audio: { echoCancellation: true, noiseSuppression: true }
+});
+
+// Video only (no microphone)
+const videoStream = await navigator.mediaDevices.getUserMedia({
+  video: { width: 1280, height: 720 },
+  audio: false
+});
+
+// Observer mode (no camera/mic) - create silent audio track
+const audioContext = new AudioContext();
+const oscillator = audioContext.createOscillator();
+const dst = audioContext.createMediaStreamDestination();
+oscillator.connect(dst);
+oscillator.start();
+const observerStream = dst.stream;
+
+// Optional: Preview local video
+document.getElementById('local-video').srcObject = stream;
+```
+
+### 2. Initialize SDK
 
 ```javascript
 import ErmisClassroom from 'ermis-classroom-sdk';
 
-const client = await ErmisClassroom.create(
-  {
-    host: "your-server.com"
-    debug: true,
-    webtpUrl: "https://your-webtpUrl.com"
-  }
-);
+const client = await ErmisClassroom.create({
+  host: "your-server.com",
+  debug: true,
+  webtpUrl: "https://your-webtpUrl.com"
+});
 
 client.manualAuthenticate('your-user-id', 'your-token');
 
 console.log('client', client);
 ```
 
-### 2. Create or Join a Room
+### 3. Create or Join a Room
 
 ```javascript
-// Create a new room
-const room = await client.createRoom('Math Class 101', ErmisClassroom.RoomTypes.MAIN);
+// Create a new room (with media stream for auto-join)
+const room = await client.createRoom({
+  name: 'Math Class 101',
+  type: ErmisClassroom.RoomTypes.MAIN,
+  mediaStream // Required for auto-join
+});
 console.log('Room code:', room.code);
 
 // Or join an existing room
-const result = await client.joinRoom('ROOM-CODE-123');
+const result = await client.joinRoom('ROOM-CODE-123', mediaStream);
 console.log('Joined room:', result.room.name);
 console.log('Participants:', result.participants.length);
 ```
 
-### 3. Listen to Events
+### 4. Listen to Events
 
 ```javascript
 // Listen for new participants
@@ -117,7 +168,7 @@ client.on(ErmisClassroom.events.REMOTE_STREAM_READY, (event) => {
 });
 ```
 
-### 4. Control Media
+### 5. Control Media
 
 ```javascript
 const currentRoom = client.getCurrentRoom();
@@ -132,9 +183,16 @@ await me.toggleCamera();
 // Check status
 console.log('Mic:', me.isAudioEnabled);
 console.log('Camera:', me.isVideoEnabled);
+
+// Switch camera/microphone
+const newStream = await navigator.mediaDevices.getUserMedia({
+  video: { deviceId: newCameraId },
+  audio: { deviceId: newMicId }
+});
+me.updateMediaStream(newStream);
 ```
 
-### 5. Send Chat Messages
+### 6. Send Chat Messages
 
 ```javascript
 // Listen for incoming messages
@@ -156,6 +214,221 @@ const messages = client.getMessages(50);
 
 ---
 
+## Media Stream Management
+
+### Overview
+
+The SDK requires you to manage MediaStreams, giving you full control over:
+- When to request camera/microphone permissions
+- Which devices to use
+- Stream quality and constraints
+- Audio-only, video-only, or observer modes
+- Dynamic device switching
+
+### Supported Configurations
+
+| Configuration | Video | Audio | Use Case |
+|--------------|-------|-------|----------|
+| Full Call | ✅ | ✅ | Standard video conferencing |
+| Audio Only | ❌ | ✅ | Voice calls, no camera |
+| Video Only | ✅ | ❌ | Silent video, no mic |
+| Observer | ❌* | ❌* | View-only mode |
+
+*Observer mode requires a silent audio track or blank video track
+
+### Getting Media Streams
+
+```javascript
+// Full video call
+const stream = await navigator.mediaDevices.getUserMedia({
+  video: { width: 1280, height: 720, frameRate: 30 },
+  audio: { echoCancellation: true, noiseSuppression: true }
+});
+
+// Audio only
+const audioStream = await navigator.mediaDevices.getUserMedia({
+  video: false,
+  audio: true
+});
+
+// Video only
+const videoStream = await navigator.mediaDevices.getUserMedia({
+  video: true,
+  audio: false
+});
+```
+
+### Device Selection
+
+```javascript
+// List available devices
+const devices = await navigator.mediaDevices.enumerateDevices();
+const cameras = devices.filter(d => d.kind === 'videoinput');
+const microphones = devices.filter(d => d.kind === 'audioinput');
+
+// Select specific device
+const stream = await navigator.mediaDevices.getUserMedia({
+  video: { deviceId: { exact: cameras[0].deviceId } },
+  audio: { deviceId: { exact: microphones[0].deviceId } }
+});
+```
+
+### Switching Devices
+
+```javascript
+// Switch camera during call
+const room = client.getCurrentRoom();
+const newStream = await navigator.mediaDevices.getUserMedia({
+  video: { deviceId: newCameraId },
+  audio: true
+});
+room.localParticipant.updateMediaStream(newStream);
+```
+
+### Screen Sharing
+
+```javascript
+// Start screen share
+const screenStream = await navigator.mediaDevices.getDisplayMedia({
+  video: { width: 1920, height: 1080 },
+  audio: true
+});
+room.localParticipant.updateMediaStream(screenStream);
+
+// Handle user stopping screen share
+screenStream.getVideoTracks()[0].addEventListener('ended', async () => {
+  // Switch back to camera
+  const cameraStream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true
+  });
+  room.localParticipant.updateMediaStream(cameraStream);
+});
+```
+
+### Adding Tracks Dynamically
+
+```javascript
+// Join with audio only
+const audioStream = await navigator.mediaDevices.getUserMedia({
+  video: false,
+  audio: true
+});
+await client.joinRoom(roomCode, audioStream);
+
+// Later, enable camera
+const room = client.getCurrentRoom();
+const currentStream = room.localParticipant.publisher.stream;
+const videoStream = await navigator.mediaDevices.getUserMedia({
+  video: { width: 1280, height: 720 }
+});
+
+// Combine audio + video
+const newStream = new MediaStream([
+  ...currentStream.getAudioTracks(),
+  ...videoStream.getVideoTracks()
+]);
+room.localParticipant.updateMediaStream(newStream);
+```
+
+### Observer Mode (No Camera/Mic)
+
+```javascript
+// Create silent audio track
+const audioContext = new AudioContext();
+const oscillator = audioContext.createOscillator();
+const dst = audioContext.createMediaStreamDestination();
+oscillator.connect(dst);
+oscillator.start();
+
+await client.joinRoom(roomCode, dst.stream);
+```
+
+### Graceful Degradation
+
+```javascript
+async function joinWithBestAvailable(roomCode) {
+  let stream;
+
+  try {
+    // Try video + audio
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true
+    });
+  } catch (e) {
+    try {
+      // Fallback to audio only
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: false,
+        audio: true
+      });
+    } catch (e2) {
+      try {
+        // Fallback to video only
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false
+        });
+      } catch (e3) {
+        // Fallback to observer mode
+        const audioContext = new AudioContext();
+        const oscillator = audioContext.createOscillator();
+        const dst = audioContext.createMediaStreamDestination();
+        oscillator.connect(dst);
+        oscillator.start();
+        stream = dst.stream;
+      }
+    }
+  }
+
+  await client.joinRoom(roomCode, stream);
+}
+```
+
+### Error Handling
+
+```javascript
+try {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true
+  });
+  await client.joinRoom(roomCode, stream);
+} catch (error) {
+  if (error.name === 'NotAllowedError') {
+    alert('Camera/microphone access denied');
+  } else if (error.name === 'NotFoundError') {
+    alert('No camera or microphone found');
+  } else if (error.name === 'NotReadableError') {
+    alert('Device is already in use');
+  }
+}
+```
+
+### Mute/Unmute Without Changing Stream
+
+```javascript
+const room = client.getCurrentRoom();
+const stream = room.localParticipant.publisher.stream;
+
+// Mute audio
+const audioTrack = stream.getAudioTracks()[0];
+if (audioTrack) {
+  audioTrack.enabled = false; // Mute
+  audioTrack.enabled = true;  // Unmute
+}
+
+// Disable video
+const videoTrack = stream.getVideoTracks()[0];
+if (videoTrack) {
+  videoTrack.enabled = false; // Turn off
+  videoTrack.enabled = true;  // Turn on
+}
+```
+
+---
+
 ## Core Concepts
 
 ### Room
@@ -163,7 +436,11 @@ const messages = client.getMessages(50);
 Represents a classroom session where participants can interact.
 
 ```javascript
-const room = await client.createRoom('My Classroom', ErmisClassroom.RoomTypes.MAIN);
+const room = await client.createRoom({
+  name: 'My Classroom',
+  type: ErmisClassroom.RoomTypes.MAIN,
+  mediaStream // Required for auto-join
+});
 ```
 
 ### SubRoom
@@ -238,8 +515,32 @@ await client.authenticate('user-123');
 
 Create a new room.
 
+**Parameters:**
+- `config.name` (string) - Room name
+- `config.type` (string) - Room type
+- `config.mediaStream` (MediaStream) - **Required if autoJoin is true (default)**
+- `config.autoJoin` (boolean) - Auto-join after creation (default: true)
+
 ```javascript
-const room = await client.createRoom('Science Class', ErmisClassroom.RoomTypes.MAIN);
+// Get media stream first
+const mediaStream = await navigator.mediaDevices.getUserMedia({
+  video: true,
+  audio: true
+});
+
+// Create and auto-join
+const room = await client.createRoom({
+  name: 'Science Class',
+  type: ErmisClassroom.RoomTypes.MAIN,
+  mediaStream // Required for auto-join
+});
+
+// Or create without auto-join
+const room = await client.createRoom({
+  name: 'Science Class',
+  type: ErmisClassroom.RoomTypes.MAIN,
+  autoJoin: false // No mediaStream needed
+});
 ```
 
 **Room Types:**
@@ -248,12 +549,23 @@ const room = await client.createRoom('Science Class', ErmisClassroom.RoomTypes.M
 - `PRESENTATION` - Presentation mode
 - `DISCUSSION` - Discussion mode
 
-#### `client.joinRoom(roomCode)`
+#### `client.joinRoom(roomCode, mediaStream)`
 
 Join an existing room.
 
+**Parameters:**
+- `roomCode` (string) - Room code to join
+- `mediaStream` (MediaStream) - **Required** - Your camera/mic stream
+
 ```javascript
-const result = await client.joinRoom('ABC-123');
+// Get media stream
+const mediaStream = await navigator.mediaDevices.getUserMedia({
+  video: true,
+  audio: true
+});
+
+// Join room
+const result = await client.joinRoom('ABC-123', mediaStream);
 
 // result contains:
 // - room: Room instance
@@ -311,20 +623,21 @@ const subRoom = await client.createSubRoom({
 });
 ```
 
-#### `client.joinSubRoom(subRoomCode)`
+#### `room.switchToSubRoom(subRoomCode, mediaStream)`
 
-Join a breakout room.
+Switch to a breakout room.
 
-```javascript
-const result = await client.joinSubRoom('SUB-ABC-123');
-```
-
-#### `client.switchSubRoom(targetSubRoomCode)`
-
-Switch from one sub-room to another.
+**Parameters:**
+- `subRoomCode` (string) - Sub room code to switch to
+- `mediaStream` (MediaStream) - **Required** - Your camera/mic stream
 
 ```javascript
-const result = await client.switchSubRoom('SUB-XYZ-789');
+const mediaStream = await navigator.mediaDevices.getUserMedia({
+  video: true,
+  audio: true
+});
+
+await room.switchToSubRoom('SUB-ABC-123', mediaStream);
 ```
 
 #### `client.returnToMainRoom()`
@@ -379,11 +692,18 @@ console.log(stats);
 const room = client.getCurrentRoom();
 const me = room.localParticipant;
 
-// Toggle microphone
+// Toggle microphone (mute/unmute)
 await me.toggleMicrophone();
 
-// Toggle camera
+// Toggle camera (on/off)
 await me.toggleCamera();
+
+// Update media stream (switch camera, enable screen share, etc.)
+const newStream = await navigator.mediaDevices.getUserMedia({
+  video: { deviceId: newCameraId },
+  audio: true
+});
+me.updateMediaStream(newStream);
 
 // Check states
 console.log('Audio enabled:', me.isAudioEnabled);
@@ -427,7 +747,9 @@ participant.on(ErmisClassroom.events.VIDEO_TOGGLED, (enabled) => {
 - `PARTICIPANT` - Regular participant
 - `OBSERVER` - Observer (view only)
 
-### Media Devices
+### Media Devices (Optional Helpers)
+
+> **Note:** These are optional helper utilities. You can use `navigator.mediaDevices` directly instead. See the [Media Stream Management](#media-stream-management) section for complete examples.
 
 #### Get Available Devices
 
@@ -447,6 +769,7 @@ devices.cameras.forEach(camera => {
 #### Get User Media Stream
 
 ```javascript
+// Helper method (wraps navigator.mediaDevices.getUserMedia)
 const stream = await ErmisClassroom.MediaDevices.getUserMedia({
   video: {
     deviceId: 'camera-device-id',
@@ -462,8 +785,14 @@ const stream = await ErmisClassroom.MediaDevices.getUserMedia({
   }
 });
 
-// Use the stream
-document.getElementById('preview').srcObject = stream;
+// Or use navigator.mediaDevices directly
+const stream2 = await navigator.mediaDevices.getUserMedia({
+  video: true,
+  audio: true
+});
+
+// Use the stream with SDK
+await client.joinRoom('ROOM_CODE', stream);
 ```
 
 #### Check Permissions
@@ -551,13 +880,232 @@ client.removeAllListeners(ErmisClassroom.events.PARTICIPANT_ADDED);
 
 ## Best Practices
 
-### 1. Error Handling
+### 1. Media Stream Management
+
+**Request permissions early:**
+```javascript
+// Request permissions before showing room UI
+try {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true
+  });
+  // Show room join UI
+  showJoinRoomUI(stream);
+} catch (error) {
+  // Show permission denied message
+  showPermissionError(error);
+}
+```
+
+**Clean up streams:**
+```javascript
+// Stop tracks when leaving room or switching streams
+function stopMediaStream(stream) {
+  stream.getTracks().forEach(track => track.stop());
+}
+
+// Before getting new stream
+stopMediaStream(oldStream);
+const newStream = await navigator.mediaDevices.getUserMedia({...});
+```
+
+**Handle graceful degradation:**
+```javascript
+// Try best available media configuration
+async function getBestMediaStream() {
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true
+    });
+  } catch (e) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        video: false,
+        audio: true
+      });
+    } catch (e2) {
+      // Fallback to observer mode
+      const audioContext = new AudioContext();
+      const oscillator = audioContext.createOscillator();
+      const dst = audioContext.createMediaStreamDestination();
+      oscillator.connect(dst);
+      oscillator.start();
+      return dst.stream;
+    }
+  }
+}
+```
+
+### 2. Error Handling
 
 Always wrap SDK calls in try-catch blocks:
 
 ```javascript
 try {
-  await client.joinRoom('ROOM-CODE');
+  const mediaStream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true
+  });
+  await client.joinRoom('ROOM-CODE', mediaStream);
 } catch (error) {
-  console.error('Failed to join room:', error);
-  // Show user-friendly
+  if (error.name === 'NotAllowedError') {
+    alert('Camera/microphone access denied');
+  } else if (error.name === 'NotFoundError') {
+    alert('No camera or microphone found');
+  } else {
+    console.error('Failed to join room:', error);
+    alert('Failed to join room. Please try again.');
+  }
+}
+```
+
+### 3. Event Listeners
+
+Clean up event listeners when components unmount:
+
+```javascript
+// React example
+useEffect(() => {
+  const handleParticipantAdded = (event) => {
+    console.log('New participant:', event.participant);
+  };
+
+  client.on(ErmisClassroom.events.PARTICIPANT_ADDED, handleParticipantAdded);
+
+  return () => {
+    client.off(ErmisClassroom.events.PARTICIPANT_ADDED, handleParticipantAdded);
+  };
+}, [client]);
+```
+
+### 4. Device Selection
+
+Provide UI for device selection:
+
+```javascript
+async function setupDeviceSelection() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cameras = devices.filter(d => d.kind === 'videoinput');
+  const microphones = devices.filter(d => d.kind === 'audioinput');
+
+  // Show in UI dropdown
+  cameras.forEach(camera => {
+    addOption('camera-select', camera.label, camera.deviceId);
+  });
+
+  microphones.forEach(mic => {
+    addOption('mic-select', mic.label, mic.deviceId);
+  });
+}
+
+// When user selects device
+async function switchDevice(deviceId, kind) {
+  const room = client.getCurrentRoom();
+  const currentStream = room.localParticipant.publisher.stream;
+
+  const constraints = kind === 'video'
+    ? { video: { deviceId: { exact: deviceId } }, audio: true }
+    : { video: true, audio: { deviceId: { exact: deviceId } } };
+
+  const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+  room.localParticipant.updateMediaStream(newStream);
+
+  // Stop old stream
+  currentStream.getTracks().forEach(track => track.stop());
+}
+```
+
+### 5. Preview Before Joining
+
+Show local video preview before joining:
+
+```javascript
+async function showPreview() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true
+  });
+
+  // Show preview
+  const previewVideo = document.getElementById('preview');
+  previewVideo.srcObject = stream;
+
+  // Store stream for later use
+  window.pendingStream = stream;
+}
+
+async function joinWithPreview(roomCode) {
+  // Use the previewed stream
+  await client.joinRoom(roomCode, window.pendingStream);
+}
+```
+
+### 6. Handle Network Issues
+
+Monitor connection status:
+
+```javascript
+client.on(ErmisClassroom.events.CONNECTION_STATUS_CHANGED, (status) => {
+  if (status === 'disconnected') {
+    showReconnectingUI();
+  } else if (status === 'connected') {
+    hideReconnectingUI();
+  }
+});
+```
+
+---
+
+## Troubleshooting
+
+### MediaStream Errors
+
+**"mediaStream is required"**
+- Ensure you're passing a MediaStream to `joinRoom()`, `createRoom()`, or `switchToSubRoom()`
+
+**"Invalid MediaStream provided - no tracks found"**
+- Check that your MediaStream has active tracks: `stream.getTracks().length > 0`
+- Ensure tracks haven't been stopped before passing to SDK
+
+**"NotAllowedError: Permission denied"**
+- User denied camera/microphone permissions
+- Ask user to grant permissions in browser settings
+
+**"NotFoundError: Requested device not found"**
+- No camera or microphone available
+- Use audio-only, video-only, or observer mode
+
+**"NotReadableError: Could not start video source"**
+- Device is already in use by another application
+- Close other applications using the camera/microphone
+
+### Audio/Video Not Working
+
+**No video track available:**
+- Join with audio-only mode
+- Or create a blank video track using Canvas
+
+**No audio track available:**
+- Join with video-only mode
+- Or create a silent audio track using Web Audio API
+
+**Toggle methods not working:**
+- Check if stream has the required track type
+- SDK will warn if trying to toggle non-existent tracks
+
+---
+
+## License
+
+MIT License - see LICENSE file for details
+
+---
+
+## Support
+
+For issues, questions, or contributions:
+- GitHub Issues: [Report an issue](https://github.com/your-repo/ermis-classroom-sdk/issues)
+- Documentation: See examples in this README
+- Email: support@ermis.com

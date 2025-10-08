@@ -46,10 +46,16 @@ class Room extends EventEmitter {
 
   /**
    * Join this room
+   * @param {string} userId - User ID
+   * @param {MediaStream} mediaStream - MediaStream from getUserMedia() or getDisplayMedia() (required)
    */
-  async join(userId) {
+  async join(userId, mediaStream) {
     if (this.isActive) {
       throw new Error("Already joined this room");
+    }
+
+    if (!mediaStream) {
+      throw new Error("MediaStream is required to join a room. Please provide a MediaStream from getUserMedia() or getDisplayMedia()");
     }
 
     try {
@@ -75,8 +81,8 @@ class Room extends EventEmitter {
       // Setup participants
       await this._setupParticipants(roomDetails.participants, userId);
 
-      // Setup media connections
-      await this._setupMediaConnections();
+      // Setup media connections with the provided MediaStream
+      await this._setupMediaConnections(mediaStream);
 
       this.isActive = true;
       this.emit("joined", { room: this, participants: this.participants });
@@ -202,8 +208,14 @@ class Room extends EventEmitter {
 
   /**
    * Switch to a sub room
+   * @param {string} subRoomCode - Sub room code to switch to
+   * @param {MediaStream} mediaStream - MediaStream from getUserMedia() or getDisplayMedia() (required)
    */
-  async switchToSubRoom(subRoomCode) {
+  async switchToSubRoom(subRoomCode, mediaStream) {
+    if (!mediaStream) {
+      throw new Error("MediaStream is required to switch to sub room. Please provide a MediaStream from getUserMedia() or getDisplayMedia()");
+    }
+
     try {
       this.emit("switchingToSubRoom", { room: this, subRoomCode });
 
@@ -220,8 +232,8 @@ class Room extends EventEmitter {
       this.membershipId = switchResponse.id;
       this.streamId = switchResponse.stream_id;
 
-      // Setup media connections for sub room
-      await this._setupMediaConnections();
+      // Setup media connections for sub room with the provided MediaStream
+      await this._setupMediaConnections(mediaStream);
 
       this.emit("switchedToSubRoom", {
         room: this,
@@ -598,8 +610,9 @@ class Room extends EventEmitter {
 
   /**
    * Setup media connections for all participants
+   * @param {MediaStream} mediaStream - The MediaStream to publish (required for local participant)
    */
-  async _setupMediaConnections() {
+  async _setupMediaConnections(mediaStream) {
     // Initialize audio mixer
     if (!this.audioMixer) {
       this.audioMixer = new AudioMixer();
@@ -608,7 +621,10 @@ class Room extends EventEmitter {
 
     // Setup publisher for local participant
     if (this.localParticipant) {
-      await this._setupLocalPublisher();
+      if (!mediaStream) {
+        throw new Error("MediaStream is required to setup media connections. Please provide a MediaStream from getUserMedia() or getDisplayMedia()");
+      }
+      await this._setupLocalPublisher(mediaStream);
     }
 
     // Setup subscribers for remote participants
@@ -624,9 +640,14 @@ class Room extends EventEmitter {
 
   /**
    * Setup publisher for local participant
+   * @param {MediaStream} mediaStream - The MediaStream to publish (required)
    */
-  async _setupLocalPublisher() {
+  async _setupLocalPublisher(mediaStream) {
     if (!this.localParticipant || !this.streamId) return;
+
+    if (!mediaStream) {
+      throw new Error("MediaStream is required to setup publisher. Please provide a MediaStream from getUserMedia() or getDisplayMedia()");
+    }
 
     // Video rendering handled by app through stream events
 
@@ -635,6 +656,7 @@ class Room extends EventEmitter {
 
     const publisher = new Publisher({
       publishUrl,
+      mediaStream, // Pass the client-provided MediaStream
       streamType: "camera",
       streamId: this.streamId,
       width: 1280,

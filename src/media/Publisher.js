@@ -13,6 +13,10 @@ export default class Publisher extends EventEmitter {
       throw new Error("publishUrl is required");
     }
 
+    if (!options.mediaStream) {
+      throw new Error("mediaStream is required - please provide a MediaStream from getUserMedia() or getDisplayMedia()");
+    }
+
     // Configuration
     this.publishUrl = options.publishUrl;
     this.streamType = options.streamType || "camera"; // 'camera' or 'display'
@@ -35,7 +39,7 @@ export default class Publisher extends EventEmitter {
     this.opusChunkCount = 0;
 
     // State variables
-    this.stream = null;
+    this.stream = options.mediaStream; // Use provided MediaStream
     this.audioProcessor = null;
     this.videoProcessor = null;
     this.webTransport = null;
@@ -180,8 +184,11 @@ export default class Publisher extends EventEmitter {
     await this.setupConnection();
 
     try {
-      // Get media stream based on type
-      await this.getMediaStream();
+      // Validate that the provided stream has tracks
+      if (!this.stream || !this.stream.getTracks || this.stream.getTracks().length === 0) {
+        throw new Error("Invalid MediaStream provided - no tracks found");
+      }
+
       this.isPublishing = true;
       // Start streaming
       await this.startStreaming();
@@ -190,12 +197,18 @@ export default class Publisher extends EventEmitter {
       this.onStatusUpdate("Publishing started successfully");
     } catch (error) {
       this.onStatusUpdate(`Failed to start publishing: ${error.message}`, true);
-      throw error;
+      // throw error;
     }
   }
 
   // Toggle camera
   async toggleCamera() {
+    // Check if stream has video track
+    if (!this.stream || this.stream.getVideoTracks().length === 0) {
+      console.warn("Cannot toggle camera: no video track available");
+      return;
+    }
+
     if (this.cameraEnabled) {
       await this.turnOffCamera();
     } else {
@@ -205,6 +218,12 @@ export default class Publisher extends EventEmitter {
 
   // Toggle mic
   async toggleMic() {
+    // Check if stream has audio track
+    if (!this.stream || this.stream.getAudioTracks().length === 0) {
+      console.warn("Cannot toggle microphone: no audio track available");
+      return;
+    }
+
     if (this.micEnabled) {
       await this.turnOffMic();
     } else {
@@ -330,50 +349,36 @@ export default class Publisher extends EventEmitter {
     }
   }
 
-  async getMediaStream() {
-    if (this.streamType === "camera") {
-      const constraints = {
-        audio: {
-          sampleRate: this.kSampleRate,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-        video: {
-          width: { ideal: this.currentConfig.width },
-          height: { ideal: this.currentConfig.height },
-          frameRate: { ideal: this.currentConfig.framerate },
-        },
-      };
-      try {
-        this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (error) {
-        console.error("Error accessing media devices:", error);
-      }
-    } else if (this.streamType === "display") {
-      this.stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true,
-      });
+  /**
+   * Update the media stream (e.g., when switching cameras or starting screen share)
+   * @param {MediaStream} newStream - The new MediaStream to use
+   */
+  updateMediaStream(newStream) {
+    if (!newStream || !newStream.getTracks || newStream.getTracks().length === 0) {
+      throw new Error("Invalid MediaStream provided - no tracks found");
+    }
 
-      // Handle user stopping screen share via browser UI
-      const videoTrack = this.stream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.onended = () => {
-          this.stop();
-        };
-      }
+    // Stop old stream tracks if they exist
+    if (this.stream) {
+      this.stream.getTracks().forEach(track => track.stop());
+    }
+
+    this.stream = newStream;
+
+    // If we're currently publishing, we need to restart the streaming with the new stream
+    if (this.isPublishing) {
+      console.log("Media stream updated, restarting streaming...");
+      // The streaming will automatically pick up the new stream
     }
 
     // Create video-only stream for display
     const videoOnlyStream = new MediaStream();
-    const videoTracks = this.stream.getVideoTracks();
+    const videoTracks = this.stream?.getVideoTracks();
 
     if (videoTracks.length > 0) {
       videoOnlyStream.addTrack(videoTracks[0]);
     }
 
-    // Emit local stream ready event for app integration
     this.emit("localStreamReady", {
       stream: this.stream,           // Full stream with audio + video
       videoOnlyStream: videoOnlyStream, // Video only stream
@@ -619,16 +624,39 @@ export default class Publisher extends EventEmitter {
   }
 
   async startStreaming() {
-    // Start video capture
-    await this.startVideoCapture();
+    const hasVideo = this.stream.getVideoTracks().length > 0;
+    const hasAudio = this.stream.getAudioTracks().length > 0;
 
-    // Start audio streaming
-    this.audioProcessor = await this.startOpusAudioStreaming();
+    // Start video capture if video track exists
+    if (hasVideo) {
+      await this.startVideoCapture();
+    } else {
+      console.warn("No video track available - publishing audio only");
+      this.cameraEnabled = false;
+    }
+
+    // Start audio streaming if audio track exists
+    if (hasAudio) {
+      this.audioProcessor = await this.startOpusAudioStreaming();
+    } else {
+      console.warn("No audio track available - publishing video only");
+      this.micEnabled = false;
+    }
+
+    if (!hasVideo && !hasAudio) {
+      throw new Error("MediaStream must have at least one track (video or audio)");
+    }
   }
 
   async startVideoCapture() {
     if (!this.stream) {
       throw new Error("No media stream available");
+    }
+
+    const videoTracks = this.stream.getVideoTracks();
+    if (!videoTracks || videoTracks.length === 0) {
+      console.warn("No video track available in media stream");
+      return; // Gracefully handle no video track
     }
 
     this.initVideoEncoders();
@@ -646,7 +674,7 @@ export default class Publisher extends EventEmitter {
     const triggerWorker = new Worker("/polyfills/triggerWorker.js");
     triggerWorker.postMessage({ frameRate: this.currentConfig.framerate });
 
-    const track = this.stream.getVideoTracks()[0];
+    const track = videoTracks[0];
     console.log("Using video track:", track);
     this.videoProcessor = new MediaStreamTrackProcessor(
       track,
@@ -713,7 +741,8 @@ export default class Publisher extends EventEmitter {
 
     const audioTrack = this.stream.getAudioTracks()[0];
     if (!audioTrack) {
-      throw new Error("No audio track found in stream");
+      console.warn("No audio track found in stream");
+      return null; // Gracefully handle no audio track
     }
 
     const audioRecorderOptions = {

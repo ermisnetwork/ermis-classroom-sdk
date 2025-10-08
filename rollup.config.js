@@ -24,10 +24,10 @@ const banner = `/**
 const baseConfig = {
   input: "src/index.js",
   external: [], // No external dependencies since we want a standalone bundle
-  
+
   // Disable code splitting for UMD builds
   manualChunks: undefined,
-  
+
   plugins: [
     // Copy static files
     copy({
@@ -36,7 +36,10 @@ const baseConfig = {
         { src: "src/raptorQ/**/*", dest: "dist/raptorQ" },
         { src: "src/polyfills/**/*", dest: "dist/polyfills" },
         { src: "src/workers/**/*", dest: "dist/workers" },
+        { src: "types/index.d.ts", dest: "dist/types" },
         { src: "package.json", dest: "dist/" },
+        { src: "README.md", dest: "dist/" },
+        { src: "LICENSE", dest: "dist/" },
       ],
     }),
 
