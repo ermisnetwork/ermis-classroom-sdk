@@ -10,6 +10,8 @@ import {
   MdVideocam,
   MdVideocamOff,
   MdCallEnd,
+  MdPushPin,
+  MdOutlinePushPin,
 } from "react-icons/md";
 
 // Styled Components
@@ -70,12 +72,14 @@ const MainVideoStyled = styled.div<{ $totalParticipants: number }>`
 const ParticipantVideoContainer = styled.div<{
   $isSmall?: boolean;
   $isLocal?: boolean;
+  $isPinned?: boolean;
 }>`
   position: relative;
   background: #111;
   border-radius: 4px;
   overflow: hidden;
   min-height: 150px;
+  aspect-ratio: 16 / 9;
   ${(props) =>
     props.$isSmall &&
     `
@@ -87,11 +91,21 @@ const ParticipantVideoContainer = styled.div<{
     z-index: 10;
     border: 2px solid white;
   `}
+  ${(props) =>
+    props.$isPinned &&
+    `
+    border: 3px solid #ffd700;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+  `}
 
   video {
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  &:hover .participant-actions {
+    opacity: 1;
   }
 `;
 
@@ -228,6 +242,157 @@ const LocalVideoOverlay = styled.div`
   font-size: 24px;
 `;
 
+const ConfirmDialog = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+`;
+
+const ConfirmBox = styled.div`
+  background: white;
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 400px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+`;
+
+const ConfirmTitle = styled.h3`
+  margin: 0 0 12px 0;
+  font-size: 18px;
+  color: #333;
+`;
+
+const ConfirmMessage = styled.p`
+  margin: 0 0 20px 0;
+  font-size: 14px;
+  color: #666;
+  line-height: 1.5;
+`;
+
+const ConfirmButtons = styled.div`
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+`;
+
+const ConfirmButton = styled.button<{ variant?: 'primary' | 'secondary' }>`
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  ${props => props.variant === 'primary' ? `
+    background: #007bff;
+    color: white;
+    &:hover {
+      background: #0056b3;
+    }
+  ` : `
+    background: #f0f0f0;
+    color: #333;
+    &:hover {
+      background: #e0e0e0;
+    }
+  `}
+`;
+
+const ParticipantActions = styled.div`
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  display: flex;
+  gap: 5px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+`;
+
+const PinButtonContainer = styled.div`
+  position: relative;
+`;
+
+const ActionButton = styled.button<{ $isActive?: boolean }>`
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: ${(props) =>
+    props.$isActive ? "rgba(255, 215, 0, 0.9)" : "rgba(0, 0, 0, 0.7)"};
+  color: white;
+  transition: all 0.2s ease;
+  padding: 0;
+
+  &:hover {
+    background: ${(props) =>
+    props.$isActive ? "rgba(255, 215, 0, 1)" : "rgba(0, 0, 0, 0.9)"};
+    transform: scale(1.1);
+  }
+`;
+
+const PinMenu = styled.div<{ $show: boolean }>`
+  position: absolute;
+  bottom: 35px;
+  left: 0;
+  background: rgba(0, 0, 0, 0.95);
+  border-radius: 8px;
+  padding: 8px;
+  display: ${(props) => (props.$show ? "flex" : "none")};
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+
+  &::before {
+    content: "";
+    position: absolute;
+    bottom: -8px;
+    left: 10px;
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 8px solid rgba(0, 0, 0, 0.95);
+  }
+`;
+
+const PinMenuItem = styled.button<{ $disabled?: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: ${(props) => (props.$disabled ? "#666" : "white")};
+  cursor: ${(props) => (props.$disabled ? "not-allowed" : "pointer")};
+  border-radius: 4px;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  transition: background 0.2s ease;
+
+  &:hover {
+    background: ${(props) =>
+    props.$disabled ? "transparent" : "rgba(255, 255, 255, 0.1)"};
+  }
+
+  svg {
+    flex-shrink: 0;
+  }
+`;
+
 // Main Component
 const VideoMeeting: React.FC = () => {
   const [userId, setUserId] = useState("tuannt20591@gmail.com");
@@ -244,6 +409,10 @@ const VideoMeeting: React.FC = () => {
   );
   const [isMicEnabled, setIsMicEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+  const [pinMenuOpen, setPinMenuOpen] = useState<string | null>(null); // Stores participantId of open menu
+  const [pinType, setPinType] = useState<'local' | 'everyone' | null>(null); // Track pin type
+  const [showPinConfirm, setShowPinConfirm] = useState(false); // Confirmation dialog
+  const [pendingPinAction, setPendingPinAction] = useState<{ userId: string, type: 'local' } | null>(null);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -271,6 +440,23 @@ const VideoMeeting: React.FC = () => {
       }
     };
   }, []);
+
+  // Close pin menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      if (pinMenuOpen) {
+        setPinMenuOpen(null);
+      }
+    };
+
+    if (pinMenuOpen) {
+      document.addEventListener("click", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("click", handleClickOutside);
+    };
+  }, [pinMenuOpen]);
 
   // Setup SDK Event Listeners
   const setupEventListeners = useCallback((client: any) => {
@@ -425,12 +611,18 @@ const VideoMeeting: React.FC = () => {
     // Pin for everyone events
     client.on(events.PARTICIPANT_PINNED_FOR_EVERYONE, (data: any) => {
       console.log("-------PARTICIPANT_PINNED_FOR_EVERYONE------", data);
-      // Update UI to reflect pin status
+      // Update to 'everyone' pin type
+      setPinType('everyone');
+      // Force re-render to show pin status
+      setParticipants((prev) => new Map(prev));
     });
 
     client.on(events.PARTICIPANT_UNPINNED_FOR_EVERYONE, (data: any) => {
       console.log("-------PARTICIPANT_UNPINNED_FOR_EVERYONE------", data);
-      // Update UI to reflect unpin status
+      // Clear pin type
+      setPinType(null);
+      // Force re-render to show unpin status
+      setParticipants((prev) => new Map(prev));
     });
 
     client.on(events.ERROR, (data: any) => {
@@ -538,6 +730,88 @@ const VideoMeeting: React.FC = () => {
     }
   };
 
+  // Pin participant locally (only for this user)
+  const handlePinLocal = async (participantUserId: string) => {
+    if (!currentRoom) return;
+
+    try {
+      const isPinned = currentRoom.pinnedParticipant?.userId === participantUserId;
+
+      // Check if already pinned for everyone
+      if (pinType === 'everyone' && !isPinned) {
+        // Show confirmation dialog
+        setPendingPinAction({ userId: participantUserId, type: 'local' });
+        setShowPinConfirm(true);
+        return;
+      }
+
+      if (isPinned) {
+        currentRoom.unpinParticipant();
+        setPinType(null);
+      } else {
+        currentRoom.pinParticipant(participantUserId);
+        setPinType('local');
+      }
+
+      // Force re-render
+      setParticipants(prev => new Map(prev));
+    } catch (error) {
+      console.error("Failed to pin participant:", error);
+    }
+  };
+
+  // Confirm pin local when already pinned for everyone
+  const confirmPinLocal = async () => {
+    if (!pendingPinAction || !currentRoom) return;
+
+    try {
+      currentRoom.pinParticipant(pendingPinAction.userId);
+      setPinType('local');
+      setParticipants(prev => new Map(prev));
+    } catch (error) {
+      console.error("Failed to confirm pin:", error);
+    } finally {
+      setShowPinConfirm(false);
+      setPendingPinAction(null);
+    }
+  };
+
+  // Cancel pin confirmation
+  const cancelPinConfirm = () => {
+    setShowPinConfirm(false);
+    setPendingPinAction(null);
+  };
+
+  // Pin participant for everyone (host only)
+  const handlePinForEveryone = async (participantUserId: string) => {
+    if (!currentRoom) return;
+
+    try {
+      const participant = currentRoom.getParticipant(participantUserId);
+      if (!participant) return;
+
+      // Access publisher from Room's localParticipant
+      const localParticipant = currentRoom.localParticipant;
+      if (!localParticipant || !(localParticipant as any).publisher) return;
+
+      const publisher = (localParticipant as any).publisher;
+      const isPinned = currentRoom.pinnedParticipant?.userId === participantUserId;
+
+      if (isPinned && pinType === 'everyone') {
+        // Send unpin event
+        await publisher.unpinForEveryone(participant.streamId);
+        setPinType(null);
+      } else {
+        // If pinned locally, this will override it
+        // Send pin event
+        await publisher.pinForEveryone(participant.streamId);
+        setPinType('everyone');
+      }
+    } catch (error) {
+      console.error("Failed to pin for everyone:", error);
+    }
+  };
+
   // Function to render participant videos based on layout rules
   const renderParticipantVideos = () => {
     const totalParticipants = participants.size + 1; // +1 for local user
@@ -545,10 +819,16 @@ const VideoMeeting: React.FC = () => {
       (p) => !p.isLocal
     );
 
+    const isHost = currentRoom?.localParticipant?.role === "owner";
+    const pinnedUserId = currentRoom?.pinnedParticipant?.userId;
+
     if (totalParticipants === 1) {
       // Only local user - show full screen
       return (
-        <ParticipantVideoContainer key="local">
+        <ParticipantVideoContainer
+          key="local"
+          $isPinned={pinnedUserId === userId}
+        >
           <video ref={localVideoRef} autoPlay playsInline muted />
           {!isVideoEnabled && (
             <LocalVideoOverlay>
@@ -566,6 +846,47 @@ const VideoMeeting: React.FC = () => {
               <OwnerBadge>OWNER</OwnerBadge>
             )}
           </ParticipantInfo>
+
+          <ParticipantActions className="participant-actions">
+            <PinButtonContainer>
+              <ActionButton
+                $isActive={pinnedUserId === userId}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPinMenuOpen(pinMenuOpen === userId ? null : userId);
+                }}
+                title="Pin options"
+              >
+                {pinnedUserId === userId ? <MdPushPin size={16} /> : <MdOutlinePushPin size={16} />}
+              </ActionButton>
+
+              <PinMenu $show={pinMenuOpen === userId}>
+                <PinMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handlePinLocal(userId);
+                    setPinMenuOpen(null);
+                  }}
+                >
+                  <MdPushPin size={14} />
+                  Pin locally
+                </PinMenuItem>
+                <PinMenuItem
+                  $disabled={!isHost}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isHost) {
+                      handlePinForEveryone(userId);
+                      setPinMenuOpen(null);
+                    }
+                  }}
+                >
+                  <MdPushPin size={14} />
+                  Pin for everyone {!isHost && "(Host only)"}
+                </PinMenuItem>
+              </PinMenu>
+            </PinButtonContainer>
+          </ParticipantActions>
         </ParticipantVideoContainer>
       );
     }
@@ -587,42 +908,95 @@ const VideoMeeting: React.FC = () => {
       })),
     ];
 
-    return allParticipants.map((participant) => (
-      <ParticipantVideoContainer key={participant.userId}>
-        <video
-          autoPlay
-          playsInline
-          muted={participant.isLocal}
-          ref={
-            participant.isLocal
-              ? localVideoRef
-              : (videoElement) => {
-                if (videoElement && participant.stream) {
-                  videoElement.srcObject = participant.stream;
+    return allParticipants.map((participant) => {
+      const isPinned = pinnedUserId === participant.userId;
+
+      return (
+        <ParticipantVideoContainer
+          key={participant.userId}
+          $isPinned={isPinned}
+        >
+          <video
+            autoPlay
+            playsInline
+            muted={participant.isLocal}
+            ref={
+              participant.isLocal
+                ? localVideoRef
+                : (videoElement) => {
+                  if (videoElement && participant.stream) {
+                    videoElement.srcObject = participant.stream;
+                  }
                 }
-              }
-          }
-        />
-        {/* Show camera off overlay for both local and remote */}
-        {!participant.isVideoEnabled && (
-          <LocalVideoOverlay>
-            <MdVideocamOff />
-          </LocalVideoOverlay>
-        )}
-        <ParticipantInfo>
-          {participant.isLocal ? "You" : participant.userId}
-          {!participant.isAudioEnabled && (
-            <span>
-              <MdMicOff />
-            </span>
+            }
+          />
+          {/* Show camera off overlay for both local and remote */}
+          {!participant.isVideoEnabled && (
+            <LocalVideoOverlay>
+              <MdVideocamOff />
+            </LocalVideoOverlay>
           )}
-          {participant.role === "owner" && <OwnerBadge>OWNER</OwnerBadge>}
-          {(participant as any).isScreenSharing && (
-            <span title="Sharing screen">📺</span>
-          )}
-        </ParticipantInfo>
-      </ParticipantVideoContainer>
-    ));
+          <ParticipantInfo>
+            {participant.isLocal ? "You" : participant.userId}
+            {!participant.isAudioEnabled && (
+              <span>
+                <MdMicOff />
+              </span>
+            )}
+            {participant.role === "owner" && <OwnerBadge>OWNER</OwnerBadge>}
+            {(participant as any).isScreenSharing && (
+              <span title="Sharing screen">📺</span>
+            )}
+            {isPinned && (
+              <span title="Pinned" style={{ color: "#ffd700" }}>
+                <MdPushPin />
+              </span>
+            )}
+          </ParticipantInfo>
+
+          <ParticipantActions className="participant-actions">
+            <PinButtonContainer>
+              <ActionButton
+                $isActive={isPinned}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPinMenuOpen(pinMenuOpen === participant.userId ? null : participant.userId);
+                }}
+                title="Pin options"
+              >
+                {isPinned ? <MdPushPin size={16} /> : <MdOutlinePushPin size={16} />}
+              </ActionButton>
+
+              <PinMenu $show={pinMenuOpen === participant.userId}>
+                <PinMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handlePinLocal(participant.userId);
+                    setPinMenuOpen(null);
+                  }}
+                >
+                  <MdPushPin size={14} />
+                  Pin locally {pinType === 'local' && isPinned && '✓'}
+                </PinMenuItem>
+                <PinMenuItem
+                  $disabled={!isHost}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isHost) {
+                      handlePinForEveryone(participant.userId);
+                      setPinMenuOpen(null);
+                    }
+                  }}
+                >
+                  <MdPushPin size={14} />
+                  Pin for everyone {pinType === 'everyone' && isPinned && '✓'} {!isHost && "(Host only)"}
+                </PinMenuItem>
+              </PinMenu>
+            </PinButtonContainer>
+          </ParticipantActions>
+        </ParticipantVideoContainer>
+      );
+    });
   };
 
   return (
@@ -700,6 +1074,27 @@ const VideoMeeting: React.FC = () => {
           </ControlsContainer>
         )}
       </VideoContainer>
+
+      {/* Pin Confirmation Dialog */}
+      {showPinConfirm && (
+        <ConfirmDialog onClick={cancelPinConfirm}>
+          <ConfirmBox onClick={(e) => e.stopPropagation()}>
+            <ConfirmTitle>Confirm Pin Change</ConfirmTitle>
+            <ConfirmMessage>
+              This participant is currently pinned for everyone by the host.
+              Do you want to override this and pin locally instead?
+            </ConfirmMessage>
+            <ConfirmButtons>
+              <ConfirmButton variant="secondary" onClick={cancelPinConfirm}>
+                Cancel
+              </ConfirmButton>
+              <ConfirmButton variant="primary" onClick={confirmPinLocal}>
+                Pin Locally
+              </ConfirmButton>
+            </ConfirmButtons>
+          </ConfirmBox>
+        </ConfirmDialog>
+      )}
     </Container>
   );
 };

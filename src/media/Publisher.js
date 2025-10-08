@@ -254,7 +254,12 @@ export default class Publisher extends EventEmitter {
     // Send mic_on event to server
     await this.sendMeetingEvent("mic_on");
   }
-
+  async pinForEveryone(targetStreamId) {
+    await this.sendMeetingEvent("pin_for_everyone", targetStreamId);
+  }
+  async unpinForEveryone(targetStreamId) {
+    await this.sendMeetingEvent("unpin_for_everyone", targetStreamId);
+  }
   /**
    * Send meeting control event to server
    */
