@@ -929,6 +929,30 @@ class Room extends EventEmitter {
         });
       }
     }
+
+    if (event.type === "raise_hand") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant) {
+        participant.updateHandRaiseStatus(true);
+        this.emit("remoteHandRaisingStatusChanged", {
+          room: this,
+          participant,
+          raised: true,
+        });
+      }
+    }
+
+    if (event.type === "lower_hand") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant) {
+        participant.updateHandRaiseStatus(false);
+        this.emit("remoteHandRaisingStatusChanged", {
+          room: this,
+          participant,
+          raised: false,
+        });
+      }
+    }
   }
 
   _setupParticipantEvents(participant) {
@@ -950,6 +974,14 @@ class Room extends EventEmitter {
 
     participant.on("videoToggled", ({ participant: p, enabled }) => {
       this.emit("videoToggled", {
+        room: this,
+        participant: p,
+        enabled,
+      });
+    });
+
+    participant.on("handRaiseToggled", ({ participant: p, enabled }) => {
+      this.emit("handRaiseToggled", {
         room: this,
         participant: p,
         enabled,

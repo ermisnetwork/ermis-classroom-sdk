@@ -131,6 +131,7 @@ export interface ParticipantInfo {
   isAudioEnabled: boolean;
   isVideoEnabled: boolean;
   isPinned: boolean;
+  isHandRaised: boolean;
   isScreenSharing: boolean;
   connectionStatus: string;
 }
@@ -191,6 +192,7 @@ export declare class Participant extends EventEmitter {
   isAudioEnabled: boolean;
   isVideoEnabled: boolean;
   isPinned: boolean;
+  isHandRaised: boolean;
   isScreenSharing: boolean;
   connectionStatus: string;
   screenSubscriber: any;
@@ -203,6 +205,7 @@ export declare class Participant extends EventEmitter {
   toggleCamera(): Promise<void>;
   toggleRemoteAudio(): Promise<void>;
   togglePin(): void;
+  toggleRaiseHand(): Promise<void>;
   updateMicStatus(enabled: boolean): void;
   updateCameraStatus(enabled: boolean): void;
   setConnectionStatus(status: string): void;
@@ -341,6 +344,7 @@ export declare class ErmisClassroom {
     readonly PARTICIPANT_UNPINNED: "participantUnpinned";
     readonly AUDIO_TOGGLED: "audioToggled";
     readonly VIDEO_TOGGLED: "videoToggled";
+    readonly HAND_RAISE_TOGGLED: "handRaiseToggled";
     readonly REMOTE_AUDIO_STATUS_CHANGED: "remoteAudioStatusChanged";
     readonly REMOTE_VIDEO_STATUS_CHANGED: "remoteVideoStatusChanged";
     readonly SCREEN_SHARE_STARTED: "screenShareStarted";
@@ -349,6 +353,7 @@ export declare class ErmisClassroom {
     readonly REMOTE_SCREEN_SHARE_STOPPED: "remoteScreenShareStopped";
     readonly PARTICIPANT_PINNED_FOR_EVERYONE: "participantPinnedForEveryone";
     readonly PARTICIPANT_UNPINNED_FOR_EVERYONE: "participantUnpinnedForEveryone";
+    readonly REMOTE_HAND_RAISING_STATUS_CHANGED: "remoteHandRaisingStatusChanged";
     readonly SUB_ROOM_CREATED: "subRoomCreated";
     readonly SUB_ROOM_JOINED: "subRoomJoined";
     readonly SUB_ROOM_LEFT: "subRoomLeft";
