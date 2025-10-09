@@ -121,7 +121,7 @@ jobs:
             
             ### Installation
             ```bash
-            npm install ermis-classroom-sdk@${{ steps.version.outputs.new_version }}
+            npm install @ermisnetwork/ermis-classroom-sdk@${{ steps.version.outputs.new_version }}
             ```
             
             ### Changes
