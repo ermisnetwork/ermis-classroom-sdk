@@ -187,6 +187,7 @@ export declare class Participant extends EventEmitter {
   streamId: string;
   membershipId: string;
   role: string;
+  roomId: string;
   isLocal: boolean;
   isAudioEnabled: boolean;
   isVideoEnabled: boolean;
@@ -194,6 +195,8 @@ export declare class Participant extends EventEmitter {
   isHandRaised: boolean;
   isScreenSharing: boolean;
   connectionStatus: string;
+  publisher: any;
+  subscriber: any;
   screenSubscriber: any;
 
   constructor(config: any);
@@ -205,6 +208,7 @@ export declare class Participant extends EventEmitter {
   toggleRaiseHand(): Promise<void>;
   updateMicStatus(enabled: boolean): void;
   updateCameraStatus(enabled: boolean): void;
+  updateHandRaiseStatus(enabled: boolean): void;
   setConnectionStatus(status: string): void;
   setPublisher(publisher: any): void;
   setSubscriber(subscriber: any): void;
