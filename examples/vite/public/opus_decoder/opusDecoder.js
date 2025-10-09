@@ -30,7 +30,7 @@ export async function ensureRecorderScriptLoaded() {
     }
 
     const script = document.createElement("script");
-    script.src = `opus_decoder/recorder.min.js?t=${Date.now()}`;
+    script.src = `/opus_decoder/recorder.min.js?t=${Date.now()}`;
 
     script.onload = () => {
       recorderScriptLoaded = true;
