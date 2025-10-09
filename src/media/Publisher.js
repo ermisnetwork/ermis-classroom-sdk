@@ -13,10 +13,6 @@ export default class Publisher extends EventEmitter {
       throw new Error("publishUrl is required");
     }
 
-    if (!options.mediaStream) {
-      throw new Error("mediaStream is required - please provide a MediaStream from getUserMedia() or getDisplayMedia()");
-    }
-
     // Configuration
     this.publishUrl = options.publishUrl;
     this.streamType = options.streamType || "camera"; // 'camera' or 'display'
@@ -39,7 +35,7 @@ export default class Publisher extends EventEmitter {
     this.opusChunkCount = 0;
 
     // State variables
-    this.stream = options.mediaStream; // Use provided MediaStream
+    this.stream = null;
     this.audioProcessor = null;
     this.videoProcessor = null;
     this.webTransport = null;
@@ -184,11 +180,8 @@ export default class Publisher extends EventEmitter {
     await this.setupConnection();
 
     try {
-      // Validate that the provided stream has tracks
-      if (!this.stream || !this.stream.getTracks || this.stream.getTracks().length === 0) {
-        throw new Error("Invalid MediaStream provided - no tracks found");
-      }
-
+      // Get media stream based on type
+      await this.getMediaStream();
       this.isPublishing = true;
       // Start streaming
       await this.startStreaming();
@@ -197,18 +190,12 @@ export default class Publisher extends EventEmitter {
       this.onStatusUpdate("Publishing started successfully");
     } catch (error) {
       this.onStatusUpdate(`Failed to start publishing: ${error.message}`, true);
-      // throw error;
+      throw error;
     }
   }
 
   // Toggle camera
   async toggleCamera() {
-    // Check if stream has video track
-    if (!this.stream || this.stream.getVideoTracks().length === 0) {
-      console.warn("Cannot toggle camera: no video track available");
-      return;
-    }
-
     if (this.cameraEnabled) {
       await this.turnOffCamera();
     } else {
@@ -218,12 +205,6 @@ export default class Publisher extends EventEmitter {
 
   // Toggle mic
   async toggleMic() {
-    // Check if stream has audio track
-    if (!this.stream || this.stream.getAudioTracks().length === 0) {
-      console.warn("Cannot toggle microphone: no audio track available");
-      return;
-    }
-
     if (this.micEnabled) {
       await this.turnOffMic();
     } else {
@@ -248,6 +229,11 @@ export default class Publisher extends EventEmitter {
 
   // Turn off camera (stop encoding video frames)
   async turnOffCamera() {
+    if (!this.hasCamera) {
+      console.warn("Cannot turn off camera: no camera available");
+      return;
+    }
+
     if (!this.cameraEnabled) return;
 
     this.cameraEnabled = false;
@@ -259,6 +245,11 @@ export default class Publisher extends EventEmitter {
 
   // Turn on camera (resume encoding video frames)
   async turnOnCamera() {
+    if (!this.hasCamera) {
+      console.warn("Cannot turn on camera: no camera available");
+      return;
+    }
+
     if (this.cameraEnabled) return;
 
     this.cameraEnabled = true;
@@ -270,6 +261,11 @@ export default class Publisher extends EventEmitter {
 
   // Turn off mic (stop encoding audio chunks)
   async turnOffMic() {
+    if (!this.hasMic) {
+      console.warn("Cannot turn off mic: no microphone available");
+      return;
+    }
+
     if (!this.micEnabled) return;
 
     this.micEnabled = false;
@@ -281,6 +277,11 @@ export default class Publisher extends EventEmitter {
 
   // Turn on mic (resume encoding audio chunks)
   async turnOnMic() {
+    if (!this.hasMic) {
+      console.warn("Cannot turn on mic: no microphone available");
+      return;
+    }
+
     if (this.micEnabled) return;
 
     this.micEnabled = true;
@@ -349,44 +350,131 @@ export default class Publisher extends EventEmitter {
     }
   }
 
-  /**
-   * Update the media stream (e.g., when switching cameras or starting screen share)
-   * @param {MediaStream} newStream - The new MediaStream to use
-   */
-  updateMediaStream(newStream) {
-    if (!newStream || !newStream.getTracks || newStream.getTracks().length === 0) {
-      throw new Error("Invalid MediaStream provided - no tracks found");
+  async getMediaStream() {
+    if (this.streamType === "camera") {
+      const constraints = {};
+
+      // Only request audio if hasMic is true
+      if (this.hasMic) {
+        constraints.audio = {
+          sampleRate: this.kSampleRate,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+        };
+      }
+
+      // Only request video if hasCamera is true
+      if (this.hasCamera) {
+        constraints.video = {
+          width: { ideal: this.currentConfig.width },
+          height: { ideal: this.currentConfig.height },
+          frameRate: { ideal: this.currentConfig.framerate },
+        };
+      }
+
+      // Check if at least one media type is requested
+      if (!this.hasMic && !this.hasCamera) {
+        console.warn("Neither camera nor microphone is enabled");
+        return;
+      }
+
+      try {
+        this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log(`Media stream obtained - Video: ${this.hasCamera}, Audio: ${this.hasMic}`);
+      } catch (error) {
+        console.error("Error accessing media devices:", error);
+
+        // Try fallback: request without the failed device
+        if (this.hasMic && this.hasCamera) {
+          console.log("Retrying with fallback...");
+          try {
+            // Try video only
+            this.stream = await navigator.mediaDevices.getUserMedia({ video: constraints.video });
+            console.warn("Fallback: Got video only, no audio available");
+            this.hasMic = false;
+            this.micEnabled = false;
+          } catch (videoError) {
+            try {
+              // Try audio only
+              this.stream = await navigator.mediaDevices.getUserMedia({ audio: constraints.audio });
+              console.warn("Fallback: Got audio only, no video available");
+              this.hasCamera = false;
+              this.cameraEnabled = false;
+            } catch (audioError) {
+              console.error("Failed to get any media stream");
+              this.onStatusUpdate("No media devices available - permission denied or no devices found", true);
+              // Don't throw, just return - this allows the app to continue without media
+              return;
+            }
+          }
+        } else {
+          // Single device requested but failed
+          console.error(`Failed to access ${this.hasCamera ? 'camera' : 'microphone'}`);
+          this.onStatusUpdate(`Cannot access ${this.hasCamera ? 'camera' : 'microphone'} - permission denied or device not found`, true);
+          // Don't throw, just return
+          return;
+        }
+      }
+    } else if (this.streamType === "display") {
+      this.stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+      });
+
+      // Handle user stopping screen share via browser UI
+      const videoTrack = this.stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          this.stop();
+        };
+      }
     }
 
-    // Stop old stream tracks if they exist
-    if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
-    }
-
-    this.stream = newStream;
-
-    // If we're currently publishing, we need to restart the streaming with the new stream
-    if (this.isPublishing) {
-      console.log("Media stream updated, restarting streaming...");
-      // The streaming will automatically pick up the new stream
+    // Check if we got a stream
+    if (!this.stream) {
+      console.warn("No media stream available");
+      return;
     }
 
     // Create video-only stream for display
     const videoOnlyStream = new MediaStream();
-    const videoTracks = this.stream?.getVideoTracks();
+    const videoTracks = this.stream.getVideoTracks();
 
     if (videoTracks.length > 0) {
       videoOnlyStream.addTrack(videoTracks[0]);
     }
 
+    // Update device availability based on actual tracks
+    const audioTracks = this.stream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      this.hasMic = false;
+      this.micEnabled = false;
+      console.log("No audio tracks in stream, disabling microphone");
+    }
+
+    if (videoTracks.length === 0) {
+      this.hasCamera = false;
+      this.cameraEnabled = false;
+      console.log("No video tracks in stream, disabling camera");
+    }
+
+    // Emit local stream ready event for app integration
     this.emit("localStreamReady", {
       stream: this.stream,           // Full stream with audio + video
       videoOnlyStream: videoOnlyStream, // Video only stream
       streamType: this.streamType,
       streamId: this.streamId,
-      config: this.currentConfig
+      config: this.currentConfig,
+      hasAudio: audioTracks.length > 0,
+      hasVideo: videoTracks.length > 0,
     });
-    this.onStatusUpdate(`${this.streamType} stream ready`);
+
+    const mediaInfo = [];
+    if (audioTracks.length > 0) mediaInfo.push("audio");
+    if (videoTracks.length > 0) mediaInfo.push("video");
+
+    this.onStatusUpdate(`${this.streamType} stream ready (${mediaInfo.join(" + ") || "no media"})`);
   }
 
   initVideoEncoders() {
@@ -624,39 +712,31 @@ export default class Publisher extends EventEmitter {
   }
 
   async startStreaming() {
-    const hasVideo = this.stream.getVideoTracks().length > 0;
-    const hasAudio = this.stream.getAudioTracks().length > 0;
-
-    // Start video capture if video track exists
-    if (hasVideo) {
+    // Start video capture if camera is available
+    if (this.hasCamera && this.stream?.getVideoTracks().length > 0) {
       await this.startVideoCapture();
     } else {
-      console.warn("No video track available - publishing audio only");
-      this.cameraEnabled = false;
+      console.log("Skipping video capture: no camera available");
     }
 
-    // Start audio streaming if audio track exists
-    if (hasAudio) {
+    // Start audio streaming if microphone is available
+    if (this.hasMic && this.stream?.getAudioTracks().length > 0) {
       this.audioProcessor = await this.startOpusAudioStreaming();
     } else {
-      console.warn("No audio track available - publishing video only");
-      this.micEnabled = false;
-    }
-
-    if (!hasVideo && !hasAudio) {
-      throw new Error("MediaStream must have at least one track (video or audio)");
+      console.log("Skipping audio streaming: no microphone available");
     }
   }
 
   async startVideoCapture() {
     if (!this.stream) {
-      throw new Error("No media stream available");
+      console.warn("No media stream available for video");
+      return;
     }
 
     const videoTracks = this.stream.getVideoTracks();
-    if (!videoTracks || videoTracks.length === 0) {
-      console.warn("No video track available in media stream");
-      return; // Gracefully handle no video track
+    if (videoTracks.length === 0) {
+      console.warn("No video track found in stream");
+      return;
     }
 
     this.initVideoEncoders();
@@ -674,7 +754,7 @@ export default class Publisher extends EventEmitter {
     const triggerWorker = new Worker("/polyfills/triggerWorker.js");
     triggerWorker.postMessage({ frameRate: this.currentConfig.framerate });
 
-    const track = videoTracks[0];
+    const track = this.stream.getVideoTracks()[0];
     console.log("Using video track:", track);
     this.videoProcessor = new MediaStreamTrackProcessor(
       track,
@@ -736,13 +816,14 @@ export default class Publisher extends EventEmitter {
 
   async startOpusAudioStreaming() {
     if (!this.stream) {
-      throw new Error("No media stream available");
+      console.warn("No media stream available for audio");
+      return null;
     }
 
     const audioTrack = this.stream.getAudioTracks()[0];
     if (!audioTrack) {
       console.warn("No audio track found in stream");
-      return null; // Gracefully handle no audio track
+      return null;
     }
 
     const audioRecorderOptions = {
@@ -856,6 +937,7 @@ export default class Publisher extends EventEmitter {
             description: description,
           };
 
+          console.log(`[Audio Config] Preparing to send config for ${channelName}`, audioConfig);
           streamData.config = audioConfig;
           this.sendStreamConfig(channelName, audioConfig, "audio");
         }
@@ -928,13 +1010,14 @@ export default class Publisher extends EventEmitter {
           },
         };
       }
-      console.log("send stream config", configPacket);
+      console.log(`[Stream Config] Sending ${mediaType} config for ${channelName}`, configPacket);
       const packet = new TextEncoder().encode(JSON.stringify(configPacket));
       await this.sendOverStream(channelName, packet);
 
       streamData.configSent = true;
       streamData.config = config;
 
+      console.log(`[Stream Config] ✅ Config sent successfully for ${channelName}`);
       this.onStatusUpdate(`Config sent for stream: ${channelName}`);
     } catch (error) {
       console.error(`Failed to send config for ${channelName}:`, error);
