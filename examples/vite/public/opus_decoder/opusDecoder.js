@@ -104,7 +104,7 @@ export async function initAudioRecorder(source, options = {}) {
       recordingGain: finalOptions.recordingGain,
       numberOfChannels: finalOptions.numberOfChannels,
       encoderSampleRate: finalOptions.encoderSampleRate,
-      encoderPath: `opus_decoder/encoderWorker.min.js?t=${Date.now()}`,
+      encoderPath: `/opus_decoder/encoderWorker.min.js?t=${Date.now()}`,
       sourceNode: sourceNode,
       streamPages: finalOptions.streamPages,
       encoderFrameSize: finalOptions.encoderFrameSize,
