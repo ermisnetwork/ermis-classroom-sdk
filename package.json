@@ -14,8 +14,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "rollup -c rollup.config.js",
-    "build:dev": "rollup -c rollup.config.js",
+    "build": "rollup -c rollup.config.js && node scripts/prepare-dist-package.js",
+    "build:dev": "rollup -c rollup.config.js && node scripts/prepare-dist-package.js",
     "build:prod": "npm run build",
     "dev": "rollup -c rollup.config.js --watch",
     "test": "jest",
