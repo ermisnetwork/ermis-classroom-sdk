@@ -198,6 +198,56 @@ class Participant extends EventEmitter {
   }
 
   /**
+   * Update media stream (local only)
+   */
+  updateMediaStream(newStream) {
+    if (!this.isLocal || !this.publisher) {
+      console.warn("Cannot update media stream: not a local participant or no publisher");
+      return;
+    }
+
+    if (!newStream || !(newStream instanceof MediaStream)) {
+      console.error("Invalid media stream provided");
+      return;
+    }
+
+    try {
+      const audioTracks = newStream.getAudioTracks();
+      const videoTracks = newStream.getVideoTracks();
+
+      this.publisher.stream = newStream;
+      this.publisher.hasCamera = videoTracks.length > 0;
+      this.publisher.hasMic = audioTracks.length > 0;
+
+      if (videoTracks.length > 0) {
+        this.publisher.cameraEnabled = true;
+        this.isVideoEnabled = true;
+      }
+
+      if (audioTracks.length > 0) {
+        this.publisher.micEnabled = true;
+        this.isAudioEnabled = true;
+      }
+
+      this.emit("mediaStreamUpdated", {
+        participant: this,
+        stream: newStream,
+        hasAudio: audioTracks.length > 0,
+        hasVideo: videoTracks.length > 0,
+      });
+
+      console.log("Media stream updated successfully");
+    } catch (error) {
+      console.error("Failed to update media stream:", error);
+      this.emit("error", {
+        participant: this,
+        error,
+        action: "updateMediaStream",
+      });
+    }
+  }
+
+  /**
    * Update microphone status from server event
    */
   updateMicStatus(enabled) {
