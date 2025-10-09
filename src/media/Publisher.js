@@ -124,7 +124,7 @@ export default class Publisher extends EventEmitter {
       ) {
         await new Promise((resolve, reject) => {
           const script = document.createElement("script");
-          script.src = "../polyfills/MSTP_polyfill.js";
+          script.src = "/polyfills/MSTP_polyfill.js";
           script.onload = () => resolve();
           script.onerror = () =>
             reject(new Error("Failed to load MSTP polyfill"));
