@@ -194,7 +194,7 @@ class Subscriber extends EventEmitter {
         });
       };
 
-      const mediaUrl = `wss://sfu-adaptive-bitrate.ermis-network.workers.dev/meeting/${this.roomId}/${this.streamId}`;
+      const mediaUrl = `wss://sfu-adaptive-bitrate-webrtc.ermis-network.workers.dev/meeting/${this.roomId}/${this.streamId}`;
       console.log("try to init worker with url:", mediaUrl);
 
       this.worker.postMessage(

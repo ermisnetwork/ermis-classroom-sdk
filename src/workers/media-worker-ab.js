@@ -515,7 +515,7 @@ function resetWebsocket() {
   if (mediaWebsocket && mediaWebsocket.readyState !== WebSocket.CLOSED) {
     try {
       mediaWebsocket.close();
-    } catch (e) {}
+    } catch (e) { }
     mediaWebsocket = null;
   }
 
@@ -557,26 +557,26 @@ function stop() {
   if (mediaWebsocket) {
     try {
       mediaWebsocket.close();
-    } catch (e) {}
+    } catch (e) { }
     mediaWebsocket = null;
   }
 
   if (videoDecoder360p) {
     try {
       videoDecoder360p.close();
-    } catch (e) {}
+    } catch (e) { }
     videoDecoder360p = null;
   }
   if (videoDecoder720p) {
     try {
       videoDecoder720p.close();
-    } catch (e) {}
+    } catch (e) { }
     videoDecoder720p = null;
   }
   if (audioDecoder) {
     try {
       audioDecoder.close();
-    } catch (e) {}
+    } catch (e) { }
     audioDecoder = null;
   }
 

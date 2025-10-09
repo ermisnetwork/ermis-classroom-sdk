@@ -3,7 +3,7 @@
  */
 class ApiClient {
   constructor(config) {
-    this.host = config.host || "daibo.ermis.network:9992";
+    this.host = config.host || "daibo.ermis.network:9993";
     this.apiBaseUrl = config.apiUrl || `https://${this.host}/meeting`;
     this.jwtToken = null;
     this.userId = null;

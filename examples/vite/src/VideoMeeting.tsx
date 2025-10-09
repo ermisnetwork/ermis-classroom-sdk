@@ -398,8 +398,8 @@ const PinMenuItem = styled.button<{ $disabled?: boolean }>`
 
 // Main Component
 const VideoMeeting: React.FC = () => {
-  const [userId, setUserId] = useState("tuannt20591@gmail.com");
-  const [roomCode, setRoomCode] = useState("5fay-jmyt-jvqn");
+  const [userId, setUserId] = useState("khoaphan7795@gmail.com");
+  const [roomCode, setRoomCode] = useState("5fb9-azht-t8d5");
   const [isConnected, setIsConnected] = useState(false);
   const [isInRoom, setIsInRoom] = useState(false);
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
@@ -427,9 +427,9 @@ const VideoMeeting: React.FC = () => {
   useEffect(() => {
     if (!clientRef.current) {
       clientRef.current = ErmisClassroom.create({
-        host: "daibo.ermis.network:9992",
+        host: "daibo.ermis.network:9993",
         debug: true,
-        webtpUrl: "https://daibo.ermis.network:4458/meeting/wt",
+        webtpUrl: "https://daibo.ermis.network:9993/meeting/wt",
       });
 
       // Setup event listeners ngay khi tạo client
