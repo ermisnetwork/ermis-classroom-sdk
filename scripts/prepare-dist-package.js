@@ -4,7 +4,7 @@ const path = require('path');
 const rootPackage = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 
 const distPackage = {
-  name: rootPackage.name,
+  name: '@ermisnetwork/ermis-classroom-sdk',
   version: rootPackage.version,
   description: rootPackage.description,
   main: 'ermis-classroom.cjs.js',
@@ -30,7 +30,8 @@ const distPackage = {
   bugs: rootPackage.bugs,
   homepage: rootPackage.homepage,
   publishConfig: {
-    registry: 'https://npm.pkg.github.com'
+    registry: 'https://npm.pkg.github.com',
+    access: 'public'
   },
   dependencies: rootPackage.dependencies || {},
   peerDependencies: rootPackage.peerDependencies || {},
