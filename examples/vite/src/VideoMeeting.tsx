@@ -427,9 +427,9 @@ const VideoMeeting: React.FC = () => {
   useEffect(() => {
     if (!clientRef.current) {
       clientRef.current = ErmisClassroom.create({
-        host: "daibo.ermis.network:9992",
+        host: "daibo.ermis.network:9993",
         debug: true,
-        webtpUrl: "https://daibo.ermis.network:4458/meeting/wt",
+        webtpUrl: "https://daibo.ermis.network:9993/meeting/wt",
       });
 
       // Setup event listeners ngay khi tạo client

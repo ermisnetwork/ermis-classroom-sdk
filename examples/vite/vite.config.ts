@@ -8,7 +8,7 @@ export default defineConfig({
     open: true,
     // host: true,
     port: 3001,
-    allowedHosts: ["tuanmua.bandia.vn", "meet.xoithit.lol"],
+    allowedHosts: ["tuanmua.bandia.vn", "meet.xoithit.lol", "meet.trungdt.xyz"],
   },
   // Configure base URL for production deployment
   base: "/",
