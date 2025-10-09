@@ -74,12 +74,7 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
-        run: |
-          if [ -f pnpm-lock.yaml ]; then
-            pnpm install --frozen-lockfile
-          else
-            pnpm install
-          fi
+        run: pnpm install --no-frozen-lockfile
 
       - name: Configure Git
         run: |
@@ -98,7 +93,7 @@ jobs:
 
       - name: Commit version bump
         run: |
-          git add package.json
+          git add package.json pnpm-lock.yaml
           git commit -m "chore: auto bump version to ${{ steps.version.outputs.new_version }} [skip ci]"
           git push origin main
 
