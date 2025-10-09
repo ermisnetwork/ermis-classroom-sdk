@@ -207,6 +207,78 @@ class ErmisClient extends EventEmitter {
     }
   }
 
+  /** 
+   * Create breakout rooms
+  */
+  async createBreakoutRooms(config) {
+    if (!this.state.currentRoom) {
+      throw new Error("Must be in a main room to create breakout rooms");
+    }
+
+    if (this.state.currentRoom.type !== 'main') {
+      throw new Error("Can only create breakout rooms from main rooms");
+    }
+
+    try {
+      this.emit('creatingBreakoutRooms', {
+        config,
+        parentRoom: this.state.currentRoom
+      });
+
+      const breakoutRooms = await this.state.currentRoom.createBreakoutRoom(config);
+
+      for (const room of breakoutRooms) {
+        this.state.currentRoom.subRooms.set(room.id, room);
+        this._setupRoomEvents(room)
+      }
+
+      this.emit('breakoutRoomsCreated', {
+        breakoutRooms,
+        parentRoom: this.state.currentRoom
+      });
+
+      this._debug("Breakout rooms created:", breakoutRooms.map(room => room.getInfo()));
+      return breakoutRooms;
+    } catch (error) {
+      this.emit("error", { error, action: "createBreakoutRooms" });
+      throw error;
+    }
+  }
+
+  /**
+   * Join breakout room
+   */
+  async joinBreakoutRoom() {
+    if (!this.state.currentRoom) {
+      throw new Error("Must be in a main room to join breakout rooms");
+    }
+
+    if (this.state.currentRoom.type !== 'main') {
+      throw new Error("Can only join breakout rooms from main rooms");
+    }
+
+    try {
+      this.emit('joiningBreakoutRoom', {
+        parentRoom: this.state.currentRoom
+      });
+      const result = await this.state.currentRoom.joinBreakoutRoom();
+
+      if (result && result.room) {
+        this.state.currentRoom = result.room;
+        this.state.rooms.set(result.room.id, result.room);
+      }
+
+      this.emit('breakoutRoomJoined', {
+        breakoutRoom: result?.room,
+        result
+      });
+      return result;
+    } catch (error) {
+      this.emit("error", { error, action: "joinBreakoutRoom" });
+      throw error;
+    }
+  }
+
   /**
    * Join a room by code
    */
@@ -630,6 +702,8 @@ class ErmisClient extends EventEmitter {
       "messageUpdated",
       "typingStarted",
       "typingStopped",
+      "creatingBreakoutRoom",
+      "joiningBreakoutRoom",
       "error",
     ];
 

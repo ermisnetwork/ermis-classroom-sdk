@@ -165,6 +165,133 @@ class Room extends EventEmitter {
   }
 
   /**
+   * Create breakout room
+   */
+  async createBreakoutRoom(config) {
+    if (this.type !== "main") {
+      throw new Error('Only main rooms can create breakout rooms');
+    }
+
+    try {
+      this.emit('creatingBreakoutRoom', {room: this, config});
+
+      const roomsData = config.rooms.map(roomConfig => {
+        const formattedParticipants = (roomConfig.participants || []).map(p => {
+          const participantObj =
+            this.participants instanceof Map
+              ? this.participants.get(p.userId)
+              : p;
+
+          if (!participantObj) {
+            throw new Error(`Participant ${p.userId} not found in main room`);
+          }
+
+          return {
+            user_id: participantObj.userId,
+            stream_id: participantObj.streamId,
+          };
+        });
+
+        return {
+          room_name: roomConfig.name,
+          participants: formattedParticipants,
+        };
+      });
+
+      const apiResponse = await this.apiClient.createBreakoutRoom(this.id, roomsData);
+
+      const createdRooms = [];
+      for (const roomData of apiResponse?.rooms || []) {
+        const subRoom = new Room({
+          id: roomData.room_id,
+          name: roomData.room_name,
+          code: roomData.room_code,
+          type: "breakout",
+          parentRoomId: this.id,
+          ownerId: roomData.user_id,
+          apiClient: this.apiClient,
+          mediaConfig: this.mediaConfig,
+        })
+        subRoom.participants = roomData.participants || [];
+        this.subRooms.set(subRoom.id, subRoom);
+        createdRooms.push(subRoom)
+
+        this.emit('subRoomCreated', {room: this, subRoom});
+      }
+
+      return createdRooms;
+    } catch (err) {
+      this.emit('error', {room: this, err, action: 'createBreakoutRooms'});
+      throw err;
+    }
+  }
+
+  /**
+   * Join Breakout room
+   */
+  async joinBreakoutRoom() {
+    try {
+      if (!this.client || !this.client.apiClient) {
+        throw new Error("Client not initialized or missing ApiClient");
+      }
+      if (!this.localParticipant) throw new Error("No local participant found");
+
+      const localUserId = this.localParticipant.userId;
+      let targetSubRoom = null;
+
+      if (!this.subRooms || this.subRooms.size === 0) {
+        console.warn("⚠️ No breakout rooms found. Maybe they haven't been created yet?");
+        return;
+      }
+
+      for (const sub of this.subRooms.values()) {
+        const participants = sub.participants || [];
+        const match = participants.find(p => p.user_id === localUserId);
+        if (match) {
+          targetSubRoom = sub;
+          break;
+        }
+      }
+
+      if (!targetSubRoom) {
+        console.warn(`⚠️ No assigned subroom found for user ${localUserId}`);
+        return;
+      }
+
+      const subRoomId = targetSubRoom.id || targetSubRoom.sub_room_id;
+
+      this.emit("joiningBreakoutRoom", {
+        userId: localUserId,
+        roomCode,
+        subRoomId,
+      });
+
+      const response = await this.apiClient.joinBreakoutRoom({
+        subRoomId,
+        parentRoomId: this.id,
+      });
+
+      this.emit("joinedBreakoutRoom", {
+        userId: localUserId,
+        subRoom: targetSubRoom,
+        response,
+      });
+
+      console.log(`✅ User ${localUserId} joined breakout room: ${roomCode}`);
+      return response;
+
+    } catch (error) {
+      this.emit("error", {
+        error,
+        action: "joinBreakoutRoom",
+        room: this,
+      });
+      console.error("❌ joinBreakoutRoom failed:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Get all sub rooms
    */
   async getSubRooms() {
