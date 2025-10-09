@@ -58,7 +58,7 @@ jobs:
           if [ -f pnpm-lock.yaml ]; then
             pnpm install --frozen-lockfile
           else
-            pnpm install
+            pnpm install --no-frozen-lockfile
           fi
 
       - name: Configure Git
