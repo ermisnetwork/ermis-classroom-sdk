@@ -1,6 +1,6 @@
 {
   "name": "ermis-classroom-sdk",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Ermis Classroom SDK for virtual classroom and meeting integration",
   "main": "dist/ermis-classroom.cjs.js",
   "module": "dist/ermis-classroom.esm.js",
