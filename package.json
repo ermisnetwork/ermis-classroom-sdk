@@ -1,6 +1,6 @@
 {
   "name": "ermis-classroom-sdk",
-  "version": "1.0.2",
+  "version": "1.0.8",
   "description": "Ermis Classroom SDK for virtual classroom and meeting integration",
   "main": "dist/ermis-classroom.cjs.js",
   "module": "dist/ermis-classroom.esm.js",
@@ -14,10 +14,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "rollup -c rollup.config.js",
-    "build:dev": "rollup -c rollup.config.js",
+    "build": "rollup -c rollup.config.mjs && node scripts/prepare-dist-package.js",
+    "build:dev": "rollup -c rollup.config.mjs && node scripts/prepare-dist-package.js",
     "build:prod": "npm run build",
-    "dev": "rollup -c rollup.config.js --watch",
+    "dev": "rollup -c rollup.config.mjs --watch",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
