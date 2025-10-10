@@ -12,10 +12,10 @@ class ErmisClient extends EventEmitter {
 
     // Configuration
     this.config = {
-      host: config.host || "daibo.ermis.network:9992",
+      host: config.host || "daibo.ermis.network:9993",
       apiUrl:
         config.apiUrl ||
-        `https://${config.host || "daibo.ermis.network:9992"}/meeting`,
+        `https://${config.host || "daibo.ermis.network:9993"}/meeting`,
       webtpUrl:
         config.webtpUrl || "https://daibo.ermis.network:4458/meeting/wt",
       reconnectAttempts: config.reconnectAttempts || 3,

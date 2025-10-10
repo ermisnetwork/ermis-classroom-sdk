@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import ErmisClassroom, {
-  Participant,
-  Room,
-} from "ermis-classroom-sdk";
+import ErmisClassroom, { Participant, Room } from "ermis-classroom-sdk";
 import styled from "styled-components";
 import {
   MdMic,
@@ -12,8 +9,10 @@ import {
   MdCallEnd,
   MdPushPin,
   MdOutlinePushPin,
+  MdGroups,
 } from "react-icons/md";
 import { MdPanTool } from "react-icons/md";
+import BreakoutRoomPopup from "./BreakoutRoom";
 
 // Styled Components
 const Container = styled.div`
@@ -285,7 +284,7 @@ const ConfirmButtons = styled.div`
   justify-content: flex-end;
 `;
 
-const ConfirmButton = styled.button<{ variant?: 'primary' | 'secondary' }>`
+const ConfirmButton = styled.button<{ variant?: "primary" | "secondary" }>`
   padding: 8px 16px;
   border-radius: 4px;
   border: none;
@@ -293,13 +292,16 @@ const ConfirmButton = styled.button<{ variant?: 'primary' | 'secondary' }>`
   cursor: pointer;
   transition: all 0.2s ease;
 
-  ${props => props.variant === 'primary' ? `
+  ${(props) =>
+    props.variant === "primary"
+      ? `
     background: #007bff;
     color: white;
     &:hover {
       background: #0056b3;
     }
-  ` : `
+  `
+      : `
     background: #f0f0f0;
     color: #333;
     &:hover {
@@ -339,7 +341,7 @@ const ActionButton = styled.button<{ $isActive?: boolean }>`
 
   &:hover {
     background: ${(props) =>
-    props.$isActive ? "rgba(255, 215, 0, 1)" : "rgba(0, 0, 0, 0.9)"};
+      props.$isActive ? "rgba(255, 215, 0, 1)" : "rgba(0, 0, 0, 0.9)"};
     transform: scale(1.1);
   }
 `;
@@ -388,7 +390,7 @@ const PinMenuItem = styled.button<{ $disabled?: boolean }>`
 
   &:hover {
     background: ${(props) =>
-    props.$disabled ? "transparent" : "rgba(255, 255, 255, 0.1)"};
+      props.$disabled ? "transparent" : "rgba(255, 255, 255, 0.1)"};
   }
 
   svg {
@@ -414,9 +416,13 @@ const VideoMeeting: React.FC = () => {
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [pinMenuOpen, setPinMenuOpen] = useState<string | null>(null); // Stores participantId of open menu
-  const [pinType, setPinType] = useState<'local' | 'everyone' | null>(null); // Track pin type
+  const [pinType, setPinType] = useState<"local" | "everyone" | null>(null); // Track pin type
   const [showPinConfirm, setShowPinConfirm] = useState(false); // Confirmation dialog
-  const [pendingPinAction, setPendingPinAction] = useState<{ userId: string, type: 'local' } | null>(null);
+  const [pendingPinAction, setPendingPinAction] = useState<{
+    userId: string;
+    type: "local";
+  } | null>(null);
+  const [showBreakoutPopup, setShowBreakoutPopup] = useState(false);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -427,7 +433,7 @@ const VideoMeeting: React.FC = () => {
   useEffect(() => {
     if (!clientRef.current) {
       clientRef.current = ErmisClassroom.create({
-        host: "daibo.ermis.network:9992",
+        host: "daibo.ermis.network:9993",
         debug: true,
         webtpUrl: "https://daibo.ermis.network:4458/meeting/wt",
       });
@@ -633,7 +639,7 @@ const VideoMeeting: React.FC = () => {
     client.on(events.PARTICIPANT_PINNED_FOR_EVERYONE, (data: any) => {
       console.log("-------PARTICIPANT_PINNED_FOR_EVERYONE------", data);
       // Update to 'everyone' pin type
-      setPinType('everyone');
+      setPinType("everyone");
       // Force re-render to show pin status
       setParticipants((prev) => new Map(prev));
     });
@@ -690,6 +696,7 @@ const VideoMeeting: React.FC = () => {
       setIsLoading(true);
 
       const result: any = await clientRef.current.joinRoom(roomCode);
+      console.log("joined room result", result);
 
       setCurrentRoom(result.room);
       setIsInRoom(true);
@@ -707,6 +714,7 @@ const VideoMeeting: React.FC = () => {
         }
       });
       setParticipants(participantMap);
+      console.log(participants);
     } catch (error) {
       console.error("Failed to join room:", error);
       alert("Failed to join room");
@@ -725,7 +733,7 @@ const VideoMeeting: React.FC = () => {
     setIsMicEnabled(p.isAudioEnabled);
 
     // Update participant in map to trigger re-render
-    setParticipants(prev => {
+    setParticipants((prev) => {
       const updated = new Map(prev);
       updated.set(userId, p);
       return updated;
@@ -742,7 +750,7 @@ const VideoMeeting: React.FC = () => {
     setIsVideoEnabled(p.isVideoEnabled);
 
     // Update participant in map to trigger re-render
-    setParticipants(prev => {
+    setParticipants((prev) => {
       const updated = new Map(prev);
       updated.set(userId, p);
       return updated;
@@ -759,7 +767,7 @@ const VideoMeeting: React.FC = () => {
     setIsHandRaised(p.isHandRaised);
 
     // Update participant in map to trigger re-render
-    setParticipants(prev => {
+    setParticipants((prev) => {
       const updated = new Map(prev);
       updated.set(userId, p);
       return updated;
@@ -789,12 +797,13 @@ const VideoMeeting: React.FC = () => {
     if (!currentRoom) return;
 
     try {
-      const isPinned = currentRoom.pinnedParticipant?.userId === participantUserId;
+      const isPinned =
+        currentRoom.pinnedParticipant?.userId === participantUserId;
 
       // Check if already pinned for everyone
-      if (pinType === 'everyone' && !isPinned) {
+      if (pinType === "everyone" && !isPinned) {
         // Show confirmation dialog
-        setPendingPinAction({ userId: participantUserId, type: 'local' });
+        setPendingPinAction({ userId: participantUserId, type: "local" });
         setShowPinConfirm(true);
         return;
       }
@@ -804,11 +813,11 @@ const VideoMeeting: React.FC = () => {
         setPinType(null);
       } else {
         currentRoom.pinParticipant(participantUserId);
-        setPinType('local');
+        setPinType("local");
       }
 
       // Force re-render
-      setParticipants(prev => new Map(prev));
+      setParticipants((prev) => new Map(prev));
     } catch (error) {
       console.error("Failed to pin participant:", error);
     }
@@ -820,8 +829,8 @@ const VideoMeeting: React.FC = () => {
 
     try {
       currentRoom.pinParticipant(pendingPinAction.userId);
-      setPinType('local');
-      setParticipants(prev => new Map(prev));
+      setPinType("local");
+      setParticipants((prev) => new Map(prev));
     } catch (error) {
       console.error("Failed to confirm pin:", error);
     } finally {
@@ -849,9 +858,10 @@ const VideoMeeting: React.FC = () => {
       if (!localParticipant || !(localParticipant as any).publisher) return;
 
       const publisher = (localParticipant as any).publisher;
-      const isPinned = currentRoom.pinnedParticipant?.userId === participantUserId;
+      const isPinned =
+        currentRoom.pinnedParticipant?.userId === participantUserId;
 
-      if (isPinned && pinType === 'everyone') {
+      if (isPinned && pinType === "everyone") {
         // Send unpin event
         await publisher.unpinForEveryone(participant.streamId);
         setPinType(null);
@@ -859,7 +869,7 @@ const VideoMeeting: React.FC = () => {
         // If pinned locally, this will override it
         // Send pin event
         await publisher.pinForEveryone(participant.streamId);
-        setPinType('everyone');
+        setPinType("everyone");
       }
     } catch (error) {
       console.error("Failed to pin for everyone:", error);
@@ -911,7 +921,11 @@ const VideoMeeting: React.FC = () => {
                 }}
                 title="Pin options"
               >
-                {pinnedUserId === userId ? <MdPushPin size={16} /> : <MdOutlinePushPin size={16} />}
+                {pinnedUserId === userId ? (
+                  <MdPushPin size={16} />
+                ) : (
+                  <MdOutlinePushPin size={16} />
+                )}
               </ActionButton>
 
               <PinMenu $show={pinMenuOpen === userId}>
@@ -978,10 +992,10 @@ const VideoMeeting: React.FC = () => {
               participant.isLocal
                 ? localVideoRef
                 : (videoElement) => {
-                  if (videoElement && participant.stream) {
-                    videoElement.srcObject = participant.stream;
+                    if (videoElement && participant.stream) {
+                      videoElement.srcObject = participant.stream;
+                    }
                   }
-                }
             }
           />
           {/* Show camera off overlay for both local and remote */}
@@ -1019,11 +1033,19 @@ const VideoMeeting: React.FC = () => {
                 $isActive={isPinned}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setPinMenuOpen(pinMenuOpen === participant.userId ? null : participant.userId);
+                  setPinMenuOpen(
+                    pinMenuOpen === participant.userId
+                      ? null
+                      : participant.userId
+                  );
                 }}
                 title="Pin options"
               >
-                {isPinned ? <MdPushPin size={16} /> : <MdOutlinePushPin size={16} />}
+                {isPinned ? (
+                  <MdPushPin size={16} />
+                ) : (
+                  <MdOutlinePushPin size={16} />
+                )}
               </ActionButton>
 
               <PinMenu $show={pinMenuOpen === participant.userId}>
@@ -1035,7 +1057,7 @@ const VideoMeeting: React.FC = () => {
                   }}
                 >
                   <MdPushPin size={14} />
-                  Pin locally {pinType === 'local' && isPinned && '✓'}
+                  Pin locally {pinType === "local" && isPinned && "✓"}
                 </PinMenuItem>
                 <PinMenuItem
                   $disabled={!isHost}
@@ -1048,7 +1070,10 @@ const VideoMeeting: React.FC = () => {
                   }}
                 >
                   <MdPushPin size={14} />
-                  Pin for everyone {pinType === 'everyone' && isPinned && '✓'} {!isHost && "(Host only)"}
+                  Pin for everyone {pinType === "everyone" &&
+                    isPinned &&
+                    "✓"}{" "}
+                  {!isHost && "(Host only)"}
                 </PinMenuItem>
               </PinMenu>
             </PinButtonContainer>
@@ -1132,6 +1157,13 @@ const VideoMeeting: React.FC = () => {
             </ControlButton>
 
             <ControlButton
+              onClick={() => setShowBreakoutPopup(true)}
+              title="Create Breakout Rooms"
+            >
+              <MdGroups size={20} />
+            </ControlButton>
+
+            <ControlButton
               variant="leave"
               onClick={handleLeaveRoom}
               title="Leave room"
@@ -1148,8 +1180,8 @@ const VideoMeeting: React.FC = () => {
           <ConfirmBox onClick={(e) => e.stopPropagation()}>
             <ConfirmTitle>Confirm Pin Change</ConfirmTitle>
             <ConfirmMessage>
-              This participant is currently pinned for everyone by the host.
-              Do you want to override this and pin locally instead?
+              This participant is currently pinned for everyone by the host. Do
+              you want to override this and pin locally instead?
             </ConfirmMessage>
             <ConfirmButtons>
               <ConfirmButton variant="secondary" onClick={cancelPinConfirm}>
@@ -1162,6 +1194,14 @@ const VideoMeeting: React.FC = () => {
           </ConfirmBox>
         </ConfirmDialog>
       )}
+
+      <BreakoutRoomPopup
+        isOpen={showBreakoutPopup}
+        onClose={() => setShowBreakoutPopup(false)}
+        participants={Array.from(participants.values())}
+        currentRoom={currentRoom}
+        client={clientRef.current}
+      />
     </Container>
   );
 };

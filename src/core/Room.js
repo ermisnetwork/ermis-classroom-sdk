@@ -175,15 +175,26 @@ class Room extends EventEmitter {
     try {
       this.emit('creatingBreakoutRoom', {room: this, config});
 
-      const roomsData = config.rooms.map(roomConfig => {
-        const formattedParticipants = (roomConfig.participants || []).map(p => {
-          const participantObj =
-            this.participants instanceof Map
-              ? this.participants.get(p.userId)
-              : p;
+      if (!config.rooms || !Array.isArray(config.rooms)) {
+        throw new Error('Invalid config: rooms array is required');
+      }
+
+      const roomsData = config.rooms.map((roomConfig, index) => {
+        const roomName = roomConfig.name || `Breakout Room ${index + 1}`;
+        const participants = roomConfig.participants || [];
+        console.log(`Processing room "${roomName}" with ${participants.length} participants`);
+
+        const formattedParticipants = participants.map((p, index) => {
+          const userId = p.userId || p.user_id;
+
+          if (!userId) {
+            throw new Error(`Participant at index ${index} is missing userId`);
+          }
+
+          const participantObj = this.participants.get(userId);
 
           if (!participantObj) {
-            throw new Error(`Participant ${p.userId} not found in main room`);
+            throw new Error(`Participant ${userId} not found in main room. Available: ${Array.from(this.participants.keys()).join(', ')}`);
           }
 
           return {
@@ -193,8 +204,8 @@ class Room extends EventEmitter {
         });
 
         return {
-          room_name: roomConfig.name,
-          participants: formattedParticipants,
+          room_name: roomName,
+          participants: formattedParticipants
         };
       });
 
@@ -203,22 +214,23 @@ class Room extends EventEmitter {
       const createdRooms = [];
       for (const roomData of apiResponse?.rooms || []) {
         const subRoom = new Room({
-          id: roomData.room_id,
-          name: roomData.room_name,
-          code: roomData.room_code,
+          id: roomData.room.id,
+          name: roomData.room.room_name,
+          code: roomData.room.room_code,
           type: "breakout",
           parentRoomId: this.id,
-          ownerId: roomData.user_id,
+          ownerId: roomData.room.user_id,
           apiClient: this.apiClient,
           mediaConfig: this.mediaConfig,
         })
+
+        subRoom.roomData = roomData.room;
         subRoom.participants = roomData.participants || [];
+
         this.subRooms.set(subRoom.id, subRoom);
         createdRooms.push(subRoom)
-
-        this.emit('subRoomCreated', {room: this, subRoom});
       }
-
+      console.log(`✅ Created ${createdRooms.length} breakout rooms`);
       return createdRooms;
     } catch (err) {
       this.emit('error', {room: this, err, action: 'createBreakoutRooms'});
