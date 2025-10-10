@@ -434,6 +434,7 @@ class Room extends EventEmitter {
       membershipId: memberData.id,
       role: memberData.role,
       roomId: this.id,
+      name: memberData.name,
       isLocal,
     });
 

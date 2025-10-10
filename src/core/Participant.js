@@ -13,6 +13,7 @@ class Participant extends EventEmitter {
     this.role = config.role || "participant";
     this.roomId = config.roomId;
     this.isLocal = config.isLocal || false;
+    this.name = config.name;
 
     // Media state
     this.isAudioEnabled = true;
@@ -30,6 +31,13 @@ class Participant extends EventEmitter {
 
     // Status
     this.connectionStatus = "disconnected"; // 'connecting', 'connected', 'disconnected', 'failed'
+  }
+
+  /**
+   * Get name
+   */
+  getName() {
+    return this.name || "";
   }
 
   /**
