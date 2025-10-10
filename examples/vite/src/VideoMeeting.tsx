@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import ErmisClassroom, {
-  Participant,
-  Room,
-} from "ermis-classroom-sdk";
+import ErmisClassroom, { Participant, Room } from "ermis-classroom-sdk";
 import styled from "styled-components";
 import {
   MdMic,
@@ -12,8 +9,10 @@ import {
   MdCallEnd,
   MdPushPin,
   MdOutlinePushPin,
+  MdGroups,
 } from "react-icons/md";
 import { MdPanTool } from "react-icons/md";
+import SubRoomPopup from "./SubRoomPopup";
 
 // Styled Components
 const Container = styled.div`
@@ -30,6 +29,148 @@ const LoginSection = styled.div`
   border-radius: 8px;
   margin-bottom: 20px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+`;
+
+const SectionsContainer = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+  
+  @media (max-width: 1200px) {
+    grid-template-columns: 1fr 1fr;
+  }
+  
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const SectionTitle = styled.h2`
+  margin: 0 0 15px 0;
+  color: #333;
+  font-size: 20px;
+  font-weight: 600;
+  border-bottom: 2px solid #007bff;
+  padding-bottom: 8px;
+`;
+
+const FormGroup = styled.div`
+  margin-bottom: 15px;
+`;
+
+const Label = styled.label`
+  display: block;
+  margin-bottom: 5px;
+  color: #555;
+  font-weight: 500;
+  font-size: 14px;
+`;
+
+const SuccessMessage = styled.div`
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 15px;
+  font-size: 14px;
+  
+  strong {
+    display: block;
+    margin-bottom: 5px;
+  }
+`;
+
+const RoomList = styled.div`
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin-top: 10px;
+`;
+
+const RoomItem = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #eee;
+  transition: background-color 0.2s ease;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background-color: #f8f9fa;
+  }
+`;
+
+const RoomInfo = styled.div`
+  flex: 1;
+`;
+
+const RoomTitle = styled.h4`
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+`;
+
+const RoomCode = styled.span`
+  font-size: 12px;
+  color: #666;
+  font-family: monospace;
+  background: #f0f0f0;
+  padding: 2px 6px;
+  border-radius: 3px;
+`;
+
+const RoomCreator = styled.div`
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+  font-style: italic;
+`;
+
+const SmallButton = styled.button`
+  background: #007bff;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+
+  &:hover:not(:disabled) {
+    background: #0056b3;
+    transform: translateY(-1px);
+  }
+
+  &:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    transform: none;
+  }
+`;
+
+const RefreshButton = styled(SmallButton)`
+  background: #28a745;
+  margin-top: 10px;
+
+  &:hover:not(:disabled) {
+    background: #218838;
+  }
+`;
+
+const EmptyState = styled.div`
+  padding: 20px;
+  text-align: center;
+  color: #666;
+  font-size: 14px;
 `;
 
 const VideoContainer = styled.div`
@@ -136,34 +277,81 @@ const OwnerBadge = styled.span`
   font-weight: bold;
 `;
 
-const Button = styled.button<{ variant?: "primary" | "danger" }>`
-  background: ${(props) =>
-    props.variant === "danger" ? "#dc3545" : "#007bff"};
+const Button = styled.button<{ variant?: "primary" | "danger" | "success" }>`
+  background: ${(props) => {
+    if (props.variant === "danger") return "#dc3545";
+    if (props.variant === "success") return "#28a745";
+    return "#007bff";
+  }};
   color: white;
   border: none;
-  padding: 10px 20px;
-  border-radius: 4px;
+  padding: 12px 24px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
+  font-weight: 500;
   margin-right: 10px;
+  transition: all 0.2s ease;
+  width: 100%;
 
-  &:hover {
-    opacity: 0.8;
+  &:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    background: ${(props) => {
+    if (props.variant === "danger") return "#c82333";
+    if (props.variant === "success") return "#218838";
+    return "#0056b3";
+  }};
   }
 
   &:disabled {
     background: #6c757d;
     cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
   }
 `;
 
 const Input = styled.input`
   width: 100%;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  padding: 12px;
+  border: 2px solid #ddd;
+  border-radius: 6px;
   font-size: 14px;
-  margin-bottom: 10px;
+  margin-bottom: 0;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
+
+  &:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+  }
+
+  &:hover:not(:focus) {
+    border-color: #aaa;
+  }
+
+  &::placeholder {
+    color: #999;
+  }
+`;
+
+const InlineFormGroup = styled.div`
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  
+  ${Input} {
+    flex: 1;
+  }
+  
+  ${Button} {
+    width: auto;
+    min-width: 120px;
+    white-space: nowrap;
+    margin-right: 0;
+  }
 `;
 
 const ControlsContainer = styled.div`
@@ -285,7 +473,7 @@ const ConfirmButtons = styled.div`
   justify-content: flex-end;
 `;
 
-const ConfirmButton = styled.button<{ variant?: 'primary' | 'secondary' }>`
+const ConfirmButton = styled.button<{ variant?: "primary" | "secondary" }>`
   padding: 8px 16px;
   border-radius: 4px;
   border: none;
@@ -293,13 +481,16 @@ const ConfirmButton = styled.button<{ variant?: 'primary' | 'secondary' }>`
   cursor: pointer;
   transition: all 0.2s ease;
 
-  ${props => props.variant === 'primary' ? `
+  ${(props) =>
+    props.variant === "primary"
+      ? `
     background: #007bff;
     color: white;
     &:hover {
       background: #0056b3;
     }
-  ` : `
+  `
+      : `
     background: #f0f0f0;
     color: #333;
     &:hover {
@@ -400,6 +591,9 @@ const PinMenuItem = styled.button<{ $disabled?: boolean }>`
 const VideoMeeting: React.FC = () => {
   const [userId, setUserId] = useState("tuannt20591@gmail.com");
   const [roomCode, setRoomCode] = useState("5fay-jmyt-jvqn");
+  const [roomName, setRoomName] = useState("");
+  const [availableRooms, setAvailableRooms] = useState<any[]>([]);
+  const [isLoadingRooms, setIsLoadingRooms] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isInRoom, setIsInRoom] = useState(false);
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
@@ -414,9 +608,13 @@ const VideoMeeting: React.FC = () => {
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [pinMenuOpen, setPinMenuOpen] = useState<string | null>(null); // Stores participantId of open menu
-  const [pinType, setPinType] = useState<'local' | 'everyone' | null>(null); // Track pin type
+  const [pinType, setPinType] = useState<"local" | "everyone" | null>(null); // Track pin type
   const [showPinConfirm, setShowPinConfirm] = useState(false); // Confirmation dialog
-  const [pendingPinAction, setPendingPinAction] = useState<{ userId: string, type: 'local' } | null>(null);
+  const [pendingPinAction, setPendingPinAction] = useState<{
+    userId: string;
+    type: "local";
+  } | null>(null);
+  const [showBreakoutPopup, setShowBreakoutPopup] = useState(false);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -427,7 +625,7 @@ const VideoMeeting: React.FC = () => {
   useEffect(() => {
     if (!clientRef.current) {
       clientRef.current = ErmisClassroom.create({
-        host: "daibo.ermis.network:9992",
+        host: "daibo.ermis.network:9993",
         debug: true,
         webtpUrl: "https://daibo.ermis.network:4458/meeting/wt",
       });
@@ -633,7 +831,7 @@ const VideoMeeting: React.FC = () => {
     client.on(events.PARTICIPANT_PINNED_FOR_EVERYONE, (data: any) => {
       console.log("-------PARTICIPANT_PINNED_FOR_EVERYONE------", data);
       // Update to 'everyone' pin type
-      setPinType('everyone');
+      setPinType("everyone");
       // Force re-render to show pin status
       setParticipants((prev) => new Map(prev));
     });
@@ -665,31 +863,31 @@ const VideoMeeting: React.FC = () => {
     });
   }, []);
 
-  // Login and authenticate
-  const handleLogin = async () => {
+  // Get list of available rooms
+  const handleGetRoomList = async () => {
     if (!clientRef.current) return;
     try {
-      setIsLoading(true);
+      setIsLoadingRooms(true);
 
-      // Authenticate với client đã được tạo
-      await clientRef.current.authenticate(userId);
-
-      setIsConnected(true);
+      // Assuming the SDK has a method to get room list
+      const roomList = await clientRef.current.getRooms();
+      setAvailableRooms(roomList || []);
     } catch (error) {
-      console.error("Authentication failed:", error);
-      alert("Authentication failed");
+      console.error("Failed to get room list:", error);
+      alert("Failed to get room list");
     } finally {
-      setIsLoading(false);
+      setIsLoadingRooms(false);
     }
   };
 
-  // Join room
-  const handleJoinRoom = async () => {
+  // Join room by room object
+  const handleJoinRoomFromList = async (room: any) => {
     if (!clientRef.current) return;
     try {
       setIsLoading(true);
 
-      const result: any = await clientRef.current.joinRoom(roomCode);
+      const result: any = await clientRef.current.joinRoom(room.room_code);
+      console.log("joined room result", result);
 
       setCurrentRoom(result.room);
       setIsInRoom(true);
@@ -715,6 +913,109 @@ const VideoMeeting: React.FC = () => {
     }
   };
 
+  // Login and authenticate
+  const handleLogin = async () => {
+    if (!clientRef.current) return;
+    try {
+      setIsLoading(true);
+
+      // Authenticate với client đã được tạo
+      await clientRef.current.authenticate(userId);
+
+      setIsConnected(true);
+
+      // Auto-fetch room list after successful authentication
+      setTimeout(() => {
+        handleGetRoomList();
+      }, 500);
+    } catch (error) {
+      console.error("Authentication failed:", error);
+      alert("Authentication failed");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Create room
+  const handleCreateRoom = async () => {
+    if (!clientRef.current) return;
+    if (!roomName.trim()) {
+      alert("Please enter a room name");
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+
+      const result: any = await clientRef.current.createRoom({
+        name: roomName.trim(),
+      });
+
+      setCurrentRoom(result);
+      setIsInRoom(true);
+      // Clear form fields
+      setRoomName("");
+
+      // Set participants
+      const participantMap = new Map();
+      result.participants.forEach((participant: Participant) => {
+        participantMap.set(participant.userId, participant);
+
+        // Update local mic, camera and hand raise status if this is the local participant
+        if (participant.isLocal) {
+          setIsMicEnabled(participant.isAudioEnabled);
+          setIsVideoEnabled(participant.isVideoEnabled);
+          setIsHandRaised((participant as any).isHandRaised || false);
+        }
+      });
+      setParticipants(participantMap);
+    } catch (error) {
+      console.error("Failed to create room:", error);
+      alert("Failed to create room. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Join room
+  const handleJoinRoom = async () => {
+    if (!clientRef.current) return;
+    if (!roomCode.trim()) {
+      alert("Please enter a room code");
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+
+      const result: any = await clientRef.current.joinRoom(roomCode.trim());
+      console.log("joined room result", result);
+
+      setCurrentRoom(result.room);
+      setIsInRoom(true);
+
+      // Set participants
+      const participantMap = new Map();
+      result.participants.forEach((participant: Participant) => {
+        participantMap.set(participant.userId, participant);
+
+        // Update local mic, camera and hand raise status if this is the local participant
+        if (participant.isLocal) {
+          setIsMicEnabled(participant.isAudioEnabled);
+          setIsVideoEnabled(participant.isVideoEnabled);
+          setIsHandRaised((participant as any).isHandRaised || false);
+        }
+      });
+      setParticipants(participantMap);
+      console.log(participants);
+    } catch (error) {
+      console.error("Failed to join room:", error);
+      alert("Failed to join room");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Toggle microphone
   const handleToggleMicrophone = async () => {
     const p = participants.get(userId);
@@ -725,7 +1026,7 @@ const VideoMeeting: React.FC = () => {
     setIsMicEnabled(p.isAudioEnabled);
 
     // Update participant in map to trigger re-render
-    setParticipants(prev => {
+    setParticipants((prev) => {
       const updated = new Map(prev);
       updated.set(userId, p);
       return updated;
@@ -742,7 +1043,7 @@ const VideoMeeting: React.FC = () => {
     setIsVideoEnabled(p.isVideoEnabled);
 
     // Update participant in map to trigger re-render
-    setParticipants(prev => {
+    setParticipants((prev) => {
       const updated = new Map(prev);
       updated.set(userId, p);
       return updated;
@@ -759,7 +1060,7 @@ const VideoMeeting: React.FC = () => {
     setIsHandRaised(p.isHandRaised);
 
     // Update participant in map to trigger re-render
-    setParticipants(prev => {
+    setParticipants((prev) => {
       const updated = new Map(prev);
       updated.set(userId, p);
       return updated;
@@ -789,12 +1090,13 @@ const VideoMeeting: React.FC = () => {
     if (!currentRoom) return;
 
     try {
-      const isPinned = currentRoom.pinnedParticipant?.userId === participantUserId;
+      const isPinned =
+        currentRoom.pinnedParticipant?.userId === participantUserId;
 
       // Check if already pinned for everyone
-      if (pinType === 'everyone' && !isPinned) {
+      if (pinType === "everyone" && !isPinned) {
         // Show confirmation dialog
-        setPendingPinAction({ userId: participantUserId, type: 'local' });
+        setPendingPinAction({ userId: participantUserId, type: "local" });
         setShowPinConfirm(true);
         return;
       }
@@ -804,11 +1106,11 @@ const VideoMeeting: React.FC = () => {
         setPinType(null);
       } else {
         currentRoom.pinParticipant(participantUserId);
-        setPinType('local');
+        setPinType("local");
       }
 
       // Force re-render
-      setParticipants(prev => new Map(prev));
+      setParticipants((prev) => new Map(prev));
     } catch (error) {
       console.error("Failed to pin participant:", error);
     }
@@ -820,8 +1122,8 @@ const VideoMeeting: React.FC = () => {
 
     try {
       currentRoom.pinParticipant(pendingPinAction.userId);
-      setPinType('local');
-      setParticipants(prev => new Map(prev));
+      setPinType("local");
+      setParticipants((prev) => new Map(prev));
     } catch (error) {
       console.error("Failed to confirm pin:", error);
     } finally {
@@ -849,9 +1151,10 @@ const VideoMeeting: React.FC = () => {
       if (!localParticipant || !(localParticipant as any).publisher) return;
 
       const publisher = (localParticipant as any).publisher;
-      const isPinned = currentRoom.pinnedParticipant?.userId === participantUserId;
+      const isPinned =
+        currentRoom.pinnedParticipant?.userId === participantUserId;
 
-      if (isPinned && pinType === 'everyone') {
+      if (isPinned && pinType === "everyone") {
         // Send unpin event
         await publisher.unpinForEveryone(participant.streamId);
         setPinType(null);
@@ -859,7 +1162,7 @@ const VideoMeeting: React.FC = () => {
         // If pinned locally, this will override it
         // Send pin event
         await publisher.pinForEveryone(participant.streamId);
-        setPinType('everyone');
+        setPinType("everyone");
       }
     } catch (error) {
       console.error("Failed to pin for everyone:", error);
@@ -911,7 +1214,11 @@ const VideoMeeting: React.FC = () => {
                 }}
                 title="Pin options"
               >
-                {pinnedUserId === userId ? <MdPushPin size={16} /> : <MdOutlinePushPin size={16} />}
+                {pinnedUserId === userId ? (
+                  <MdPushPin size={16} />
+                ) : (
+                  <MdOutlinePushPin size={16} />
+                )}
               </ActionButton>
 
               <PinMenu $show={pinMenuOpen === userId}>
@@ -1019,11 +1326,19 @@ const VideoMeeting: React.FC = () => {
                 $isActive={isPinned}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setPinMenuOpen(pinMenuOpen === participant.userId ? null : participant.userId);
+                  setPinMenuOpen(
+                    pinMenuOpen === participant.userId
+                      ? null
+                      : participant.userId
+                  );
                 }}
                 title="Pin options"
               >
-                {isPinned ? <MdPushPin size={16} /> : <MdOutlinePushPin size={16} />}
+                {isPinned ? (
+                  <MdPushPin size={16} />
+                ) : (
+                  <MdOutlinePushPin size={16} />
+                )}
               </ActionButton>
 
               <PinMenu $show={pinMenuOpen === participant.userId}>
@@ -1035,7 +1350,7 @@ const VideoMeeting: React.FC = () => {
                   }}
                 >
                   <MdPushPin size={14} />
-                  Pin locally {pinType === 'local' && isPinned && '✓'}
+                  Pin locally {pinType === "local" && isPinned && "✓"}
                 </PinMenuItem>
                 <PinMenuItem
                   $disabled={!isHost}
@@ -1048,7 +1363,10 @@ const VideoMeeting: React.FC = () => {
                   }}
                 >
                   <MdPushPin size={14} />
-                  Pin for everyone {pinType === 'everyone' && isPinned && '✓'} {!isHost && "(Host only)"}
+                  Pin for everyone {pinType === "everyone" &&
+                    isPinned &&
+                    "✓"}{" "}
+                  {!isHost && "(Host only)"}
                 </PinMenuItem>
               </PinMenu>
             </PinButtonContainer>
@@ -1063,37 +1381,127 @@ const VideoMeeting: React.FC = () => {
       {/* Login Section */}
       {!isConnected && (
         <LoginSection>
-          <h2>Join Meeting</h2>
-          <Input
-            type="email"
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-            placeholder="Enter your email"
-          />
-          <Button onClick={handleLogin} disabled={isLoading}>
-            {isLoading ? "Connecting..." : "Connect"}
-          </Button>
+          <SectionTitle>Authentication</SectionTitle>
+          <InlineFormGroup>
+            <FormGroup style={{ marginBottom: 0, flex: 1 }}>
+              <Label htmlFor="userEmail">Email Address</Label>
+              <Input
+                id="userEmail"
+                type="email"
+                value={userId}
+                onChange={(e) => setUserId(e.target.value)}
+                placeholder="Enter your email address"
+              />
+            </FormGroup>
+            <Button onClick={handleLogin} disabled={isLoading}>
+              {isLoading ? "Connecting..." : "Connect"}
+            </Button>
+          </InlineFormGroup>
         </LoginSection>
       )}
 
-      {/* Room Join Section */}
+      {/* Room Management Section */}
       {isConnected && !isInRoom && (
-        <LoginSection>
-          <h2>Enter Room</h2>
-          <Input
-            type="text"
-            value={roomCode}
-            onChange={(e) => setRoomCode(e.target.value)}
-            placeholder="Enter room code"
-            onKeyPress={(e) => e.key === "Enter" && handleJoinRoom()}
-          />
-          <Button onClick={handleJoinRoom} disabled={isLoading}>
-            {isLoading ? "Joining..." : "Join Room"}
-          </Button>
-        </LoginSection>
-      )}
+        <SectionsContainer>
+          {/* Create Room Section */}
+          <LoginSection>
+            <SectionTitle>Create New Room</SectionTitle>
+            <InlineFormGroup>
+              <FormGroup style={{ marginBottom: 0, flex: 1 }}>
+                <Label htmlFor="roomName">Room Name *</Label>
+                <Input
+                  id="roomName"
+                  type="text"
+                  value={roomName}
+                  onChange={(e) => setRoomName(e.target.value)}
+                  placeholder="Enter room name"
+                  onKeyPress={(e) => e.key === "Enter" && handleCreateRoom()}
+                />
+              </FormGroup>
+              <Button onClick={handleCreateRoom} disabled={isLoading || !roomName.trim()}>
+                {isLoading ? "Creating..." : "Create & Join Room"}
+              </Button>
+            </InlineFormGroup>
+          </LoginSection>
 
-      <VideoContainer>
+          {/* Join Room Section */}
+          <LoginSection>
+            <SectionTitle>Join Existing Room</SectionTitle>
+            <InlineFormGroup>
+              <FormGroup style={{ marginBottom: 0, flex: 1 }}>
+                <Label htmlFor="roomCode">Room Code *</Label>
+                <Input
+                  id="roomCode"
+                  type="text"
+                  value={roomCode}
+                  onChange={(e) => setRoomCode(e.target.value)}
+                  placeholder="Enter room code (e.g., 5fay-jmyt-jvqn)"
+                  onKeyPress={(e) => e.key === "Enter" && handleJoinRoom()}
+                />
+              </FormGroup>
+              <Button onClick={handleJoinRoom} disabled={isLoading || !roomCode.trim()}>
+                {isLoading ? "Joining..." : "Join Room"}
+              </Button>
+            </InlineFormGroup>
+          </LoginSection>
+
+          {/* Available Rooms Section */}
+          <LoginSection>
+            <SectionTitle style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              Available Rooms
+              <RefreshButton
+                onClick={handleGetRoomList}
+                disabled={isLoadingRooms}
+              >
+                {isLoadingRooms ? "Loading..." : "Refresh"}
+              </RefreshButton></SectionTitle>
+
+
+            <RoomList>
+              {availableRooms.length === 0 ? (
+                <EmptyState>
+                  {isLoadingRooms ? "Loading rooms..." : "No rooms available. Click 'Refresh Room List' to check again."}
+                </EmptyState>
+              ) : (
+                availableRooms.map((room, index) => (
+                  <RoomItem key={room.id || index}>
+                    <RoomInfo>
+                      <RoomTitle>{room.room_name || `Room ${index + 1}`}</RoomTitle>
+                      <div>
+                        {room.room_type === 'main' && (
+                          <RoomCode>{room.room_code}</RoomCode>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                        <span style={{
+                          fontSize: '11px',
+                          padding: '2px 6px',
+                          borderRadius: '10px',
+                          backgroundColor: room.room_type === 'main' ? '#e3f2fd' : '#f3e5f5',
+                          color: room.room_type === 'main' ? '#1976d2' : '#7b1fa2',
+                          fontWeight: '500',
+                          textTransform: 'uppercase'
+                        }}>
+                          {room.room_type || 'unknown'}
+                        </span>
+                      </div>
+                      <RoomCreator>
+                        Created by: {room.user_id || 'Unknown'}
+                      </RoomCreator>
+                    </RoomInfo>
+                    <SmallButton
+                      onClick={() => handleJoinRoomFromList(room)}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? "Joining..." : "Join"}
+                    </SmallButton>
+                  </RoomItem>
+                ))
+              )}
+            </RoomList>
+          </LoginSection>
+        </SectionsContainer>
+      )}      <VideoContainer style={{ display: isInRoom ? 'block' : 'none' }}>
         <MainVideoStyled $totalParticipants={participants.size}>
           {renderParticipantVideos()}
         </MainVideoStyled>
@@ -1132,6 +1540,13 @@ const VideoMeeting: React.FC = () => {
             </ControlButton>
 
             <ControlButton
+              onClick={() => setShowBreakoutPopup(true)}
+              title="Create Breakout Rooms"
+            >
+              <MdGroups size={20} />
+            </ControlButton>
+
+            <ControlButton
               variant="leave"
               onClick={handleLeaveRoom}
               title="Leave room"
@@ -1148,8 +1563,8 @@ const VideoMeeting: React.FC = () => {
           <ConfirmBox onClick={(e) => e.stopPropagation()}>
             <ConfirmTitle>Confirm Pin Change</ConfirmTitle>
             <ConfirmMessage>
-              This participant is currently pinned for everyone by the host.
-              Do you want to override this and pin locally instead?
+              This participant is currently pinned for everyone by the host. Do
+              you want to override this and pin locally instead?
             </ConfirmMessage>
             <ConfirmButtons>
               <ConfirmButton variant="secondary" onClick={cancelPinConfirm}>
@@ -1162,6 +1577,14 @@ const VideoMeeting: React.FC = () => {
           </ConfirmBox>
         </ConfirmDialog>
       )}
+
+      <SubRoomPopup
+        isOpen={showBreakoutPopup}
+        onClose={() => setShowBreakoutPopup(false)}
+        participants={Array.from(participants.values())}
+        currentRoom={currentRoom}
+        client={clientRef.current}
+      />
     </Container>
   );
 };

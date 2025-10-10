@@ -125,12 +125,8 @@ class ApiClient {
   /**
    * Create a sub room
    */
-  async createSubRoom(parentRoomId, subRoomName, subRoomType = "breakout") {
-    return await this.apiCall("/rooms", "POST", {
-      room_name: subRoomName,
-      room_type: subRoomType,
-      parent_room_id: parentRoomId,
-    });
+  async createSubRoom({ mainRoomId, rooms }) {
+    return await this.apiCall("/rooms", "POST", { main_room_id: mainRoomId, rooms });
   }
 
   /**
@@ -144,10 +140,7 @@ class ApiClient {
    * Leave a room
    */
   async leaveRoom(roomId, membershipId) {
-    return await this.apiCall(
-      `/rooms/${roomId}/members/${membershipId}`,
-      "DELETE"
-    );
+    return await this.apiCall(`/rooms/${roomId}/members/${membershipId}`, "DELETE");
   }
 
   /**

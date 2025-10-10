@@ -64,9 +64,7 @@ class Room extends EventEmitter {
       this.streamId = joinResponse.stream_id;
 
       // Get room details and members
-      const roomDetails = await this.apiClient.getRoomById(
-        joinResponse.room_id
-      );
+      const roomDetails = await this.apiClient.getRoomById(joinResponse.room_id);
       console.log("Joined room, details:", roomDetails);
 
       // Update room info
@@ -134,18 +132,14 @@ class Room extends EventEmitter {
       this.emit("creatingSubRoom", { room: this, config });
 
       // Create sub room via API
-      const subRoomData = await this.apiClient.createSubRoom(
-        this.id,
-        config.name,
-        config.type || "breakout"
-      );
+      const subRoomData = await this.apiClient.createSubRoom(config);
 
       // Create sub room instance
       const subRoom = new Room({
         id: subRoomData.id,
         name: subRoomData.room_name,
         code: subRoomData.room_code,
-        type: config.type || "breakout",
+        type: "breakout",
         parentRoomId: this.id,
         ownerId: subRoomData.user_id,
         apiClient: this.apiClient,
@@ -208,10 +202,7 @@ class Room extends EventEmitter {
       this.emit("switchingToSubRoom", { room: this, subRoomCode });
 
       // Switch via API
-      const switchResponse = await this.apiClient.switchToSubRoom(
-        this.id,
-        subRoomCode
-      );
+      const switchResponse = await this.apiClient.switchToSubRoom(this.id, subRoomCode);
 
       // Cleanup current media connections but keep participants
       await this._cleanupMediaConnections();
@@ -642,9 +633,7 @@ class Room extends EventEmitter {
       framerate: 30,
       bitrate: 1_500_000,
       onStatusUpdate: (msg, isError) => {
-        this.localParticipant.setConnectionStatus(
-          isError ? "failed" : "connected"
-        );
+        this.localParticipant.setConnectionStatus(isError ? "failed" : "connected");
       },
       onServerEvent: async (event) => {
         await this._handleServerEvent(event);
