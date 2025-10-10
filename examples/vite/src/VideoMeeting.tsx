@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from "react";
+import {useEffect, useState} from "react";
 import {
   MdCallEnd,
   MdMic,
@@ -8,6 +8,7 @@ import {
   MdPushPin,
   MdVideocam,
   MdVideocamOff,
+  MdSettings,
 } from "react-icons/md";
 import {
   ActionButton,
@@ -15,6 +16,11 @@ import {
   Container,
   ControlButton,
   ControlsContainer,
+  DeviceGroup,
+  DeviceLabel,
+  DeviceSelect,
+  DeviceSettingsPanel,
+  DeviceSettingsTitle,
   Input,
   LocalVideoOverlay,
   LoginSection,
@@ -28,31 +34,32 @@ import {
   PinMenuItem,
   VideoContainer
 } from "./VideoMeeting.styles.tsx";
-import {useErmisMeeting} from "./hooks/useErmisMeeting.ts";
+import { useErmisMeeting } from "./context";
 
-// Main Component
-export default function VideoMeeting() {
+interface VideoMeetingProps {
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+}
+
+export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
   const [userId, setUserId] = useState("tuannt20591@gmail.com");
   const [roomCode, setRoomCode] = useState("5fay-jmyt-jvqn");
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [pinMenuOpen, setPinMenuOpen] = useState<string | null>(null); // Stores participantId of open menu
-
-  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const [pinMenuOpen, setPinMenuOpen] = useState<string | null>(null);
+  const [showDeviceSettings, setShowDeviceSettings] = useState(false);
 
   const {
-    participants, remoteStreams, authenticate, joinRoom,
+    participants, remoteStreams, localStream, authenticate, joinRoom,
     videoEnabled, micEnabled, handRaised, inRoom, currentRoom,
     leaveRoom, toggleMicrophone, toggleCamera, toggleRaiseHand,
-    togglePin,
-  } = useErmisMeeting({
-    config: {
-      host: "daibo.ermis.network:9992",
-      debug: true,
-      webtpUrl: "https://daibo.ermis.network:4458/meeting/wt",
-    },
-    videoRef: localVideoRef,
-  });
+    togglePin, devices, selectedDevices, switchCamera, switchMicrophone,
+  } = useErmisMeeting();
+
+  useEffect(() => {
+    if (videoRef?.current && localStream) {
+      videoRef.current.srcObject = localStream;
+    }
+  }, [videoRef, localStream]);
 
   // Close pin menu when clicking outside
   useEffect(() => {
@@ -97,7 +104,7 @@ export default function VideoMeeting() {
   const renderParticipantVideos = () => {
     const totalParticipants = participants.size + 1; // +1 for local user
     const remoteParticipantsList = Array.from(participants.values()).filter(
-      (p) => !p.isLocal
+      (p: any) => !p.isLocal
     );
 
     const isHost = currentRoom?.localParticipant?.role === "owner";
@@ -110,7 +117,7 @@ export default function VideoMeeting() {
           key="local"
           $isPinned={pinnedUserId === userId}
         >
-          <video ref={localVideoRef} autoPlay playsInline muted/>
+          <video ref={videoRef} autoPlay playsInline muted/>
           {!videoEnabled && (
             <LocalVideoOverlay>
               <MdVideocamOff/>
@@ -173,7 +180,7 @@ export default function VideoMeeting() {
         role: currentRoom?.localParticipant?.role,
         stream: null,
       },
-      ...remoteParticipantsList.map((p) => ({
+      ...remoteParticipantsList.map((p: any) => ({
         ...p,
         stream: remoteStreams.get(p.userId),
       })),
@@ -193,7 +200,7 @@ export default function VideoMeeting() {
             muted={participant.isLocal}
             ref={
               participant.isLocal
-                ? localVideoRef
+                ? videoRef
                 : (videoElement) => {
                   if (videoElement && participant.stream) {
                     videoElement.srcObject = participant.stream;
@@ -339,6 +346,14 @@ export default function VideoMeeting() {
             </ControlButton>
 
             <ControlButton
+              $isActive={showDeviceSettings}
+              onClick={() => setShowDeviceSettings(!showDeviceSettings)}
+              title="Device settings"
+            >
+              <MdSettings size={20}/>
+            </ControlButton>
+
+            <ControlButton
               variant="leave"
               onClick={leaveRoom}
               title="Leave room"
@@ -346,6 +361,42 @@ export default function VideoMeeting() {
               <MdCallEnd size={20}/>
             </ControlButton>
           </ControlsContainer>
+        )}
+
+        {inRoom && (
+          <DeviceSettingsPanel $show={showDeviceSettings}>
+            <DeviceSettingsTitle>Device Settings</DeviceSettingsTitle>
+
+            <DeviceGroup>
+              <DeviceLabel>Camera</DeviceLabel>
+              <DeviceSelect
+                value={selectedDevices?.camera || ''}
+                onChange={(e) => switchCamera(e.target.value)}
+                disabled={!videoEnabled}
+              >
+                {devices?.cameras?.map((camera: any) => (
+                  <option key={camera.deviceId} value={camera.deviceId}>
+                    {camera.label}
+                  </option>
+                ))}
+              </DeviceSelect>
+            </DeviceGroup>
+
+            <DeviceGroup>
+              <DeviceLabel>Microphone</DeviceLabel>
+              <DeviceSelect
+                value={selectedDevices?.microphone || ''}
+                onChange={(e) => switchMicrophone(e.target.value)}
+                disabled={!micEnabled}
+              >
+                {devices?.microphones?.map((mic: any) => (
+                  <option key={mic.deviceId} value={mic.deviceId}>
+                    {mic.label}
+                  </option>
+                ))}
+              </DeviceSelect>
+            </DeviceGroup>
+          </DeviceSettingsPanel>
         )}
       </VideoContainer>
     </Container>

@@ -1,22 +1,22 @@
+import { useRef } from 'react'
+import { ErmisClassroomProvider } from './context'
 import VideoMeeting from './VideoMeeting'
 import './App.css'
 
-
 function App() {
-
-  // const onJoinRoom = async () => {
-  //   try {
-  //     await client.authenticate("tuannt20591@gmail.com");
-  //     await client.joinRoom("5faf-bgj5-mhsy");
-  //   } catch (error) {
-  //     console.error('Failed to join room:', error);
-  //   }
-  // }
+  const videoRef = useRef<HTMLVideoElement>(null)
 
   return (
-    <>
-      <VideoMeeting />
-    </>
+    <ErmisClassroomProvider
+      config={{
+        host: "daibo.ermis.network:9992",
+        debug: true,
+        webtpUrl: "https://daibo.ermis.network:4458/meeting/wt",
+      }}
+      videoRef={videoRef}
+    >
+      <VideoMeeting videoRef={videoRef} />
+    </ErmisClassroomProvider>
   )
 }
 

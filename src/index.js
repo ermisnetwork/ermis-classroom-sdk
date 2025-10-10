@@ -9,6 +9,7 @@ import SubRoom from "./core/SubRoom.js";
 import Participant from "./core/Participant.js";
 import ApiClient from "./api/ApiClient.js";
 import EventEmitter from "./events/EventEmitter.js";
+import MediaDeviceManager from "./media/MediaDeviceManager.js";
 
 /**
  * SDK Version
@@ -124,11 +125,12 @@ class ErmisClassroom {
   /**
    * Media device utilities
    */
+  static createMediaDeviceManager() {
+    return new MediaDeviceManager();
+  }
+
   static get MediaDevices() {
     return {
-      /**
-       * Get available media devices
-       */
       async getDevices() {
         if (!navigator.mediaDevices?.enumerateDevices) {
           throw new Error("Media devices not supported");
@@ -143,9 +145,6 @@ class ErmisClassroom {
         };
       },
 
-      /**
-       * Get user media with constraints
-       */
       async getUserMedia(constraints = { video: true, audio: true }) {
         if (!navigator.mediaDevices?.getUserMedia) {
           throw new Error("getUserMedia not supported");
@@ -154,9 +153,6 @@ class ErmisClassroom {
         return await navigator.mediaDevices.getUserMedia(constraints);
       },
 
-      /**
-       * Check for media permissions
-       */
       async checkPermissions() {
         const permissions = {};
 
@@ -215,12 +211,14 @@ class ErmisClassroom {
   }
 }
 
-/**
- * Named exports for individual classes
- */
-export { ErmisClient, Room, SubRoom, Participant, ApiClient, EventEmitter };
+export {
+  ErmisClient,
+  Room,
+  SubRoom,
+  Participant,
+  ApiClient,
+  EventEmitter,
+  MediaDeviceManager
+};
 
-/**
- * Default export - Main SDK class
- */
 export default ErmisClassroom;
