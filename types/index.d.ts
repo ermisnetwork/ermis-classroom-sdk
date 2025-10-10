@@ -251,6 +251,12 @@ export declare class Participant extends EventEmitter {
   setPublisher(publisher: any): void;
   setSubscriber(subscriber: any): void;
   updateMediaStream(newStream: MediaStream): void;
+  replaceMediaStream(newStream: MediaStream): Promise<{
+    stream: MediaStream;
+    videoOnlyStream: MediaStream;
+    hasVideo: boolean;
+    hasAudio: boolean;
+  }>;
   cleanup(): void;
   getDisplayName(): string;
   getInfo(): ParticipantInfo;
@@ -341,7 +347,7 @@ export declare class ErmisClient extends EventEmitter {
   manualAuthenticate(userId: string, token: string): void;
   logout(): Promise<void>;
   createRoom(config: RoomConfig): Promise<Room>;
-  joinRoom(roomCode: string): Promise<JoinResult>;
+  joinRoom(roomCode: string, mediaStream?: MediaStream): Promise<JoinResult>;
   leaveRoom(): Promise<void>;
   getRooms(options?: any): Promise<RoomInfo[]>;
   createSubRoom(config: SubRoomConfig): Promise<SubRoom>;

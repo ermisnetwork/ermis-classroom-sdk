@@ -17,6 +17,7 @@ export default class Publisher extends EventEmitter {
     this.publishUrl = options.publishUrl;
     this.streamType = options.streamType || "camera"; // 'camera' or 'display'
     this.streamId = options.streamId || "test_stream";
+    this.preConfiguredStream = options.mediaStream || null;
 
     // Video configuration
     this.currentConfig = {
@@ -38,6 +39,9 @@ export default class Publisher extends EventEmitter {
     this.stream = null;
     this.audioProcessor = null;
     this.videoProcessor = null;
+    this.videoReader = null;
+    this.screenVideoProcessor = null;
+    this.screenVideoReader = null;
     this.webTransport = null;
     this.isChannelOpen = false;
     this.sequenceNumber = 0;
@@ -437,7 +441,103 @@ export default class Publisher extends EventEmitter {
     }
   }
 
+  async replaceMediaStream(newStream) {
+    if (!this.isPublishing) {
+      throw new Error("Not currently publishing");
+    }
+
+    if (!newStream || !(newStream instanceof MediaStream)) {
+      throw new Error("Invalid MediaStream provided");
+    }
+
+    try {
+      console.log('[Publisher] Replacing media stream...');
+      this.onStatusUpdate("Replacing media stream...");
+
+      const hasVideo = newStream.getVideoTracks().length > 0;
+      const hasAudio = newStream.getAudioTracks().length > 0;
+
+      if (!hasVideo && !hasAudio) {
+        throw new Error("MediaStream has no tracks");
+      }
+
+      const wasVideoActive = this.hasCamera && this.cameraEnabled;
+      const wasAudioActive = this.hasMic && this.micEnabled;
+
+      if (wasVideoActive && hasVideo) {
+        console.log('[Publisher] Stopping video processing...');
+        await this.stopVideoProcessing();
+      }
+
+      if (wasAudioActive && hasAudio) {
+        console.log('[Publisher] Stopping audio processing...');
+        await this.stopAudioProcessing();
+      }
+
+      const oldStream = this.stream;
+      this.stream = newStream;
+
+      this.hasCamera = hasVideo;
+      this.hasMic = hasAudio;
+      this.cameraEnabled = hasVideo;
+      this.micEnabled = hasAudio;
+
+      if (hasVideo) {
+        console.log('[Publisher] Starting video capture with new stream...');
+        await this.startVideoCapture();
+      }
+
+      if (hasAudio) {
+        console.log('[Publisher] Starting audio streaming with new stream...');
+        this.audioProcessor = await this.startOpusAudioStreaming();
+      }
+
+      if (oldStream) {
+        console.log('[Publisher] Cleaning up old stream...');
+        oldStream.getTracks().forEach(track => track.stop());
+      }
+
+      const videoOnlyStream = new MediaStream();
+      if (hasVideo) {
+        videoOnlyStream.addTrack(newStream.getVideoTracks()[0]);
+      }
+
+      this.emit("mediaStreamReplaced", {
+        stream: this.stream,
+        videoOnlyStream,
+        hasVideo,
+        hasAudio
+      });
+
+      console.log('[Publisher] Media stream replaced successfully');
+      this.onStatusUpdate("Media stream replaced successfully");
+
+      return { stream: this.stream, videoOnlyStream, hasVideo, hasAudio };
+    } catch (error) {
+      console.error('[Publisher] Failed to replace media stream:', error);
+      this.onStatusUpdate(`Failed to replace media stream: ${error.message}`, true);
+      throw error;
+    }
+  }
+
   async stopVideoProcessing() {
+    if (this.videoReader) {
+      try {
+        await this.videoReader.cancel();
+        this.videoReader = null;
+      } catch (error) {
+        console.warn("Error canceling video reader:", error);
+      }
+    }
+
+    if (this.videoProcessor) {
+      try {
+        this.videoProcessor = null;
+      } catch (error) {
+        console.warn("Error stopping video processor:", error);
+      }
+    }
+
     if (this.videoEncoders && this.videoEncoders.size > 0) {
       this.videoEncoders.forEach((encoderObj) => {
         try {
@@ -449,14 +549,6 @@ export default class Publisher extends EventEmitter {
         }
       });
       this.videoEncoders.clear();
-    }
-
-    if (this.videoProcessor) {
-      try {
-        this.videoProcessor = null;
-      } catch (error) {
-        console.warn("Error stopping video processor:", error);
-      }
     }
   }
 
@@ -534,6 +626,37 @@ export default class Publisher extends EventEmitter {
   }
 
   async getMediaStream(deviceIds = {}) {
+    if (this.preConfiguredStream) {
+      this.stream = this.preConfiguredStream;
+      console.log('Using pre-configured media stream');
+
+      const audioTracks = this.stream.getAudioTracks();
+      const videoTracks = this.stream.getVideoTracks();
+      this.hasMic = audioTracks.length > 0;
+      this.hasCamera = videoTracks.length > 0;
+      this.micEnabled = this.hasMic;
+      this.cameraEnabled = this.hasCamera;
+
+      console.log(`Pre-configured stream - Video: ${this.hasCamera}, Audio: ${this.hasMic}`);
+
+      const videoOnlyStream = new MediaStream();
+      if (videoTracks.length > 0) {
+        videoOnlyStream.addTrack(videoTracks[0]);
+      }
+
+      this.emit("localStreamReady", {
+        stream: this.stream,
+        videoOnlyStream: videoOnlyStream,
+        streamType: this.streamType,
+        streamId: this.streamId,
+        config: this.currentConfig,
+        hasAudio: audioTracks.length > 0,
+        hasVideo: videoTracks.length > 0,
+      });
+
+      return;
+    }
+
     if (this.streamType === "camera") {
       const constraints = {};
 
@@ -949,8 +1072,8 @@ export default class Publisher extends EventEmitter {
       true
     );
 
-    const reader = this.videoProcessor.readable.getReader();
-    console.log("Video processor reader created:", reader);
+    this.videoReader = this.videoProcessor.readable.getReader();
+    console.log("Video processor reader created:", this.videoReader);
 
     let frameCounter = 0;
 
@@ -962,7 +1085,7 @@ export default class Publisher extends EventEmitter {
     (async () => {
       try {
         while (this.isPublishing) {
-          const result = await reader.read();
+          const result = await this.videoReader.read();
 
           if (result.done) break;
 
@@ -1362,7 +1485,7 @@ export default class Publisher extends EventEmitter {
         true
       );
 
-      const reader = this.screenVideoProcessor.readable.getReader();
+      this.screenVideoReader = this.screenVideoProcessor.readable.getReader();
       let frameCounter = 0;
 
       // Handle video track ending
@@ -1374,7 +1497,7 @@ export default class Publisher extends EventEmitter {
       (async () => {
         try {
           while (this.isScreenSharing) {
-            const result = await reader.read();
+            const result = await this.screenVideoReader.read();
             if (result.done) break;
 
             const frame = result.value;
@@ -1431,6 +1554,21 @@ export default class Publisher extends EventEmitter {
         sender_stream_id: this.streamId,
       };
       await this.sendEvent(stopEvent);
+
+      // Cancel screen video reader first
+      if (this.screenVideoReader) {
+        try {
+          await this.screenVideoReader.cancel();
+          this.screenVideoReader = null;
+        } catch (error) {
+          console.warn("Error canceling screen video reader:", error);
+        }
+      }
+
+      // Stop screen video processor
+      if (this.screenVideoProcessor) {
+        this.screenVideoProcessor = null;
+      }
 
       // Stop and close video encoder
       if (this.screenVideoEncoder && this.screenVideoEncoder.encoder) {

@@ -19,6 +19,7 @@ interface ErmisClassroomProviderProps {
 
 export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, children }: ErmisClassroomProviderProps) => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
 
   const cfg = useMemo(
     () => ({
@@ -309,10 +310,10 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     await client.authenticate(userIdToAuth);
   }, []);
 
-  const joinRoom = useCallback(async (code: string) => {
+  const joinRoom = useCallback(async (code: string, customStream?: MediaStream) => {
     const client = clientRef.current;
     if (!client) throw new Error('Client not initialized');
-    const result = await client.joinRoom(code);
+    const result = await client.joinRoom(code, customStream);
     setCurrentRoom(result.room);
     setRoomCode(code);
     setInRoom(true);
@@ -329,7 +330,11 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
       });
       return map;
     });
-  }, []);
+
+    if (previewStream) {
+      setPreviewStream(null);
+    }
+  }, [previewStream]);
 
   const leaveRoom = useCallback(async () => {
     const client = clientRef.current;
@@ -449,12 +454,75 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     }
   }, [currentRoom]);
 
+  const getPreviewStream = useCallback(async (cameraId?: string, micId?: string) => {
+    try {
+      const constraints: any = {};
+
+      if (cameraId || selectedDevices?.camera) {
+        constraints.video = {
+          deviceId: { exact: cameraId || selectedDevices?.camera },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 }
+        };
+      } else {
+        constraints.video = true;
+      }
+
+      if (micId || selectedDevices?.microphone) {
+        constraints.audio = {
+          deviceId: { exact: micId || selectedDevices?.microphone },
+          echoCancellation: true,
+          noiseSuppression: true
+        };
+      } else {
+        constraints.audio = true;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      setPreviewStream(stream);
+      return stream;
+    } catch (error) {
+      console.error('Failed to get preview stream:', error);
+      throw error;
+    }
+  }, [selectedDevices]);
+
+  const stopPreviewStream = useCallback(() => {
+    if (previewStream) {
+      previewStream.getTracks().forEach(track => track.stop());
+      setPreviewStream(null);
+    }
+  }, [previewStream]);
+
+  const replaceMediaStream = useCallback(async (newStream: MediaStream) => {
+    if (!currentRoom) return;
+
+    try {
+      const local = currentRoom.localParticipant as any;
+      if (local?.publisher) {
+        const result = await local.replaceMediaStream(newStream);
+
+        if (result?.videoOnlyStream) {
+          setLocalStream(result.videoOnlyStream);
+        }
+
+        setMicEnabled(result.hasAudio);
+        setVideoEnabled(result.hasVideo);
+      }
+    } catch (error) {
+      console.error('Failed to replace media stream:', error);
+      throw error;
+    }
+  }, [currentRoom]);
+
   const value = useMemo(
     () => ({
       client: clientRef.current,
       participants,
       remoteStreams,
       localStream,
+      previewStream,
       micEnabled,
       handRaised,
       pinType,
@@ -474,11 +542,15 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
       selectedDevices,
       switchCamera,
       switchMicrophone,
+      getPreviewStream,
+      stopPreviewStream,
+      replaceMediaStream,
     }),
     [
       participants,
       remoteStreams,
       localStream,
+      previewStream,
       micEnabled,
       handRaised,
       pinType,
@@ -498,6 +570,9 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
       selectedDevices,
       switchCamera,
       switchMicrophone,
+      getPreviewStream,
+      stopPreviewStream,
+      replaceMediaStream,
     ]
   );
 
