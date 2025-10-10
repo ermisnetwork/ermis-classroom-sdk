@@ -1,22 +1,37 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ErmisClassroom, { type Participant, type Room, MediaDeviceManager } from "ermis-classroom-sdk";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ErmisClassroomContext } from './ErmisClassroomContext';
+import ErmisClassroom, { type Participant, type Room, MediaDeviceManager } from 'ermis-classroom-sdk';
 
-interface ErmisMeetingProps {
-  videoRef: React.RefObject<HTMLVideoElement | null>;
-  config: {
-    host: string;
-    debug?: boolean;
-    webtpUrl: string;
-  };
+interface ErmisClassroomConfig {
+  host: string;
+  debug?: boolean;
+  webtpUrl: string;
+  apiUrl?: string;
+  reconnectAttempts?: number;
+  reconnectDelay?: number;
 }
 
-export const useErmisMeeting = (props: ErmisMeetingProps) => {
-  const { videoRef } = props;
+interface ErmisClassroomProviderProps {
+  config: ErmisClassroomConfig;
+  videoRef?: React.RefObject<HTMLVideoElement | null>;
+  children: React.ReactNode;
+}
+
+export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, children }: ErmisClassroomProviderProps) => {
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+
   const cfg = useMemo(
-    () => ({ host: props.config.host, debug: props.config.debug, webtpUrl: props.config.webtpUrl }),
-    [props.config.host, props.config.debug, props.config.webtpUrl]
+    () => ({
+      host: config.host,
+      debug: config.debug,
+      webtpUrl: config.webtpUrl,
+      apiUrl: config.apiUrl,
+      reconnectAttempts: config.reconnectAttempts,
+      reconnectDelay: config.reconnectDelay,
+    }),
+    [config.host, config.debug, config.webtpUrl, config.apiUrl, config.reconnectAttempts, config.reconnectDelay]
   );
-  const cfgKey = useMemo(() => JSON.stringify(cfg), [cfg]); // for optional recreate
+  const cfgKey = useMemo(() => JSON.stringify(cfg), [cfg]);
 
   const [roomCode, setRoomCode] = useState<string>();
   const [userId, setUserId] = useState<string>();
@@ -36,8 +51,196 @@ export const useErmisMeeting = (props: ErmisMeetingProps) => {
   const unsubRef = useRef<(() => void)[]>([]);
 
   useEffect(() => {
+    if (initialVideoRef?.current && localStream) {
+      initialVideoRef.current.srcObject = localStream;
+    }
+  }, [initialVideoRef, localStream]);
+
+  const setupEventListeners = useCallback((client: any) => {
+    const events = ErmisClassroom.events;
+    const unsubs: (() => void)[] = [];
+
+    const on = (evt: string, handler: (...args: any[]) => void) => {
+      client.on(evt, handler);
+      if (typeof client.off === 'function') {
+        unsubs.push(() => client.off(evt, handler));
+      } else if (typeof client.removeListener === 'function') {
+        unsubs.push(() => client.removeListener(evt, handler));
+      }
+    };
+
+    on(events.LOCAL_STREAM_READY, (event: any) => {
+      if (event.videoOnlyStream) {
+        setLocalStream(event.videoOnlyStream);
+      }
+    });
+
+    on(events.REMOTE_STREAM_READY, (event: any) => {
+      setRemoteStreams(prev => {
+        const updated = new Map(prev);
+        updated.set(event.participant.userId, event.stream);
+        return updated;
+      });
+    });
+
+    on(events.ROOM_JOINED, (data: any) => {
+      console.log('ROOM_JOINED', data);
+    });
+
+    on(events.PARTICIPANT_ADDED, (data: any) => {
+      setParticipants(prev => new Map(prev.set(data.participant.userId, data.participant)));
+    });
+
+    on(events.PARTICIPANT_REMOVED, (data: any) => {
+      setParticipants(prev => {
+        const updated = new Map(prev);
+        updated.delete(data.participant.userId);
+        return updated;
+      });
+      setRemoteStreams(prev => {
+        const updated = new Map(prev);
+        updated.delete(data.participant.userId);
+        return updated;
+      });
+    });
+
+    on(events.ROOM_LEFT, (data: any) => {
+      console.log('ROOM_LEFT', data);
+    });
+
+    on(events.REMOTE_AUDIO_STATUS_CHANGED, (data: any) => {
+      setParticipants(prev => {
+        const updated = new Map(prev);
+        const p = updated.get(data.participant.userId);
+        if (p) {
+          p.isAudioEnabled = data.enabled;
+          updated.set(data.participant.userId, p);
+        }
+        return updated;
+      });
+    });
+
+    on(events.REMOTE_VIDEO_STATUS_CHANGED, (data: any) => {
+      setParticipants(prev => {
+        const updated = new Map(prev);
+        const p = updated.get(data.participant.userId);
+        if (p) {
+          p.isVideoEnabled = data.enabled;
+          updated.set(data.participant.userId, p);
+        }
+        return updated;
+      });
+    });
+
+    on('audioToggled', (data: any) => {
+      if (data.participant.isLocal) {
+        setMicEnabled(data.enabled);
+        setParticipants(prev => {
+          const updated = new Map(prev);
+          const p = updated.get(data.participant.userId);
+          if (p) {
+            p.isAudioEnabled = data.enabled;
+            updated.set(data.participant.userId, p);
+          }
+          return updated;
+        });
+      }
+    });
+
+    on('videoToggled', (data: any) => {
+      if (data.participant.isLocal) {
+        setVideoEnabled(data.enabled);
+        setParticipants(prev => {
+          const updated = new Map(prev);
+          const p = updated.get(data.participant.userId);
+          if (p) {
+            p.isVideoEnabled = data.enabled;
+            updated.set(data.participant.userId, p);
+          }
+          return updated;
+        });
+      }
+    });
+
+    on('handRaiseToggled', (data: any) => {
+      if (data.participant.isLocal) {
+        setHandRaised(data.enabled);
+        setParticipants(prev => {
+          const updated = new Map(prev);
+          const p = updated.get(data.participant.userId);
+          if (p) {
+            p.isHandRaised = data.enabled;
+            updated.set(data.participant.userId, p);
+          }
+          return updated;
+        });
+      }
+    });
+
+    on(events.SCREEN_SHARE_STARTED, (data: any) => {
+      console.log('SCREEN_SHARE_STARTED', data);
+    });
+    
+    on(events.SCREEN_SHARE_STOPPED, (data: any) => {
+      console.log('SCREEN_SHARE_STOPPED', data);
+    });
+
+    on(events.REMOTE_SCREEN_SHARE_STARTED, (data: any) => {
+      setParticipants(prev => {
+        const updated = new Map(prev);
+        const p = updated.get(data.participant.userId);
+        if (p) {
+          (p as any).isScreenSharing = true;
+          updated.set(data.participant.userId, p);
+        }
+        return updated;
+      });
+    });
+
+    on(events.REMOTE_SCREEN_SHARE_STOPPED, (data: any) => {
+      setParticipants(prev => {
+        const updated = new Map(prev);
+        const p = updated.get(data.participant.userId);
+        if (p) {
+          (p as any).isScreenSharing = false;
+          updated.set(data.participant.userId, p);
+        }
+        return updated;
+      });
+    });
+
+    on(events.PARTICIPANT_PINNED_FOR_EVERYONE, () => {
+      setPinType('everyone');
+      setParticipants(prev => new Map(prev));
+    });
+
+    on(events.PARTICIPANT_UNPINNED_FOR_EVERYONE, () => {
+      setPinType(null);
+      setParticipants(prev => new Map(prev));
+    });
+
+    on(events.REMOTE_HAND_RAISING_STATUS_CHANGED, (data: any) => {
+      setParticipants(prev => {
+        const updated = new Map(prev);
+        const p = updated.get(data.participant.userId);
+        if (p) {
+          p.isHandRaised = data.raised;
+          updated.set(data.participant.userId, p);
+        }
+        return updated;
+      });
+    });
+
+    on(events.ERROR, (data: any) => {
+      console.error(`SDK Error in ${data.action}:`, data.error?.message);
+    });
+
+    return unsubs;
+  }, []);
+
+  useEffect(() => {
     if (clientRef.current) {
-      if (typeof clientRef.current.updateConfig === "function") {
+      if (typeof clientRef.current.updateConfig === 'function') {
         clientRef.current.updateConfig(cfg);
         return;
       }
@@ -67,7 +270,7 @@ export const useErmisMeeting = (props: ErmisMeetingProps) => {
       } catch {}
       clientRef.current = null;
     };
-  }, [cfgKey]);
+  }, [cfgKey, setupEventListeners]);
 
   useEffect(() => {
     const initDeviceManager = async () => {
@@ -99,197 +302,16 @@ export const useErmisMeeting = (props: ErmisMeetingProps) => {
     };
   }, []);
 
-  const setupEventListeners = useCallback((client: any) => {
-    const events = ErmisClassroom.events;
-    const unsubs: (() => void)[] = [];
-
-    const on = (evt: string, handler: (...args: any[]) => void) => {
-      client.on(evt, handler);
-      if (typeof client.off === "function") {
-        unsubs.push(() => client.off(evt, handler));
-      } else if (typeof client.removeListener === "function") {
-        unsubs.push(() => client.removeListener(evt, handler));
-      }
-    };
-
-    on(events.LOCAL_STREAM_READY, (event: any) => {
-      if (videoRef.current && event.videoOnlyStream) {
-        (videoRef.current as any).srcObject = event.videoOnlyStream;
-      }
-    });
-
-    on(events.REMOTE_STREAM_READY, (event: any) => {
-      setRemoteStreams(prev => {
-        const updated = new Map(prev);
-        updated.set(event.participant.userId, event.stream);
-        return updated;
-      });
-    });
-
-    on(events.ROOM_JOINED, (data: any) => {
-      console.log("ROOM_JOINED", data);
-    });
-
-    on(events.PARTICIPANT_ADDED, (data: any) => {
-      setParticipants(prev => new Map(prev.set(data.participant.userId, data.participant)));
-    });
-
-    on(events.PARTICIPANT_REMOVED, (data: any) => {
-      setParticipants(prev => {
-        const updated = new Map(prev);
-        updated.delete(data.participant.userId);
-        return updated;
-      });
-      setRemoteStreams(prev => {
-        const updated = new Map(prev);
-        updated.delete(data.participant.userId);
-        return updated;
-      });
-    });
-
-    on(events.ROOM_LEFT, (data: any) => {
-      console.log("ROOM_LEFT", data);
-    });
-
-    on(events.REMOTE_AUDIO_STATUS_CHANGED, (data: any) => {
-      setParticipants(prev => {
-        const updated = new Map(prev);
-        const p = updated.get(data.participant.userId);
-        if (p) {
-          p.isAudioEnabled = data.enabled;
-          updated.set(data.participant.userId, p);
-        }
-        return updated;
-      });
-    });
-
-    on(events.REMOTE_VIDEO_STATUS_CHANGED, (data: any) => {
-      setParticipants(prev => {
-        const updated = new Map(prev);
-        const p = updated.get(data.participant.userId);
-        if (p) {
-          p.isVideoEnabled = data.enabled;
-          updated.set(data.participant.userId, p);
-        }
-        return updated;
-      });
-    });
-
-    on("audioToggled", (data: any) => {
-      if (data.participant.isLocal) {
-        setMicEnabled(data.enabled);
-        setParticipants(prev => {
-          const updated = new Map(prev);
-          const p = updated.get(data.participant.userId);
-          if (p) {
-            p.isAudioEnabled = data.enabled;
-            updated.set(data.participant.userId, p);
-          }
-          return updated;
-        });
-      }
-    });
-
-    on("videoToggled", (data: any) => {
-      if (data.participant.isLocal) {
-        setVideoEnabled(data.enabled); // <-- fix: was setting mic state before
-        setParticipants(prev => {
-          const updated = new Map(prev);
-          const p = updated.get(data.participant.userId);
-          if (p) {
-            p.isVideoEnabled = data.enabled;
-            updated.set(data.participant.userId, p);
-          }
-          return updated;
-        });
-      }
-    });
-
-    on("handRaiseToggled", (data: any) => {
-      if (data.participant.isLocal) {
-        setHandRaised(data.enabled);
-        setParticipants(prev => {
-          const updated = new Map(prev);
-          const p = updated.get(data.participant.userId);
-          if (p) {
-            p.isHandRaised = data.enabled;
-            updated.set(data.participant.userId, p);
-          }
-          return updated;
-        });
-      }
-    });
-
-    on(events.SCREEN_SHARE_STARTED, (data: any) => {
-      console.log("SCREEN_SHARE_STARTED", data);
-    });
-    on(events.SCREEN_SHARE_STOPPED, (data: any) => {
-      console.log("SCREEN_SHARE_STOPPED", data);
-    });
-
-    on(events.REMOTE_SCREEN_SHARE_STARTED, (data: any) => {
-      setParticipants(prev => {
-        const updated = new Map(prev);
-        const p = updated.get(data.participant.userId);
-        if (p) {
-          (p as any).isScreenSharing = true;
-          updated.set(data.participant.userId, p);
-        }
-        return updated;
-      });
-    });
-
-    on(events.REMOTE_SCREEN_SHARE_STOPPED, (data: any) => {
-      setParticipants(prev => {
-        const updated = new Map(prev);
-        const p = updated.get(data.participant.userId);
-        if (p) {
-          (p as any).isScreenSharing = false;
-          updated.set(data.participant.userId, p);
-        }
-        return updated;
-      });
-    });
-
-    on(events.PARTICIPANT_PINNED_FOR_EVERYONE, () => {
-      setPinType("everyone");
-      setParticipants(prev => new Map(prev));
-    });
-
-    on(events.PARTICIPANT_UNPINNED_FOR_EVERYONE, () => {
-      setPinType(null);
-      setParticipants(prev => new Map(prev));
-    });
-
-    on(events.REMOTE_HAND_RAISING_STATUS_CHANGED, (data: any) => {
-      setParticipants(prev => {
-        const updated = new Map(prev);
-        const p = updated.get(data.participant.userId);
-        if (p) {
-          p.isHandRaised = data.raised;
-          updated.set(data.participant.userId, p);
-        }
-        return updated;
-      });
-    });
-
-    on(events.ERROR, (data: any) => {
-      console.error(`SDK Error in ${data.action}:`, data.error?.message);
-    });
-
-    return unsubs;
-  }, [videoRef]);
-
   const authenticate = useCallback(async (userIdToAuth: string) => {
     const client = clientRef.current;
-    if (!client) throw new Error("Client not initialized");
+    if (!client) throw new Error('Client not initialized');
     setUserId(userIdToAuth);
     await client.authenticate(userIdToAuth);
   }, []);
 
   const joinRoom = useCallback(async (code: string) => {
     const client = clientRef.current;
-    if (!client) throw new Error("Client not initialized");
+    if (!client) throw new Error('Client not initialized');
     const result = await client.joinRoom(code);
     setCurrentRoom(result.room);
     setRoomCode(code);
@@ -364,7 +386,7 @@ export const useErmisMeeting = (props: ErmisMeetingProps) => {
   }, [participants, userId]);
 
   const togglePin = useCallback(
-    async (participantId: string, pinFor: "local" | "everyone") => {
+    async (participantId: string, pinFor: 'local' | 'everyone') => {
       if (!currentRoom) return;
       const target = currentRoom.getParticipant(participantId);
       if (!target) return;
@@ -380,7 +402,7 @@ export const useErmisMeeting = (props: ErmisMeetingProps) => {
         return updated;
       });
 
-      if (pinFor === "everyone") {
+      if (pinFor === 'everyone') {
         if (isPinned) {
           await local.publisher.unpinForEveryone(target.streamId);
         } else {
@@ -400,14 +422,14 @@ export const useErmisMeeting = (props: ErmisMeetingProps) => {
       if (local?.publisher) {
         const result = await local.publisher.switchCamera(deviceId);
 
-        if (result?.videoOnlyStream && videoRef.current) {
-          (videoRef.current as any).srcObject = result.videoOnlyStream;
+        if (result?.videoOnlyStream) {
+          setLocalStream(result.videoOnlyStream);
         }
       }
     } catch (error) {
       console.error('Failed to switch camera:', error);
     }
-  }, [currentRoom, videoRef]);
+  }, [currentRoom]);
 
   const switchMicrophone = useCallback(async (deviceId: string) => {
     if (!deviceManagerRef.current || !currentRoom) return;
@@ -418,36 +440,71 @@ export const useErmisMeeting = (props: ErmisMeetingProps) => {
       if (local?.publisher) {
         const result = await local.publisher.switchMicrophone(deviceId);
 
-        if (result?.videoOnlyStream && videoRef.current) {
-          (videoRef.current as any).srcObject = result.videoOnlyStream;
+        if (result?.videoOnlyStream) {
+          setLocalStream(result.videoOnlyStream);
         }
       }
     } catch (error) {
       console.error('Failed to switch microphone:', error);
     }
-  }, [currentRoom, videoRef]);
+  }, [currentRoom]);
 
-  return {
-    client: clientRef.current as any,
-    participants,
-    remoteStreams,
-    micEnabled,
-    handRaised,
-    pinType,
-    authenticate,
-    joinRoom,
-    currentRoom,
-    inRoom,
-    videoEnabled,
-    leaveRoom,
-    roomCode,
-    toggleMicrophone,
-    toggleCamera,
-    toggleRaiseHand,
-    togglePin,
-    devices,
-    selectedDevices,
-    switchCamera,
-    switchMicrophone,
-  };
+  const value = useMemo(
+    () => ({
+      client: clientRef.current,
+      participants,
+      remoteStreams,
+      localStream,
+      micEnabled,
+      handRaised,
+      pinType,
+      authenticate,
+      joinRoom,
+      currentRoom,
+      inRoom,
+      videoEnabled,
+      leaveRoom,
+      roomCode,
+      userId,
+      toggleMicrophone,
+      toggleCamera,
+      toggleRaiseHand,
+      togglePin,
+      devices,
+      selectedDevices,
+      switchCamera,
+      switchMicrophone,
+    }),
+    [
+      participants,
+      remoteStreams,
+      localStream,
+      micEnabled,
+      handRaised,
+      pinType,
+      authenticate,
+      joinRoom,
+      currentRoom,
+      inRoom,
+      videoEnabled,
+      leaveRoom,
+      roomCode,
+      userId,
+      toggleMicrophone,
+      toggleCamera,
+      toggleRaiseHand,
+      togglePin,
+      devices,
+      selectedDevices,
+      switchCamera,
+      switchMicrophone,
+    ]
+  );
+
+  return (
+    <ErmisClassroomContext.Provider value={value}>
+      {children}
+    </ErmisClassroomContext.Provider>
+  );
 };
+

@@ -22,7 +22,6 @@ export const VideoContainer = styled.div`
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   position: relative;
   width: 100%;
-  height: 100%;
 `;
 export const MainVideoStyled = styled.div<{ $totalParticipants: number }>`
   width: 100%;
@@ -355,5 +354,67 @@ export const PinMenuItem = styled.button<{ $disabled?: boolean }>`
 
   svg {
     flex-shrink: 0;
+  }
+`;
+
+export const DeviceSettingsPanel = styled.div<{ $show: boolean }>`
+  position: absolute;
+  bottom: 80px;
+  right: 20px;
+  background: rgba(30, 30, 30, 0.95);
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 300px;
+  display: ${props => props.$show ? 'block' : 'none'};
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+`;
+
+export const DeviceSettingsTitle = styled.h3`
+  margin: 0 0 16px 0;
+  color: white;
+  font-size: 16px;
+  font-weight: 600;
+`;
+
+export const DeviceGroup = styled.div`
+  margin-bottom: 16px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+`;
+
+export const DeviceLabel = styled.label`
+  display: block;
+  color: #ccc;
+  font-size: 12px;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+`;
+
+export const DeviceSelect = styled.select`
+  width: 100%;
+  padding: 10px;
+  background: rgba(50, 50, 50, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+
+  &:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: #4CAF50;
+  }
+
+  option {
+    background: #2a2a2a;
+    color: white;
   }
 `;
