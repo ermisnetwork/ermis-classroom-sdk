@@ -47,19 +47,27 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [pinMenuOpen, setPinMenuOpen] = useState<string | null>(null);
   const [showDeviceSettings, setShowDeviceSettings] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewCameraId, setPreviewCameraId] = useState<string>('');
+  const [previewMicId, setPreviewMicId] = useState<string>('');
 
   const {
-    participants, remoteStreams, localStream, authenticate, joinRoom,
+    participants, remoteStreams, localStream, previewStream, authenticate, joinRoom,
     videoEnabled, micEnabled, handRaised, inRoom, currentRoom,
     leaveRoom, toggleMicrophone, toggleCamera, toggleRaiseHand,
     togglePin, devices, selectedDevices, switchCamera, switchMicrophone,
+    getPreviewStream, stopPreviewStream, replaceMediaStream,
   } = useErmisMeeting();
 
   useEffect(() => {
-    if (videoRef?.current && localStream) {
-      videoRef.current.srcObject = localStream;
+    if (videoRef?.current) {
+      if (inRoom && localStream) {
+        videoRef.current.srcObject = localStream;
+      } else if (!inRoom && previewStream) {
+        videoRef.current.srcObject = previewStream;
+      }
     }
-  }, [videoRef, localStream]);
+  }, [videoRef, localStream, previewStream, inRoom]);
 
   // Close pin menu when clicking outside
   useEffect(() => {
@@ -91,10 +99,87 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
   const handleJoinRoom = async () => {
     try {
       setIsLoading(true);
-      await joinRoom(roomCode);
+
+      let streamToUse = previewStream;
+
+      if (!streamToUse && (previewCameraId || previewMicId)) {
+        const constraints: any = {};
+
+        if (previewCameraId) {
+          constraints.video = { deviceId: { exact: previewCameraId } };
+        } else {
+          constraints.video = true;
+        }
+
+        if (previewMicId) {
+          constraints.audio = { deviceId: { exact: previewMicId } };
+        } else {
+          constraints.audio = true;
+        }
+
+        streamToUse = await navigator.mediaDevices.getUserMedia(constraints);
+      }
+
+      await joinRoom(roomCode, streamToUse);
+      setShowPreview(false);
     } catch (error) {
       console.error("Failed to join room:", error);
       alert("Failed to join room");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStartPreview = async () => {
+    try {
+      setIsLoading(true);
+      await getPreviewStream(previewCameraId || undefined, previewMicId || undefined);
+      setShowPreview(true);
+    } catch (error) {
+      console.error("Failed to start preview:", error);
+      alert("Failed to start preview. Please check camera/microphone permissions.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStopPreview = () => {
+    stopPreviewStream();
+    setShowPreview(false);
+  };
+
+  const handleDeviceChange = async (type: 'camera' | 'mic', deviceId: string) => {
+    if (type === 'camera') {
+      setPreviewCameraId(deviceId);
+    } else {
+      setPreviewMicId(deviceId);
+    }
+
+    if (showPreview) {
+      try {
+        stopPreviewStream();
+        await getPreviewStream(
+          type === 'camera' ? deviceId : previewCameraId,
+          type === 'mic' ? deviceId : previewMicId
+        );
+      } catch (error) {
+        console.error("Failed to update preview:", error);
+      }
+    }
+  };
+
+  const handleReplaceStream = async () => {
+    try {
+      setIsLoading(true);
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: previewCameraId ? { deviceId: { exact: previewCameraId } } : true,
+        audio: previewMicId ? { deviceId: { exact: previewMicId } } : true,
+      });
+      await replaceMediaStream(newStream);
+      alert("Media stream replaced successfully!");
+    } catch (error) {
+      console.error("Failed to replace stream:", error);
+      alert("Failed to replace media stream");
     } finally {
       setIsLoading(false);
     }
@@ -301,7 +386,49 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
             placeholder="Enter room code"
             onKeyPress={(e) => e.key === "Enter" && handleJoinRoom()}
           />
-          <Button onClick={handleJoinRoom} disabled={isLoading}>
+
+          <div style={{ marginTop: '20px', width: '100%' }}>
+            <h3 style={{ marginBottom: '10px' }}>Select Devices</h3>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+              <select
+                value={previewCameraId}
+                onChange={(e) => handleDeviceChange('camera', e.target.value)}
+                style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+              >
+                <option value="">Default Camera</option>
+                {devices?.cameras?.map((camera: any) => (
+                  <option key={camera.deviceId} value={camera.deviceId}>
+                    {camera.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={previewMicId}
+                onChange={(e) => handleDeviceChange('mic', e.target.value)}
+                style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+              >
+                <option value="">Default Microphone</option>
+                {devices?.microphones?.map((mic: any) => (
+                  <option key={mic.deviceId} value={mic.deviceId}>
+                    {mic.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              {!showPreview ? (
+                <Button onClick={handleStartPreview} disabled={isLoading} style={{ flex: 1 }}>
+                  Start Preview
+                </Button>
+              ) : (
+                <Button onClick={handleStopPreview} style={{ flex: 1, background: '#dc3545' }}>
+                  Stop Preview
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <Button onClick={handleJoinRoom} disabled={isLoading} style={{ marginTop: '20px' }}>
             {isLoading ? "Joining..." : "Join Room"}
           </Button>
         </LoginSection>
@@ -395,6 +522,39 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
                   </option>
                 ))}
               </DeviceSelect>
+            </DeviceGroup>
+
+            <DeviceGroup style={{ marginTop: '20px' }}>
+              <DeviceLabel>Replace Entire Stream</DeviceLabel>
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                <select
+                  value={previewCameraId}
+                  onChange={(e) => setPreviewCameraId(e.target.value)}
+                  style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                  <option value="">Default Camera</option>
+                  {devices?.cameras?.map((camera: any) => (
+                    <option key={camera.deviceId} value={camera.deviceId}>
+                      {camera.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={previewMicId}
+                  onChange={(e) => setPreviewMicId(e.target.value)}
+                  style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                  <option value="">Default Microphone</option>
+                  {devices?.microphones?.map((mic: any) => (
+                    <option key={mic.deviceId} value={mic.deviceId}>
+                      {mic.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button onClick={handleReplaceStream} disabled={isLoading} style={{ width: '100%' }}>
+                {isLoading ? "Replacing..." : "Replace Stream"}
+              </Button>
             </DeviceGroup>
           </DeviceSettingsPanel>
         )}
