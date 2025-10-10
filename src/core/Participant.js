@@ -366,6 +366,7 @@ class Participant extends EventEmitter {
       isPinned: this.isPinned,
       isScreenSharing: this.isScreenSharing,
       connectionStatus: this.connectionStatus,
+      name: this.name,
     };
   }
 }
