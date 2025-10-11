@@ -64,32 +64,57 @@ A powerful and easy-to-use SDK for building online classroom applications with r
 ## Installation
 
 ```bash
-npm install ermis-classroom-sdk
+npm install @ermisnetwork/ermis-classroom-sdk
 ```
 
 Or with yarn:
 
 ```bash
-yarn add ermis-classroom-sdk
+yarn add @ermisnetwork/ermis-classroom-sdk
 ```
 
 ---
 
 ## Quick Start
 
-> **⚠️ Important:** You must provide your own MediaStream when joining rooms. This gives you full control over camera/microphone access, device selection, and stream configuration.
+> **✨ New:** You can now provide a custom MediaStream when joining rooms OR let the SDK auto-request media. You also have full control to change media sources while live!
 
-### 1. Get Media Stream
+### 1. Get Media Stream (Optional)
 
-The SDK supports various media configurations:
+You have two options:
 
+**Option A: Provide Custom MediaStream (Recommended)**
 ```javascript
 // Full video call (video + audio)
 const stream = await navigator.mediaDevices.getUserMedia({
-  video: { width: 1280, height: 720, frameRate: 30 },
-  audio: { echoCancellation: true, noiseSuppression: true }
+  video: {
+    deviceId: { exact: selectedCameraId }, // Select specific device
+    width: 1280,
+    height: 720,
+    frameRate: 30
+  },
+  audio: {
+    deviceId: { exact: selectedMicId }, // Select specific device
+    echoCancellation: true,
+    noiseSuppression: true
+  }
 });
 
+// Preview before joining
+document.getElementById('local-video').srcObject = stream;
+
+// Join with custom stream
+await client.joinRoom('ROOM-CODE-123', stream);
+```
+
+**Option B: Let SDK Auto-Request Media**
+```javascript
+// SDK will automatically request default camera/microphone
+await client.joinRoom('ROOM-CODE-123');
+```
+
+**Other Configurations:**
+```javascript
 // Audio only (no camera)
 const audioStream = await navigator.mediaDevices.getUserMedia({
   video: false,
@@ -101,17 +126,6 @@ const videoStream = await navigator.mediaDevices.getUserMedia({
   video: { width: 1280, height: 720 },
   audio: false
 });
-
-// Observer mode (no camera/mic) - create silent audio track
-const audioContext = new AudioContext();
-const oscillator = audioContext.createOscillator();
-const dst = audioContext.createMediaStreamDestination();
-oscillator.connect(dst);
-oscillator.start();
-const observerStream = dst.stream;
-
-// Optional: Preview local video
-document.getElementById('local-video').srcObject = stream;
 ```
 
 ### 2. Initialize SDK
@@ -180,9 +194,13 @@ await me.toggleMicrophone();
 // Toggle camera
 await me.toggleCamera();
 
+// Toggle raise hand
+await me.toggleRaiseHand();
+
 // Check status
 console.log('Mic:', me.isAudioEnabled);
 console.log('Camera:', me.isVideoEnabled);
+console.log('Hand raised:', me.isHandRaised);
 
 // Switch camera/microphone
 const newStream = await navigator.mediaDevices.getUserMedia({
@@ -273,16 +291,31 @@ const stream = await navigator.mediaDevices.getUserMedia({
 });
 ```
 
-### Switching Devices
+### Switching Devices While Live
 
+**Method 1: Switch Individual Devices (Recommended)**
 ```javascript
-// Switch camera during call
 const room = client.getCurrentRoom();
+
+// Switch camera only (keeps existing microphone)
+await room.localParticipant.publisher.switchCamera(newCameraDeviceId);
+
+// Switch microphone only (keeps existing camera)
+await room.localParticipant.publisher.switchMicrophone(newMicDeviceId);
+```
+
+**Method 2: Replace Entire MediaStream**
+```javascript
+const room = client.getCurrentRoom();
+
+// Get new stream with different devices
 const newStream = await navigator.mediaDevices.getUserMedia({
-  video: { deviceId: newCameraId },
-  audio: true
+  video: { deviceId: { exact: newCameraId } },
+  audio: { deviceId: { exact: newMicId } }
 });
-room.localParticipant.updateMediaStream(newStream);
+
+// Replace entire stream (stops old stream automatically)
+await room.localParticipant.replaceMediaStream(newStream);
 ```
 
 ### Screen Sharing
@@ -293,7 +326,9 @@ const screenStream = await navigator.mediaDevices.getDisplayMedia({
   video: { width: 1920, height: 1080 },
   audio: true
 });
-room.localParticipant.updateMediaStream(screenStream);
+
+// Replace current stream with screen share
+await room.localParticipant.replaceMediaStream(screenStream);
 
 // Handle user stopping screen share
 screenStream.getVideoTracks()[0].addEventListener('ended', async () => {
@@ -302,7 +337,7 @@ screenStream.getVideoTracks()[0].addEventListener('ended', async () => {
     video: true,
     audio: true
   });
-  room.localParticipant.updateMediaStream(cameraStream);
+  await room.localParticipant.replaceMediaStream(cameraStream);
 });
 ```
 
@@ -461,8 +496,18 @@ Represents a user in a room with their media state.
 
 ```javascript
 const participant = room.getParticipant('user-id');
+console.log(participant.userId);
+console.log(participant.streamId);
+console.log(participant.membershipId);
+console.log(participant.role);
+console.log(participant.roomId);
+console.log(participant.isLocal);
 console.log(participant.isAudioEnabled);
 console.log(participant.isVideoEnabled);
+console.log(participant.isHandRaised);
+console.log(participant.isPinned);
+console.log(participant.isScreenSharing);
+console.log(participant.connectionStatus);
 ```
 
 ---
@@ -698,6 +743,9 @@ await me.toggleMicrophone();
 // Toggle camera (on/off)
 await me.toggleCamera();
 
+// Toggle raise hand
+await me.toggleRaiseHand();
+
 // Update media stream (switch camera, enable screen share, etc.)
 const newStream = await navigator.mediaDevices.getUserMedia({
   video: { deviceId: newCameraId },
@@ -708,6 +756,7 @@ me.updateMediaStream(newStream);
 // Check states
 console.log('Audio enabled:', me.isAudioEnabled);
 console.log('Video enabled:', me.isVideoEnabled);
+console.log('Hand raised:', me.isHandRaised);
 console.log('Role:', me.role);
 
 // Get full info
@@ -731,13 +780,30 @@ const name = participant.getDisplayName();
 // Get participant info
 const info = participant.getInfo();
 
+// Access participant properties
+console.log('User ID:', participant.userId);
+console.log('Stream ID:', participant.streamId);
+console.log('Room ID:', participant.roomId);
+console.log('Role:', participant.role);
+console.log('Is local:', participant.isLocal);
+console.log('Audio enabled:', participant.isAudioEnabled);
+console.log('Video enabled:', participant.isVideoEnabled);
+console.log('Hand raised:', participant.isHandRaised);
+console.log('Pinned:', participant.isPinned);
+console.log('Screen sharing:', participant.isScreenSharing);
+console.log('Connection status:', participant.connectionStatus);
+
 // Listen to participant events
-participant.on(ErmisClassroom.events.AUDIO_TOGGLED, (enabled) => {
-  console.log(`${participant.userId} audio:`, enabled);
+participant.on(ErmisClassroom.events.AUDIO_TOGGLED, (data) => {
+  console.log(`${data.participant.userId} audio:`, data.enabled);
 });
 
-participant.on(ErmisClassroom.events.VIDEO_TOGGLED, (enabled) => {
-  console.log(`${participant.userId} video:`, enabled);
+participant.on(ErmisClassroom.events.VIDEO_TOGGLED, (data) => {
+  console.log(`${data.participant.userId} video:`, data.enabled);
+});
+
+participant.on(ErmisClassroom.events.HAND_RAISE_TOGGLED, (data) => {
+  console.log(`${data.participant.userId} hand raised:`, data.enabled);
 });
 ```
 
@@ -827,8 +893,18 @@ ErmisClassroom.events.PARTICIPANT_ADDED
 ErmisClassroom.events.PARTICIPANT_REMOVED
 ErmisClassroom.events.PARTICIPANT_PINNED
 ErmisClassroom.events.PARTICIPANT_UNPINNED
+ErmisClassroom.events.PARTICIPANT_PINNED_FOR_EVERYONE
+ErmisClassroom.events.PARTICIPANT_UNPINNED_FOR_EVERYONE
 ErmisClassroom.events.AUDIO_TOGGLED
 ErmisClassroom.events.VIDEO_TOGGLED
+ErmisClassroom.events.HAND_RAISE_TOGGLED
+ErmisClassroom.events.REMOTE_AUDIO_STATUS_CHANGED
+ErmisClassroom.events.REMOTE_VIDEO_STATUS_CHANGED
+ErmisClassroom.events.REMOTE_HAND_RAISING_STATUS_CHANGED
+ErmisClassroom.events.SCREEN_SHARE_STARTED
+ErmisClassroom.events.SCREEN_SHARE_STOPPED
+ErmisClassroom.events.REMOTE_SCREEN_SHARE_STARTED
+ErmisClassroom.events.REMOTE_SCREEN_SHARE_STOPPED
 
 // Sub-Room Events
 ErmisClassroom.events.SUB_ROOM_CREATED

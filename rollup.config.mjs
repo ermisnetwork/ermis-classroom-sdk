@@ -37,10 +37,10 @@ const baseConfig = {
         { src: "src/polyfills/**/*", dest: "dist/polyfills" },
         { src: "src/workers/**/*", dest: "dist/workers" },
         { src: "types/index.d.ts", dest: "dist/types" },
-        { src: "package.json", dest: "dist/" },
         { src: "README.md", dest: "dist/" },
         { src: "LICENSE", dest: "dist/" },
       ],
+      hook: 'writeBundle',
     }),
 
     // Replace environment variables

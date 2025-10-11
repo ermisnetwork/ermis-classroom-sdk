@@ -47,7 +47,7 @@ class Room extends EventEmitter {
   /**
    * Join this room
    */
-  async join(userId) {
+  async join(userId, mediaStream = null) {
     if (this.isActive) {
       throw new Error("Already joined this room");
     }
@@ -75,8 +75,8 @@ class Room extends EventEmitter {
       // Setup participants
       await this._setupParticipants(roomDetails.participants, userId);
 
-      // Setup media connections
-      await this._setupMediaConnections();
+      // Setup media connections with optional custom stream
+      await this._setupMediaConnections(mediaStream);
 
       this.isActive = true;
       this.emit("joined", { room: this, participants: this.participants });
@@ -434,6 +434,7 @@ class Room extends EventEmitter {
       membershipId: memberData.id,
       role: memberData.role,
       roomId: this.id,
+      name: memberData.name,
       isLocal,
     });
 
@@ -599,16 +600,16 @@ class Room extends EventEmitter {
   /**
    * Setup media connections for all participants
    */
-  async _setupMediaConnections() {
+  async _setupMediaConnections(mediaStream = null) {
     // Initialize audio mixer
     if (!this.audioMixer) {
       this.audioMixer = new AudioMixer();
       await this.audioMixer.initialize();
     }
 
-    // Setup publisher for local participant
+    // Setup publisher for local participant with optional custom stream
     if (this.localParticipant) {
-      await this._setupLocalPublisher();
+      await this._setupLocalPublisher(mediaStream);
     }
 
     // Setup subscribers for remote participants
@@ -625,7 +626,7 @@ class Room extends EventEmitter {
   /**
    * Setup publisher for local participant
    */
-  async _setupLocalPublisher() {
+  async _setupLocalPublisher(mediaStream = null) {
     if (!this.localParticipant || !this.streamId) return;
 
     // Video rendering handled by app through stream events
@@ -637,6 +638,7 @@ class Room extends EventEmitter {
       publishUrl,
       streamType: "camera",
       streamId: this.streamId,
+      mediaStream: mediaStream,
       width: 1280,
       height: 720,
       framerate: 30,
