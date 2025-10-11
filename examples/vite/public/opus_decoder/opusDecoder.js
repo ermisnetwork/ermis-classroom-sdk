@@ -55,7 +55,7 @@ export async function ensureRecorderScriptLoaded() {
   return recorderScriptLoadPromise;
 }
 
-export async function initAudioRecorder(source, options = {}) {
+export async function initAudioRecorder(audioStream, options = {}) {
   try {
     await ensureRecorderScriptLoaded();
   } catch (err) {
@@ -89,7 +89,7 @@ export async function initAudioRecorder(source, options = {}) {
   }
 
   try {
-    const audioStream = new MediaStream([source]);
+    // const audioStream = new MediaStream([source]);
     console.log("Using provided MediaStreamTrack");
 
     const AudioContext = window.AudioContext || window.webkitAudioContext;

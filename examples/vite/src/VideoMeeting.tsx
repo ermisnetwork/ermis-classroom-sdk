@@ -1,4 +1,4 @@
-import {useEffect, useState} from "react";
+import { useEffect, useState } from "react";
 import {
   MdCallEnd,
   MdMic,
@@ -32,7 +32,7 @@ import {
   PinButtonContainer,
   PinMenu,
   PinMenuItem,
-  VideoContainer
+  VideoContainer,
 } from "./VideoMeeting.styles.tsx";
 import { useErmisMeeting } from "./context";
 
@@ -48,15 +48,33 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
   const [pinMenuOpen, setPinMenuOpen] = useState<string | null>(null);
   const [showDeviceSettings, setShowDeviceSettings] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  const [previewCameraId, setPreviewCameraId] = useState<string>('');
-  const [previewMicId, setPreviewMicId] = useState<string>('');
+  const [previewCameraId, setPreviewCameraId] = useState<string>("");
+  const [previewMicId, setPreviewMicId] = useState<string>("");
 
   const {
-    participants, remoteStreams, localStream, previewStream, authenticate, joinRoom,
-    videoEnabled, micEnabled, handRaised, inRoom, currentRoom,
-    leaveRoom, toggleMicrophone, toggleCamera, toggleRaiseHand,
-    togglePin, devices, selectedDevices, switchCamera, switchMicrophone,
-    getPreviewStream, stopPreviewStream, replaceMediaStream,
+    participants,
+    remoteStreams,
+    localStream,
+    previewStream,
+    authenticate,
+    joinRoom,
+    videoEnabled,
+    micEnabled,
+    handRaised,
+    inRoom,
+    currentRoom,
+    leaveRoom,
+    toggleMicrophone,
+    toggleCamera,
+    toggleRaiseHand,
+    togglePin,
+    devices,
+    selectedDevices,
+    switchCamera,
+    switchMicrophone,
+    getPreviewStream,
+    stopPreviewStream,
+    replaceMediaStream,
   } = useErmisMeeting();
 
   useEffect(() => {
@@ -133,11 +151,16 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
   const handleStartPreview = async () => {
     try {
       setIsLoading(true);
-      await getPreviewStream(previewCameraId || undefined, previewMicId || undefined);
+      await getPreviewStream(
+        previewCameraId || undefined,
+        previewMicId || undefined
+      );
       setShowPreview(true);
     } catch (error) {
       console.error("Failed to start preview:", error);
-      alert("Failed to start preview. Please check camera/microphone permissions.");
+      alert(
+        "Failed to start preview. Please check camera/microphone permissions."
+      );
     } finally {
       setIsLoading(false);
     }
@@ -148,8 +171,11 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
     setShowPreview(false);
   };
 
-  const handleDeviceChange = async (type: 'camera' | 'mic', deviceId: string) => {
-    if (type === 'camera') {
+  const handleDeviceChange = async (
+    type: "camera" | "mic",
+    deviceId: string
+  ) => {
+    if (type === "camera") {
       setPreviewCameraId(deviceId);
     } else {
       setPreviewMicId(deviceId);
@@ -159,8 +185,8 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
       try {
         stopPreviewStream();
         await getPreviewStream(
-          type === 'camera' ? deviceId : previewCameraId,
-          type === 'mic' ? deviceId : previewMicId
+          type === "camera" ? deviceId : previewCameraId,
+          type === "mic" ? deviceId : previewMicId
         );
       } catch (error) {
         console.error("Failed to update preview:", error);
@@ -172,7 +198,9 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
     try {
       setIsLoading(true);
       const newStream = await navigator.mediaDevices.getUserMedia({
-        video: previewCameraId ? { deviceId: { exact: previewCameraId } } : true,
+        video: previewCameraId
+          ? { deviceId: { exact: previewCameraId } }
+          : true,
         audio: previewMicId ? { deviceId: { exact: previewMicId } } : true,
       });
       await replaceMediaStream(newStream);
@@ -202,17 +230,17 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
           key="local"
           $isPinned={pinnedUserId === userId}
         >
-          <video ref={videoRef} autoPlay playsInline muted/>
+          <video ref={videoRef} autoPlay playsInline muted />
           {!videoEnabled && (
             <LocalVideoOverlay>
-              <MdVideocamOff/>
+              <MdVideocamOff />
             </LocalVideoOverlay>
           )}
           <ParticipantInfo>
             You ({userId})
             {!micEnabled && (
               <span>
-                <MdMicOff/>
+                <MdMicOff />
               </span>
             )}
             {currentRoom?.localParticipant?.role === "owner" && (
@@ -230,21 +258,23 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
                 }}
                 title="Pin options"
               >
-                {pinnedUserId === userId ? <MdPushPin size={16}/> : <MdOutlinePushPin size={16}/>}
+                {pinnedUserId === userId ? (
+                  <MdPushPin size={16} />
+                ) : (
+                  <MdOutlinePushPin size={16} />
+                )}
               </ActionButton>
 
               <PinMenu $show={pinMenuOpen === userId}>
-                <PinMenuItem
-                  onClick={() => togglePin(userId, 'local')}
-                >
-                  <MdPushPin size={14}/>
+                <PinMenuItem onClick={() => togglePin(userId, "local")}>
+                  <MdPushPin size={14} />
                   Pin locally
                 </PinMenuItem>
                 <PinMenuItem
                   $disabled={!isHost}
-                  onClick={() => togglePin(userId, 'everyone')}
+                  onClick={() => togglePin(userId, "everyone")}
                 >
-                  <MdPushPin size={14}/>
+                  <MdPushPin size={14} />
                   Pin for everyone {!isHost && "(Host only)"}
                 </PinMenuItem>
               </PinMenu>
@@ -287,23 +317,23 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
               participant.isLocal
                 ? videoRef
                 : (videoElement) => {
-                  if (videoElement && participant.stream) {
-                    videoElement.srcObject = participant.stream;
+                    if (videoElement && participant.stream) {
+                      videoElement.srcObject = participant.stream;
+                    }
                   }
-                }
             }
           />
           {/* Show camera off overlay for both local and remote */}
           {!participant.isVideoEnabled && (
             <LocalVideoOverlay>
-              <MdVideocamOff/>
+              <MdVideocamOff />
             </LocalVideoOverlay>
           )}
           <ParticipantInfo>
             {participant.isLocal ? "You" : participant.userId}
             {!participant.isAudioEnabled && (
               <span>
-                <MdMicOff/>
+                <MdMicOff />
               </span>
             )}
             {participant.role === "owner" && <OwnerBadge>OWNER</OwnerBadge>}
@@ -311,13 +341,13 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
               <span title="Sharing screen">📺</span>
             )}
             {(participant as any).isHandRaised && (
-              <span title="Hand raised" style={{color: "#ffa500"}}>
-                <MdPanTool/>
+              <span title="Hand raised" style={{ color: "#ffa500" }}>
+                <MdPanTool />
               </span>
             )}
             {isPinned && (
-              <span title="Pinned" style={{color: "#ffd700"}}>
-                <MdPushPin/>
+              <span title="Pinned" style={{ color: "#ffd700" }}>
+                <MdPushPin />
               </span>
             )}
           </ParticipantInfo>
@@ -328,25 +358,33 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
                 $isActive={isPinned}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setPinMenuOpen(pinMenuOpen === participant.userId ? null : participant.userId);
+                  setPinMenuOpen(
+                    pinMenuOpen === participant.userId
+                      ? null
+                      : participant.userId
+                  );
                 }}
                 title="Pin options"
               >
-                {isPinned ? <MdPushPin size={16}/> : <MdOutlinePushPin size={16}/>}
+                {isPinned ? (
+                  <MdPushPin size={16} />
+                ) : (
+                  <MdOutlinePushPin size={16} />
+                )}
               </ActionButton>
 
               <PinMenu $show={pinMenuOpen === participant.userId}>
                 <PinMenuItem
-                  onClick={() => togglePin(participant.userId, 'local')}
+                  onClick={() => togglePin(participant.userId, "local")}
                 >
-                  <MdPushPin size={14}/>
+                  <MdPushPin size={14} />
                   Pin locally
                 </PinMenuItem>
                 <PinMenuItem
                   $disabled={!isHost}
-                  onClick={() => togglePin(participant.userId, 'everyone')}
+                  onClick={() => togglePin(participant.userId, "everyone")}
                 >
-                  <MdPushPin size={14}/>
+                  <MdPushPin size={14} />
                   Pin for everyone
                 </PinMenuItem>
               </PinMenu>
@@ -362,7 +400,7 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
       {/* Login Section */}
       {!isConnected && (
         <LoginSection>
-          <h2 style={{color: 'black'}}>Join Meeting</h2>
+          <h2 style={{ color: "black" }}>Join Meeting</h2>
           <Input
             type="email"
             value={userId}
@@ -387,13 +425,18 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
             onKeyPress={(e) => e.key === "Enter" && handleJoinRoom()}
           />
 
-          <div style={{ marginTop: '20px', width: '100%' }}>
-            <h3 style={{ marginBottom: '10px' }}>Select Devices</h3>
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+          <div style={{ marginTop: "20px", width: "100%" }}>
+            <h3 style={{ marginBottom: "10px" }}>Select Devices</h3>
+            <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
               <select
                 value={previewCameraId}
-                onChange={(e) => handleDeviceChange('camera', e.target.value)}
-                style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                onChange={(e) => handleDeviceChange("camera", e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: "8px",
+                  borderRadius: "4px",
+                  border: "1px solid #ccc",
+                }}
               >
                 <option value="">Default Camera</option>
                 {devices?.cameras?.map((camera: any) => (
@@ -404,8 +447,13 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
               </select>
               <select
                 value={previewMicId}
-                onChange={(e) => handleDeviceChange('mic', e.target.value)}
-                style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                onChange={(e) => handleDeviceChange("mic", e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: "8px",
+                  borderRadius: "4px",
+                  border: "1px solid #ccc",
+                }}
               >
                 <option value="">Default Microphone</option>
                 {devices?.microphones?.map((mic: any) => (
@@ -415,20 +463,31 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
                 ))}
               </select>
             </div>
-            <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ display: "flex", gap: "10px" }}>
               {!showPreview ? (
-                <Button onClick={handleStartPreview} disabled={isLoading} style={{ flex: 1 }}>
+                <Button
+                  onClick={handleStartPreview}
+                  disabled={isLoading}
+                  style={{ flex: 1 }}
+                >
                   Start Preview
                 </Button>
               ) : (
-                <Button onClick={handleStopPreview} style={{ flex: 1, background: '#dc3545' }}>
+                <Button
+                  onClick={handleStopPreview}
+                  style={{ flex: 1, background: "#dc3545" }}
+                >
                   Stop Preview
                 </Button>
               )}
             </div>
           </div>
 
-          <Button onClick={handleJoinRoom} disabled={isLoading} style={{ marginTop: '20px' }}>
+          <Button
+            onClick={handleJoinRoom}
+            disabled={isLoading}
+            style={{ marginTop: "20px" }}
+          >
             {isLoading ? "Joining..." : "Join Room"}
           </Button>
         </LoginSection>
@@ -448,7 +507,7 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
               onClick={toggleMicrophone}
               title={micEnabled ? "Mute microphone" : "Unmute microphone"}
             >
-              {micEnabled ? <MdMic size={20}/> : <MdMicOff size={20}/>}
+              {micEnabled ? <MdMic size={20} /> : <MdMicOff size={20} />}
             </ControlButton>
 
             <ControlButton
@@ -458,9 +517,9 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
               title={videoEnabled ? "Turn off camera" : "Turn on camera"}
             >
               {videoEnabled ? (
-                <MdVideocam size={20}/>
+                <MdVideocam size={20} />
               ) : (
-                <MdVideocamOff size={20}/>
+                <MdVideocamOff size={20} />
               )}
             </ControlButton>
 
@@ -469,7 +528,7 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
               onClick={toggleRaiseHand}
               title={handRaised ? "Lower hand" : "Raise hand"}
             >
-              <MdPanTool size={20}/>
+              <MdPanTool size={20} />
             </ControlButton>
 
             <ControlButton
@@ -477,7 +536,7 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
               onClick={() => setShowDeviceSettings(!showDeviceSettings)}
               title="Device settings"
             >
-              <MdSettings size={20}/>
+              <MdSettings size={20} />
             </ControlButton>
 
             <ControlButton
@@ -485,7 +544,7 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
               onClick={leaveRoom}
               title="Leave room"
             >
-              <MdCallEnd size={20}/>
+              <MdCallEnd size={20} />
             </ControlButton>
           </ControlsContainer>
         )}
@@ -497,7 +556,7 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
             <DeviceGroup>
               <DeviceLabel>Camera</DeviceLabel>
               <DeviceSelect
-                value={selectedDevices?.camera || ''}
+                value={selectedDevices?.camera || ""}
                 onChange={(e) => switchCamera(e.target.value)}
                 disabled={!videoEnabled}
               >
@@ -512,7 +571,7 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
             <DeviceGroup>
               <DeviceLabel>Microphone</DeviceLabel>
               <DeviceSelect
-                value={selectedDevices?.microphone || ''}
+                value={selectedDevices?.microphone || ""}
                 onChange={(e) => switchMicrophone(e.target.value)}
                 disabled={!micEnabled}
               >
@@ -524,13 +583,20 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
               </DeviceSelect>
             </DeviceGroup>
 
-            <DeviceGroup style={{ marginTop: '20px' }}>
+            <DeviceGroup style={{ marginTop: "20px" }}>
               <DeviceLabel>Replace Entire Stream</DeviceLabel>
-              <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+              <div
+                style={{ display: "flex", gap: "10px", marginBottom: "10px" }}
+              >
                 <select
                   value={previewCameraId}
                   onChange={(e) => setPreviewCameraId(e.target.value)}
-                  style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                  style={{
+                    flex: 1,
+                    padding: "8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ccc",
+                  }}
                 >
                   <option value="">Default Camera</option>
                   {devices?.cameras?.map((camera: any) => (
@@ -542,7 +608,12 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
                 <select
                   value={previewMicId}
                   onChange={(e) => setPreviewMicId(e.target.value)}
-                  style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                  style={{
+                    flex: 1,
+                    padding: "8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ccc",
+                  }}
                 >
                   <option value="">Default Microphone</option>
                   {devices?.microphones?.map((mic: any) => (
@@ -552,7 +623,11 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
                   ))}
                 </select>
               </div>
-              <Button onClick={handleReplaceStream} disabled={isLoading} style={{ width: '100%' }}>
+              <Button
+                onClick={handleReplaceStream}
+                disabled={isLoading}
+                style={{ width: "100%" }}
+              >
                 {isLoading ? "Replacing..." : "Replace Stream"}
               </Button>
             </DeviceGroup>
@@ -561,4 +636,4 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
       </VideoContainer>
     </Container>
   );
-};
+}
