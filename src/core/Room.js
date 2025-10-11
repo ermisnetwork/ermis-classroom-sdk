@@ -722,6 +722,7 @@ class Room extends EventEmitter {
           stream_id: joinedParticipant.stream_id,
           id: joinedParticipant.membership_id,
           role: joinedParticipant.role,
+          name: joinedParticipant.name,
         },
         this.localParticipant?.userId
       );
