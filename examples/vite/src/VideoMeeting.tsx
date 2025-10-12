@@ -74,7 +74,6 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
     switchMicrophone,
     getPreviewStream,
     stopPreviewStream,
-    replaceMediaStream,
   } = useErmisMeeting();
 
   useEffect(() => {
