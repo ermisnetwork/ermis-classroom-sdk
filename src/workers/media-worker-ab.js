@@ -3,14 +3,16 @@ import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
 
-let videoDecoder360p;
-let videoDecoder720p;
-let currentVideoDecoder; // Decoder hiện đang active
-let currentQuality = "360p"; // Quality hiện tại
+let videoDecoderFor360p;
+let videoDecoderFor720p;
+let videoDecoderForScreenShare;
+let currentVideoDecoder;
+let currentQuality = "360p";
 let audioDecoder;
 let mediaWebsocket = null;
 let video360pConfig;
 let video720pConfig;
+let screenShareConfig;
 let videoFrameRate;
 let audioFrameRate;
 let audioConfig;
@@ -29,6 +31,8 @@ let mediaUrl = null;
 let videoCodecReceived = false;
 let audioCodecReceived = false;
 let keyFrameReceived = false;
+
+let isScreenSharing = false;
 
 const createVideoInit = (quality) => ({
   output: (frame) => {
@@ -203,12 +207,14 @@ function startSendingAudio(interval) {
 }
 
 self.onmessage = async function (e) {
-  const { type, data, port, quality } = e.data;
+  const { type, data, port, quality, isShare } = e.data;
   switch (type) {
     case "init":
       mediaUrl = data.mediaUrl;
       console.log("Media Worker: Initializing with stream url:", mediaUrl);
-      await initializeDecoders();
+      isScreenSharing = isShare;
+      await initializeDecoders(isScreenSharing);
+
       setupWebSocket(quality);
       if (port && port instanceof MessagePort) {
         console.log("Media Worker: Received port to connect to Audio Worklet.");
@@ -240,7 +246,7 @@ self.onmessage = async function (e) {
   }
 };
 
-async function initializeDecoders() {
+async function initializeDecoders(isScreenSharing = false) {
   self.postMessage({
     type: "log",
     level: "info",
@@ -249,9 +255,17 @@ async function initializeDecoders() {
   });
 
   // Khởi tạo 2 video decoder
-  videoDecoder360p = new VideoDecoder(createVideoInit("360p"));
-  videoDecoder720p = new VideoDecoder(createVideoInit("720p"));
-  currentVideoDecoder = videoDecoder360p; // Mặc định dùng 360p
+  if (isScreenSharing) {
+    videoDecoderForScreenShare = new VideoDecoder(createVideoInit("screen"));
+    currentVideoDecoder = videoDecoderForScreenShare;
+  } else {
+    videoDecoderFor360p = new VideoDecoder(createVideoInit("360p"));
+    videoDecoderFor720p = new VideoDecoder(createVideoInit("720p"));
+    currentVideoDecoder = videoDecoderFor360p; // Mặc định dùng 360p
+  }
+  videoDecoderFor360p = new VideoDecoder(createVideoInit("360p"));
+  videoDecoderFor720p = new VideoDecoder(createVideoInit("720p"));
+  currentVideoDecoder = videoDecoderFor360p; // Mặc định dùng 360p
 
   try {
     audioDecoder = new OpusAudioDecoder(audioInit);
@@ -276,13 +290,15 @@ function setupWebSocket(initialQuality = "360p") {
   mediaWebsocket = new WebSocket(mediaUrl);
   mediaWebsocket.binaryType = "arraybuffer";
   mediaWebsocket.onopen = () => {
-    mediaWebsocket.send(JSON.stringify({ quality: initialQuality }));
-    self.postMessage({
-      type: "log",
-      level: "info",
-      event: "ws-connected",
-      message: "media websocket Connected",
-    });
+    if (!isScreenSharing) {
+      mediaWebsocket.send(JSON.stringify({ quality: initialQuality }));
+      self.postMessage({
+        type: "log",
+        level: "info",
+        event: "ws-connected",
+        message: "media websocket Connected",
+      });
+    }
   };
   mediaWebsocket.onmessage = handleMediaWsMessage;
   mediaWebsocket.onclose = handleMediaWsClose;
@@ -299,10 +315,10 @@ function handleBitrateSwitch(quality) {
 
     // Chuyển decoder
     if (quality === "360p") {
-      currentVideoDecoder = videoDecoder360p;
+      currentVideoDecoder = videoDecoderFor360p;
       currentQuality = "360p";
     } else if (quality === "720p") {
-      currentVideoDecoder = videoDecoder720p;
+      currentVideoDecoder = videoDecoderFor720p;
       currentQuality = "720p";
     }
 
@@ -344,28 +360,37 @@ function handleMediaWsMessage(event) {
       dataJson.type === "DecoderConfigs" &&
       (!videoCodecReceived || !audioCodecReceived)
     ) {
-      // Lưu cả 2 video config
-      video360pConfig = dataJson.video360pConfig;
-      video720pConfig = dataJson.video720pConfig;
+      if (isScreenSharing) {
+        screenShareConfig = dataJson.videoConfig;
+        videoFrameRate = screenShareConfig.frameRate;
+        screenShareConfig.description = base64ToUint8Array(
+          screenShareConfig.description
+        );
+        videoDecoderForScreenShare.configure(screenShareConfig);
+        currentVideoDecoder = videoDecoderForScreenShare;
+        currentQuality = "screen";
+      } else {
+        video360pConfig = dataJson.video360pConfig;
+        video720pConfig = dataJson.video720pConfig;
+
+        videoFrameRate = video360pConfig.frameRate;
+
+        video360pConfig.description = base64ToUint8Array(
+          video360pConfig.description
+        );
+        video720pConfig.description = base64ToUint8Array(
+          video720pConfig.description
+        );
+        videoDecoderFor360p.configure(video360pConfig);
+        videoDecoderFor720p.configure(video720pConfig);
+      }
+
       audioConfig = dataJson.audioConfig;
-
-      videoFrameRate = video360pConfig.frameRate;
       audioFrameRate = audioConfig.sampleRate / 1024;
-
-      // Convert description từ base64
-      video360pConfig.description = base64ToUint8Array(
-        video360pConfig.description
-      );
-      video720pConfig.description = base64ToUint8Array(
-        video720pConfig.description
-      );
       const audioConfigDescription = base64ToUint8Array(
         audioConfig.description
       );
 
-      // Configure cả 2 video decoder
-      videoDecoder360p.configure(video360pConfig);
-      videoDecoder720p.configure(video720pConfig);
       audioDecoder.configure(audioConfig);
 
       // Decode first audio frame để khởi tạo audio decoder
@@ -387,20 +412,28 @@ function handleMediaWsMessage(event) {
 
       videoCodecReceived = true;
       audioCodecReceived = true;
-
-      self.postMessage({
-        type: "codecReceived",
-        stream: "both",
-        video360pConfig,
-        video720pConfig,
-        audioConfig,
-      });
+      if (isScreenSharing) {
+        self.postMessage({
+          type: "codecReceived",
+          stream: "screen",
+          screenShareConfig,
+          audioConfig,
+        });
+      } else {
+        self.postMessage({
+          type: "codecReceived",
+          stream: "both",
+          video360pConfig,
+          video720pConfig,
+          audioConfig,
+        });
+      }
       return;
     }
 
     if (event.data === "publish") {
-      videoDecoder360p.reset();
-      videoDecoder720p.reset();
+      videoDecoderFor360p.reset();
+      videoDecoderFor720p.reset();
       audioDecoder.reset();
       videoCodecReceived = false;
       audioCodecReceived = false;
@@ -454,9 +487,9 @@ function handleMediaWsMessage(event) {
       }
 
       if (keyFrameReceived) {
-        if (videoDecoder360p.state === "closed") {
-          videoDecoder360p = new VideoDecoder(createVideoInit("360p"));
-          videoDecoder360p.configure(video360pConfig);
+        if (videoDecoderFor360p.state === "closed") {
+          videoDecoderFor360p = new VideoDecoder(createVideoInit("360p"));
+          videoDecoderFor360p.configure(video360pConfig);
         }
         const encodedChunk = new EncodedVideoChunk({
           timestamp: timestamp * 1000,
@@ -465,7 +498,7 @@ function handleMediaWsMessage(event) {
         });
 
         // if (currentQuality === "360p") {
-        videoDecoder360p.decode(encodedChunk);
+        videoDecoderFor360p.decode(encodedChunk);
         // }
       }
       return;
@@ -478,9 +511,9 @@ function handleMediaWsMessage(event) {
       }
 
       if (keyFrameReceived) {
-        if (videoDecoder720p.state === "closed") {
-          videoDecoder720p = new VideoDecoder(createVideoInit("720p"));
-          videoDecoder720p.configure(video720pConfig);
+        if (videoDecoderFor720p.state === "closed") {
+          videoDecoderFor720p = new VideoDecoder(createVideoInit("720p"));
+          videoDecoderFor720p.configure(video720pConfig);
         }
         const encodedChunk = new EncodedVideoChunk({
           timestamp: timestamp * 1000,
@@ -489,8 +522,31 @@ function handleMediaWsMessage(event) {
         });
 
         // if (currentQuality === "720p") {
-        videoDecoder720p.decode(encodedChunk);
+        videoDecoderFor720p.decode(encodedChunk);
         // }
+      }
+      return;
+    } else if (frameType === 4 || frameType === 5) {
+      const type = frameType === 4 ? "key" : "delta";
+
+      if (type === "key") {
+        keyFrameReceived = true;
+      }
+
+      if (keyFrameReceived) {
+        if (videoDecoderForScreenShare.state === "closed") {
+          videoDecoderForScreenShare = new VideoDecoder(
+            createVideoInit("screen")
+          );
+          videoDecoderForScreenShare.configure(screenShareConfig);
+        }
+        const encodedChunk = new EncodedVideoChunk({
+          timestamp: timestamp * 1000,
+          type,
+          data,
+        });
+
+        videoDecoderForScreenShare.decode(encodedChunk);
       }
       return;
     } else if (frameType === 7) {
@@ -520,11 +576,11 @@ function resetWebsocket() {
   }
 
   // Reset decoder, buffer, trạng thái
-  if (videoDecoder360p) {
-    videoDecoder360p.reset();
+  if (videoDecoderFor360p) {
+    videoDecoderFor360p.reset();
   }
-  if (videoDecoder720p) {
-    videoDecoder720p.reset();
+  if (videoDecoderFor720p) {
+    videoDecoderFor720p.reset();
   }
   if (audioDecoder) {
     audioDecoder.reset();
@@ -561,17 +617,17 @@ function stop() {
     mediaWebsocket = null;
   }
 
-  if (videoDecoder360p) {
+  if (videoDecoderFor360p) {
     try {
-      videoDecoder360p.close();
+      videoDecoderFor360p.close();
     } catch (e) { }
-    videoDecoder360p = null;
+    videoDecoderFor360p = null;
   }
-  if (videoDecoder720p) {
+  if (videoDecoderFor720p) {
     try {
-      videoDecoder720p.close();
+      videoDecoderFor720p.close();
     } catch (e) { }
-    videoDecoder720p = null;
+    videoDecoderFor720p = null;
   }
   if (audioDecoder) {
     try {

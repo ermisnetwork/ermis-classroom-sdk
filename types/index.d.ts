@@ -243,6 +243,9 @@ export declare class Room extends EventEmitter {
   renderParticipantTiles(): void;
   getInfo(): RoomInfo;
 
+  startScreenShare(): Promise<void>;
+  stopScreenShare(): Promise<void>;
+
   sendMessage(text: string, metadata?: SendMessageOptions): Promise<ChatMessage>;
   deleteMessage(messageId: string): Promise<boolean>;
   updateMessage(messageId: string, newText: string, metadata?: SendMessageOptions): Promise<boolean>;
@@ -400,6 +403,50 @@ export declare class ErmisClassroom {
     userId: string,
     options?: ConnectionOptions
   ): Promise<ErmisClient>;
+}
+
+// Media Utilities
+export namespace MediaUtils {
+  interface GetUserMediaOptions {
+    audio?: boolean;
+    video?: boolean;
+    audioConstraints?: MediaTrackConstraints;
+    videoConstraints?: MediaTrackConstraints;
+    fallbackToAudioOnly?: boolean;
+    fallbackToVideoOnly?: boolean;
+  }
+
+  interface MediaDevicesInfo {
+    hasCamera: boolean;
+    hasMicrophone: boolean;
+    cameras: MediaDeviceInfo[];
+    microphones: MediaDeviceInfo[];
+    speakers: MediaDeviceInfo[];
+  }
+
+  interface StreamInfo {
+    hasVideo: boolean;
+    hasAudio: boolean;
+    videoTrackCount: number;
+    audioTrackCount: number;
+    videoTracks: MediaStreamTrack[];
+    audioTracks: MediaStreamTrack[];
+  }
+
+  export function getUserMedia(
+    options?: GetUserMediaOptions
+  ): Promise<MediaStream | null>;
+
+  export function checkMediaDevices(): Promise<MediaDevicesInfo>;
+
+  export function requestMediaPermissions(
+    audio?: boolean,
+    video?: boolean
+  ): Promise<boolean>;
+
+  export function stopMediaStream(stream: MediaStream | null): void;
+
+  export function getStreamInfo(stream: MediaStream | null): StreamInfo;
 }
 
 // Named exports

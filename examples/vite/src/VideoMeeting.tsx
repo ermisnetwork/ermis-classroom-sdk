@@ -12,6 +12,8 @@ import {
   MdCallEnd,
   MdPushPin,
   MdOutlinePushPin,
+  MdScreenShare,
+  MdStopScreenShare,
 } from "react-icons/md";
 import { MdPanTool } from "react-icons/md";
 
@@ -413,6 +415,8 @@ const VideoMeeting: React.FC = () => {
   const [isMicEnabled, setIsMicEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isHandRaised, setIsHandRaised] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [screenShareStreams, setScreenShareStreams] = useState<Map<string, { stream: MediaStream; userName: string }>>(new Map());
   const [pinMenuOpen, setPinMenuOpen] = useState<string | null>(null); // Stores participantId of open menu
   const [pinType, setPinType] = useState<'local' | 'everyone' | null>(null); // Track pin type
   const [showPinConfirm, setShowPinConfirm] = useState(false); // Confirmation dialog
@@ -660,8 +664,63 @@ const VideoMeeting: React.FC = () => {
       });
     });
 
+    // Screen share events
+    client.on("screenShareStarted", (data: any) => {
+      console.log("Screen share started", data);
+      setIsScreenSharing(true);
+
+      // Add local screen share to the map
+      if (data.stream && data.participant) {
+        setScreenShareStreams((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(data.participant.userId, {
+            stream: data.stream,
+            userName: data.participant.userId,
+          });
+          return newMap;
+        });
+      }
+    });
+
+    client.on("screenShareStopped", () => {
+      console.log("Screen share stopped");
+      setIsScreenSharing(false);
+
+      // Remove local screen share from the map
+      setScreenShareStreams((prev) => {
+        const newMap = new Map(prev);
+        newMap.delete(userId);
+        return newMap;
+      });
+    });
+
+    client.on("remoteScreenShareStreamReady", (data: any) => {
+      console.log("Remote screen share stream ready:", data.participant.userId);
+      setScreenShareStreams((prev) => {
+        const newMap = new Map(prev);
+        newMap.set(data.participant.userId, {
+          stream: data.stream,
+          userName: data.participant.userId,
+        });
+        return newMap;
+      });
+    });
+
+    client.on("remoteScreenShareStopped", (data: any) => {
+      console.log("Remote screen share stopped:", data.participant.userId);
+      setScreenShareStreams((prev) => {
+        const newMap = new Map(prev);
+        newMap.delete(data.participant.userId);
+        return newMap;
+      });
+    });
+
     client.on(events.ERROR, (data: any) => {
       console.error(`SDK Error in ${data.action}:`, data.error.message);
+      // Reset screen sharing state on error
+      if (data.action === "startScreenShare" || data.action === "stopScreenShare") {
+        setIsScreenSharing(false);
+      }
     });
   }, []);
 
@@ -766,6 +825,22 @@ const VideoMeeting: React.FC = () => {
     });
   };
 
+  // Toggle screen share
+  const handleToggleScreenShare = async () => {
+    if (!currentRoom) return;
+
+    try {
+      if (isScreenSharing) {
+        await currentRoom.stopScreenShare();
+      } else {
+        await currentRoom.startScreenShare();
+      }
+    } catch (error) {
+      console.error("Failed to toggle screen share:", error);
+      setIsScreenSharing(false);
+    }
+  };
+
   // Leave room
   const handleLeaveRoom = async () => {
     if (!clientRef.current || !isInRoom) return;
@@ -776,9 +851,11 @@ const VideoMeeting: React.FC = () => {
       setCurrentRoom(null);
       setParticipants(new Map());
       setRemoteStreams(new Map());
+      setScreenShareStreams(new Map());
       setIsMicEnabled(true);
       setIsVideoEnabled(true);
       setIsHandRaised(false);
+      setIsScreenSharing(false);
     } catch (error) {
       console.error("Failed to leave room:", error);
     }
@@ -962,8 +1039,25 @@ const VideoMeeting: React.FC = () => {
       })),
     ];
 
-    return allParticipants.map((participant) => {
+    // Add screen share tiles
+    const screenShareTiles = Array.from(screenShareStreams.entries()).map(([screenShareUserId, data]) => ({
+      userId: `${screenShareUserId}-screenshare`,
+      isLocal: screenShareUserId === userId, // Mark as local if it's the current user's screen share
+      isAudioEnabled: false,
+      isVideoEnabled: true,
+      isScreenShare: true,
+      screenShareUserId: screenShareUserId,
+      userName: data.userName,
+      stream: data.stream,
+      role: undefined,
+    }));
+
+    // Combine regular participants with screen share tiles
+    const allTiles = [...allParticipants, ...screenShareTiles];
+
+    return allTiles.map((participant: any) => {
       const isPinned = pinnedUserId === participant.userId;
+      const isScreenShareTile = participant.isScreenShare === true;
 
       return (
         <ParticipantVideoContainer
@@ -973,9 +1067,9 @@ const VideoMeeting: React.FC = () => {
           <video
             autoPlay
             playsInline
-            muted={participant.isLocal}
+            muted={participant.isLocal && !isScreenShareTile}
             ref={
-              participant.isLocal
+              participant.isLocal && !isScreenShareTile
                 ? localVideoRef
                 : (videoElement) => {
                   if (videoElement && participant.stream) {
@@ -984,75 +1078,83 @@ const VideoMeeting: React.FC = () => {
                 }
             }
           />
-          {/* Show camera off overlay for both local and remote */}
-          {!participant.isVideoEnabled && (
+          {/* Show camera off overlay for both local and remote (but not for screen shares) */}
+          {!participant.isVideoEnabled && !isScreenShareTile && (
             <LocalVideoOverlay>
               <MdVideocamOff />
             </LocalVideoOverlay>
           )}
           <ParticipantInfo>
-            {participant.isLocal ? "You" : participant.userId}
-            {!participant.isAudioEnabled && (
+            {isScreenShareTile
+              ? participant.isLocal
+                ? "You - Screen Share"
+                : `${participant.userName} - Screen Share`
+              : participant.isLocal ? "You" : participant.userId
+            }
+            {!participant.isAudioEnabled && !isScreenShareTile && (
               <span>
                 <MdMicOff />
               </span>
             )}
             {participant.role === "owner" && <OwnerBadge>OWNER</OwnerBadge>}
-            {(participant as any).isScreenSharing && (
+            {!isScreenShareTile && (participant as any).isScreenSharing && (
               <span title="Sharing screen">📺</span>
             )}
-            {(participant as any).isHandRaised && (
+            {!isScreenShareTile && (participant as any).isHandRaised && (
               <span title="Hand raised" style={{ color: "#ffa500" }}>
                 <MdPanTool />
               </span>
             )}
-            {isPinned && (
+            {isPinned && !isScreenShareTile && (
               <span title="Pinned" style={{ color: "#ffd700" }}>
                 <MdPushPin />
               </span>
             )}
           </ParticipantInfo>
 
-          <ParticipantActions className="participant-actions">
-            <PinButtonContainer>
-              <ActionButton
-                $isActive={isPinned}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setPinMenuOpen(pinMenuOpen === participant.userId ? null : participant.userId);
-                }}
-                title="Pin options"
-              >
-                {isPinned ? <MdPushPin size={16} /> : <MdOutlinePushPin size={16} />}
-              </ActionButton>
+          {/* Don't show pin actions for screen share tiles */}
+          {!isScreenShareTile && (
+            <ParticipantActions className="participant-actions">
+              <PinButtonContainer>
+                <ActionButton
+                  $isActive={isPinned}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPinMenuOpen(pinMenuOpen === participant.userId ? null : participant.userId);
+                  }}
+                  title="Pin options"
+                >
+                  {isPinned ? <MdPushPin size={16} /> : <MdOutlinePushPin size={16} />}
+                </ActionButton>
 
-              <PinMenu $show={pinMenuOpen === participant.userId}>
-                <PinMenuItem
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handlePinLocal(participant.userId);
-                    setPinMenuOpen(null);
-                  }}
-                >
-                  <MdPushPin size={14} />
-                  Pin locally {pinType === 'local' && isPinned && '✓'}
-                </PinMenuItem>
-                <PinMenuItem
-                  $disabled={!isHost}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (isHost) {
-                      handlePinForEveryone(participant.userId);
+                <PinMenu $show={pinMenuOpen === participant.userId}>
+                  <PinMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePinLocal(participant.userId);
                       setPinMenuOpen(null);
-                    }
-                  }}
-                >
-                  <MdPushPin size={14} />
-                  Pin for everyone {pinType === 'everyone' && isPinned && '✓'} {!isHost && "(Host only)"}
-                </PinMenuItem>
-              </PinMenu>
-            </PinButtonContainer>
-          </ParticipantActions>
+                    }}
+                  >
+                    <MdPushPin size={14} />
+                    Pin locally {pinType === 'local' && isPinned && '✓'}
+                  </PinMenuItem>
+                  <PinMenuItem
+                    $disabled={!isHost}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isHost) {
+                        handlePinForEveryone(participant.userId);
+                        setPinMenuOpen(null);
+                      }
+                    }}
+                  >
+                    <MdPushPin size={14} />
+                    Pin for everyone {pinType === 'everyone' && isPinned && '✓'} {!isHost && "(Host only)"}
+                  </PinMenuItem>
+                </PinMenu>
+              </PinButtonContainer>
+            </ParticipantActions>
+          )}
         </ParticipantVideoContainer>
       );
     });
@@ -1094,7 +1196,7 @@ const VideoMeeting: React.FC = () => {
       )}
 
       <VideoContainer>
-        <MainVideoStyled $totalParticipants={participants.size}>
+        <MainVideoStyled $totalParticipants={participants.size + screenShareStreams.size}>
           {renderParticipantVideos()}
         </MainVideoStyled>
 
@@ -1132,6 +1234,18 @@ const VideoMeeting: React.FC = () => {
             </ControlButton>
 
             <ControlButton
+              $isActive={isScreenSharing}
+              onClick={handleToggleScreenShare}
+              title={isScreenSharing ? "Stop sharing screen" : "Share screen"}
+            >
+              {isScreenSharing ? (
+                <MdStopScreenShare size={20} />
+              ) : (
+                <MdScreenShare size={20} />
+              )}
+            </ControlButton>
+
+            <ControlButton
               variant="leave"
               onClick={handleLeaveRoom}
               title="Leave room"
@@ -1141,6 +1255,8 @@ const VideoMeeting: React.FC = () => {
           </ControlsContainer>
         )}
       </VideoContainer>
+
+
 
       {/* Pin Confirmation Dialog */}
       {showPinConfirm && (

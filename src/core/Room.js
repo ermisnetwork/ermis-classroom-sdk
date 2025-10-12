@@ -173,7 +173,7 @@ class Room extends EventEmitter {
     }
 
     try {
-      this.emit('creatingBreakoutRoom', {room: this, config});
+      this.emit('creatingBreakoutRoom', { room: this, config });
 
       const roomsData = config.rooms.map(roomConfig => {
         const formattedParticipants = (roomConfig.participants || []).map(p => {
@@ -216,12 +216,12 @@ class Room extends EventEmitter {
         this.subRooms.set(subRoom.id, subRoom);
         createdRooms.push(subRoom)
 
-        this.emit('subRoomCreated', {room: this, subRoom});
+        this.emit('subRoomCreated', { room: this, subRoom });
       }
 
       return createdRooms;
     } catch (err) {
-      this.emit('error', {room: this, err, action: 'createBreakoutRooms'});
+      this.emit('error', { room: this, err, action: 'createBreakoutRooms' });
       throw err;
     }
   }
@@ -562,6 +562,7 @@ class Room extends EventEmitter {
       role: memberData.role,
       roomId: this.id,
       isLocal,
+      isScreenSharing: memberData.is_screen_sharing || false,
     });
 
     // Setup participant events
@@ -830,6 +831,124 @@ class Room extends EventEmitter {
 
     await subscriber.start();
     participant.setSubscriber(subscriber);
+
+    if (participant.isScreenSharing) {
+      await this.handleRemoteScreenShare(
+        participant.userId,
+        participant.streamId,
+        true
+      );
+    }
+  }
+
+  /**
+   * Start screen sharing for local participant
+   */
+  async startScreenShare() {
+    if (!this.localParticipant || !this.localParticipant.publisher) {
+      throw new Error("Local participant or publisher not available");
+    }
+
+    try {
+      this.emit("screenShareStarting", { room: this });
+
+      // Get display media
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { width: 1920, height: 1080 },
+        audio: true,
+      });
+
+      // Start screen share through publisher
+      await this.localParticipant.publisher.startShareScreen(screenStream);
+
+      this.localParticipant.isScreenSharing = true;
+      this.emit("screenShareStarted", {
+        room: this,
+        stream: screenStream,
+        participant: this.localParticipant.getInfo()
+      });
+      return screenStream;
+    } catch (error) {
+      this.emit("error", { room: this, error, action: "startScreenShare" });
+      throw error;
+    }
+  }
+
+  /**
+   * Stop screen sharing for local participant
+   */
+  async stopScreenShare() {
+    if (!this.localParticipant || !this.localParticipant.publisher) {
+      throw new Error("Local participant or publisher not available");
+    }
+
+    try {
+      this.emit("screenShareStopping", { room: this });
+
+      await this.localParticipant.publisher.stopShareScreen();
+
+      this.localParticipant.isScreenSharing = false;
+      this.emit("screenShareStopped", { room: this });
+    } catch (error) {
+      this.emit("error", { room: this, error, action: "stopScreenShare" });
+      throw error;
+    }
+  }
+
+  /**
+   * Handle remote screen share
+   */
+  async handleRemoteScreenShare(participantId, screenStreamId, isStarting) {
+    const participant = this.participants.get(participantId);
+    if (!participant) return;
+
+    if (isStarting) {
+      // Create subscriber for screen share
+      const screenSubscriber = new Subscriber({
+        streamId: screenStreamId,
+        roomId: this.id,
+        host: this.mediaConfig.host,
+        isScreenSharing: true,
+        streamOutputEnabled: true,
+        onStatus: (msg, isError) => {
+          console.log(`Screen share status: ${msg}`);
+        },
+        audioWorkletUrl: "/workers/audio-worklet1.js",
+        mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
+      });
+
+      // Add to audio mixer if has audio
+      if (this.audioMixer) {
+        screenSubscriber.setAudioMixer(this.audioMixer);
+      }
+
+      // Setup stream event forwarding
+      screenSubscriber.on("remoteStreamReady", (data) => {
+        this.emit("remoteScreenShareStreamReady", {
+          ...data,
+          participant: participant.getInfo(),
+          roomId: this.id,
+        });
+      });
+
+      await screenSubscriber.start();
+
+      // Store reference
+      participant.screenSubscriber = screenSubscriber;
+      participant.isScreenSharing = true;
+
+      this.emit("remoteScreenShareStarted", { room: this, participant });
+    } else {
+      // Stop screen share
+      if (participant.screenSubscriber) {
+        participant.screenSubscriber.stop();
+        participant.screenSubscriber = null;
+      }
+
+      participant.isScreenSharing = false;
+
+      this.emit("remoteScreenShareStopped", { room: this, participant });
+    }
   }
 
   /**
@@ -1056,6 +1175,28 @@ class Room extends EventEmitter {
           participant,
           raised: false,
         });
+      }
+    }
+
+    if (event.type === "start_share_screen") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant && participant.userId !== this.localParticipant?.userId) {
+        await this.handleRemoteScreenShare(
+          participant.userId,
+          event.participant.stream_id,
+          true
+        );
+      }
+    }
+
+    if (event.type === "stop_share_screen") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant && participant.userId !== this.localParticipant?.userId) {
+        await this.handleRemoteScreenShare(
+          participant.userId,
+          event.participant.stream_id,
+          false
+        );
       }
     }
   }

@@ -12,6 +12,11 @@ class Subscriber extends EventEmitter {
     this.streamId = config.streamId || "";
     this.roomId = config.roomId || "";
     this.host = config.host || "stream-gate.bandia.vn";
+    this.userMediaWorker =
+      config.userMediaWorker ||
+      "sfu-adaptive-bitrate-webrtc.ermis-network.workers.dev";
+    this.screenShareWorker =
+      config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev";
     this.isOwnStream = config.isOwnStream || false;
 
     // Media configuration
@@ -20,6 +25,12 @@ class Subscriber extends EventEmitter {
       config.audioWorkletUrl || "/workers/audio-worklet1.js";
     this.mstgPolyfillUrl =
       config.mstgPolyfillUrl || "/polyfills/MSTG_polyfill.js";
+
+    // Screen share flag
+    this.isScreenSharing = config.isScreenSharing || false;
+
+    // Stream output flag
+    this.streamOutputEnabled = config.streamOutputEnabled !== false;
 
     // State
     this.isStarted = false;
@@ -194,7 +205,11 @@ class Subscriber extends EventEmitter {
         });
       };
 
-      const mediaUrl = `wss://sfu-adaptive-bitrate-webrtc.ermis-network.workers.dev/meeting/${this.roomId}/${this.streamId}`;
+      const workerHost = this.isScreenSharing
+        ? this.screenShareWorker
+        : this.userMediaWorker;
+
+      const mediaUrl = `wss://${workerHost}/meeting/${this.roomId}/${this.streamId}`;
       console.log("try to init worker with url:", mediaUrl);
 
       this.worker.postMessage(
@@ -203,6 +218,7 @@ class Subscriber extends EventEmitter {
           data: { mediaUrl },
           port: channelPort,
           quality: "360p", // default quality
+          isShare: this.isScreenSharing,
         },
         [channelPort]
       );
