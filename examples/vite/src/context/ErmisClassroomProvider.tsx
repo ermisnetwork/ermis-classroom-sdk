@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ErmisClassroomContext } from './ErmisClassroomContext';
-import ErmisClassroom, { type Participant, type Room, MediaDeviceManager } from 'ermis-classroom-sdk';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ErmisClassroomContext } from "./ErmisClassroomContext";
+import ErmisClassroom, {
+  type Participant,
+  type Room,
+  MediaDeviceManager,
+} from "ermis-classroom-sdk";
 
 interface ErmisClassroomConfig {
   host: string;
@@ -17,7 +21,11 @@ interface ErmisClassroomProviderProps {
   children: React.ReactNode;
 }
 
-export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, children }: ErmisClassroomProviderProps) => {
+export const ErmisClassroomProvider = ({
+  config,
+  videoRef: initialVideoRef,
+  children,
+}: ErmisClassroomProviderProps) => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
 
@@ -30,17 +38,28 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
       reconnectAttempts: config.reconnectAttempts,
       reconnectDelay: config.reconnectDelay,
     }),
-    [config.host, config.debug, config.webtpUrl, config.apiUrl, config.reconnectAttempts, config.reconnectDelay]
+    [
+      config.host,
+      config.debug,
+      config.webtpUrl,
+      config.apiUrl,
+      config.reconnectAttempts,
+      config.reconnectDelay,
+    ]
   );
   const cfgKey = useMemo(() => JSON.stringify(cfg), [cfg]);
 
   const [roomCode, setRoomCode] = useState<string>();
   const [userId, setUserId] = useState<string>();
-  const [participants, setParticipants] = useState<Map<string, Participant>>(new Map());
-  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
+  const [participants, setParticipants] = useState<Map<string, Participant>>(
+    new Map()
+  );
+  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(
+    new Map()
+  );
   const [micEnabled, setMicEnabled] = useState(true);
   const [handRaised, setHandRaised] = useState(false);
-  const [pinType, setPinType] = useState<'local' | 'everyone' | null>(null);
+  const [pinType, setPinType] = useState<"local" | "everyone" | null>(null);
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
   const [inRoom, setInRoom] = useState(false);
   const [videoEnabled, setVideoEnabled] = useState(true);
@@ -63,9 +82,9 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
 
     const on = (evt: string, handler: (...args: any[]) => void) => {
       client.on(evt, handler);
-      if (typeof client.off === 'function') {
+      if (typeof client.off === "function") {
         unsubs.push(() => client.off(evt, handler));
-      } else if (typeof client.removeListener === 'function') {
+      } else if (typeof client.removeListener === "function") {
         unsubs.push(() => client.removeListener(evt, handler));
       }
     };
@@ -77,7 +96,7 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     });
 
     on(events.REMOTE_STREAM_READY, (event: any) => {
-      setRemoteStreams(prev => {
+      setRemoteStreams((prev) => {
         const updated = new Map(prev);
         updated.set(event.participant.userId, event.stream);
         return updated;
@@ -85,20 +104,22 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     });
 
     on(events.ROOM_JOINED, (data: any) => {
-      console.log('ROOM_JOINED', data);
+      console.log("ROOM_JOINED", data);
     });
 
     on(events.PARTICIPANT_ADDED, (data: any) => {
-      setParticipants(prev => new Map(prev.set(data.participant.userId, data.participant)));
+      setParticipants(
+        (prev) => new Map(prev.set(data.participant.userId, data.participant))
+      );
     });
 
     on(events.PARTICIPANT_REMOVED, (data: any) => {
-      setParticipants(prev => {
+      setParticipants((prev) => {
         const updated = new Map(prev);
         updated.delete(data.participant.userId);
         return updated;
       });
-      setRemoteStreams(prev => {
+      setRemoteStreams((prev) => {
         const updated = new Map(prev);
         updated.delete(data.participant.userId);
         return updated;
@@ -106,11 +127,11 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     });
 
     on(events.ROOM_LEFT, (data: any) => {
-      console.log('ROOM_LEFT', data);
+      console.log("ROOM_LEFT", data);
     });
 
     on(events.REMOTE_AUDIO_STATUS_CHANGED, (data: any) => {
-      setParticipants(prev => {
+      setParticipants((prev) => {
         const updated = new Map(prev);
         const p = updated.get(data.participant.userId);
         if (p) {
@@ -122,7 +143,7 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     });
 
     on(events.REMOTE_VIDEO_STATUS_CHANGED, (data: any) => {
-      setParticipants(prev => {
+      setParticipants((prev) => {
         const updated = new Map(prev);
         const p = updated.get(data.participant.userId);
         if (p) {
@@ -133,10 +154,10 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
       });
     });
 
-    on('audioToggled', (data: any) => {
+    on("audioToggled", (data: any) => {
       if (data.participant.isLocal) {
         setMicEnabled(data.enabled);
-        setParticipants(prev => {
+        setParticipants((prev) => {
           const updated = new Map(prev);
           const p = updated.get(data.participant.userId);
           if (p) {
@@ -148,10 +169,10 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
       }
     });
 
-    on('videoToggled', (data: any) => {
+    on("videoToggled", (data: any) => {
       if (data.participant.isLocal) {
         setVideoEnabled(data.enabled);
-        setParticipants(prev => {
+        setParticipants((prev) => {
           const updated = new Map(prev);
           const p = updated.get(data.participant.userId);
           if (p) {
@@ -163,10 +184,10 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
       }
     });
 
-    on('handRaiseToggled', (data: any) => {
+    on("handRaiseToggled", (data: any) => {
       if (data.participant.isLocal) {
         setHandRaised(data.enabled);
-        setParticipants(prev => {
+        setParticipants((prev) => {
           const updated = new Map(prev);
           const p = updated.get(data.participant.userId);
           if (p) {
@@ -179,15 +200,15 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     });
 
     on(events.SCREEN_SHARE_STARTED, (data: any) => {
-      console.log('SCREEN_SHARE_STARTED', data);
+      console.log("SCREEN_SHARE_STARTED", data);
     });
-    
+
     on(events.SCREEN_SHARE_STOPPED, (data: any) => {
-      console.log('SCREEN_SHARE_STOPPED', data);
+      console.log("SCREEN_SHARE_STOPPED", data);
     });
 
     on(events.REMOTE_SCREEN_SHARE_STARTED, (data: any) => {
-      setParticipants(prev => {
+      setParticipants((prev) => {
         const updated = new Map(prev);
         const p = updated.get(data.participant.userId);
         if (p) {
@@ -199,7 +220,7 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     });
 
     on(events.REMOTE_SCREEN_SHARE_STOPPED, (data: any) => {
-      setParticipants(prev => {
+      setParticipants((prev) => {
         const updated = new Map(prev);
         const p = updated.get(data.participant.userId);
         if (p) {
@@ -211,17 +232,17 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     });
 
     on(events.PARTICIPANT_PINNED_FOR_EVERYONE, () => {
-      setPinType('everyone');
-      setParticipants(prev => new Map(prev));
+      setPinType("everyone");
+      setParticipants((prev) => new Map(prev));
     });
 
     on(events.PARTICIPANT_UNPINNED_FOR_EVERYONE, () => {
       setPinType(null);
-      setParticipants(prev => new Map(prev));
+      setParticipants((prev) => new Map(prev));
     });
 
     on(events.REMOTE_HAND_RAISING_STATUS_CHANGED, (data: any) => {
-      setParticipants(prev => {
+      setParticipants((prev) => {
         const updated = new Map(prev);
         const p = updated.get(data.participant.userId);
         if (p) {
@@ -241,12 +262,12 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
 
   useEffect(() => {
     if (clientRef.current) {
-      if (typeof clientRef.current.updateConfig === 'function') {
+      if (typeof clientRef.current.updateConfig === "function") {
         clientRef.current.updateConfig(cfg);
         return;
       }
       try {
-        unsubRef.current.forEach(fn => fn());
+        unsubRef.current.forEach((fn) => fn());
       } catch {}
       unsubRef.current = [];
       try {
@@ -263,7 +284,7 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
 
     return () => {
       try {
-        unsubRef.current.forEach(fn => fn());
+        unsubRef.current.forEach((fn) => fn());
       } catch {}
       unsubRef.current = [];
       try {
@@ -283,15 +304,15 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
         setDevices(manager.getDevices());
         setSelectedDevices(manager.getSelectedDevices());
 
-        manager.on('devicesChanged', (newDevices: any) => {
+        manager.on("devicesChanged", (newDevices: any) => {
           setDevices(newDevices);
         });
 
-        manager.on('deviceSelected', () => {
+        manager.on("deviceSelected", () => {
           setSelectedDevices(manager.getSelectedDevices());
         });
       } catch (error) {
-        console.error('Failed to initialize device manager:', error);
+        console.error("Failed to initialize device manager:", error);
       }
     };
 
@@ -305,36 +326,39 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
 
   const authenticate = useCallback(async (userIdToAuth: string) => {
     const client = clientRef.current;
-    if (!client) throw new Error('Client not initialized');
+    if (!client) throw new Error("Client not initialized");
     setUserId(userIdToAuth);
     await client.authenticate(userIdToAuth);
   }, []);
 
-  const joinRoom = useCallback(async (code: string, customStream?: MediaStream) => {
-    const client = clientRef.current;
-    if (!client) throw new Error('Client not initialized');
-    const result = await client.joinRoom(code, customStream);
-    setCurrentRoom(result.room);
-    setRoomCode(code);
-    setInRoom(true);
+  const joinRoom = useCallback(
+    async (code: string, customStream?: MediaStream) => {
+      const client = clientRef.current;
+      if (!client) throw new Error("Client not initialized");
+      const result = await client.joinRoom(code, customStream);
+      setCurrentRoom(result.room);
+      setRoomCode(code);
+      setInRoom(true);
 
-    setParticipants(prev => {
-      const map = new Map(prev);
-      result.participants.forEach((p: Participant) => {
-        map.set(p.userId, p);
-        if (p.isLocal) {
-          setMicEnabled(p.isAudioEnabled);
-          setVideoEnabled(p.isVideoEnabled);
-          setHandRaised((p as any).isHandRaised || false);
-        }
+      setParticipants((prev) => {
+        const map = new Map(prev);
+        result.participants.forEach((p: Participant) => {
+          map.set(p.userId, p);
+          if (p.isLocal) {
+            setMicEnabled(p.isAudioEnabled);
+            setVideoEnabled(p.isVideoEnabled);
+            setHandRaised((p as any).isHandRaised || false);
+          }
+        });
+        return map;
       });
-      return map;
-    });
 
-    if (previewStream) {
-      setPreviewStream(null);
-    }
-  }, [previewStream]);
+      if (previewStream) {
+        setPreviewStream(null);
+      }
+    },
+    [previewStream]
+  );
 
   const leaveRoom = useCallback(async () => {
     const client = clientRef.current;
@@ -357,7 +381,7 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     if (!p) return;
     await p.toggleMicrophone();
     setMicEnabled(p.isAudioEnabled);
-    setParticipants(prev => {
+    setParticipants((prev) => {
       const updated = new Map(prev);
       updated.set(userId, p);
       return updated;
@@ -370,7 +394,7 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     if (!p) return;
     await p.toggleCamera();
     setVideoEnabled(p.isVideoEnabled);
-    setParticipants(prev => {
+    setParticipants((prev) => {
       const updated = new Map(prev);
       updated.set(userId, p);
       return updated;
@@ -383,7 +407,7 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     if (!p) return;
     await p.toggleRaiseHand();
     setHandRaised(p.isHandRaised);
-    setParticipants(prev => {
+    setParticipants((prev) => {
       const updated = new Map(prev);
       updated.set(userId, p);
       return updated;
@@ -391,7 +415,7 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
   }, [participants, userId]);
 
   const togglePin = useCallback(
-    async (participantId: string, pinFor: 'local' | 'everyone') => {
+    async (participantId: string, pinFor: "local" | "everyone") => {
       if (!currentRoom) return;
       const target = currentRoom.getParticipant(participantId);
       if (!target) return;
@@ -401,13 +425,13 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
 
       const isPinned = currentRoom.pinnedParticipant?.userId === participantId;
 
-      setParticipants(prev => {
+      setParticipants((prev) => {
         const updated = new Map(prev);
         updated.set(participantId, target);
         return updated;
       });
 
-      if (pinFor === 'everyone') {
+      if (pinFor === "everyone") {
         if (isPinned) {
           await local.publisher.unpinForEveryone(target.streamId);
         } else {
@@ -418,103 +442,115 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     [currentRoom]
   );
 
-  const switchCamera = useCallback(async (deviceId: string) => {
-    if (!deviceManagerRef.current || !currentRoom) return;
+  const switchCamera = useCallback(
+    async (deviceId: string) => {
+      if (!deviceManagerRef.current || !currentRoom) return;
 
-    try {
-      deviceManagerRef.current.selectCamera(deviceId);
-      const local = currentRoom.localParticipant as any;
-      if (local?.publisher) {
-        const result = await local.publisher.switchCamera(deviceId);
-
-        if (result?.videoOnlyStream) {
-          setLocalStream(result.videoOnlyStream);
+      try {
+        deviceManagerRef.current.selectCamera(deviceId);
+        const local = currentRoom.localParticipant as any;
+        if (local?.publisher) {
+          const result = await local.publisher.switchCamera(deviceId);
+          console.log("switchCamera result", result);
+          if (result?.videoOnlyStream) {
+            setLocalStream(result.videoOnlyStream);
+          }
         }
+      } catch (error) {
+        console.error("Failed to switch camera:", error);
       }
-    } catch (error) {
-      console.error('Failed to switch camera:', error);
-    }
-  }, [currentRoom]);
+    },
+    [currentRoom]
+  );
 
-  const switchMicrophone = useCallback(async (deviceId: string) => {
-    if (!deviceManagerRef.current || !currentRoom) return;
+  const switchMicrophone = useCallback(
+    async (deviceId: string) => {
+      if (!deviceManagerRef.current || !currentRoom) return;
 
-    try {
-      deviceManagerRef.current.selectMicrophone(deviceId);
-      const local = currentRoom.localParticipant as any;
-      if (local?.publisher) {
-        const result = await local.publisher.switchMicrophone(deviceId);
+      try {
+        deviceManagerRef.current.selectMicrophone(deviceId);
+        const local = currentRoom.localParticipant as any;
+        if (local?.publisher) {
+          const result = await local.publisher.switchMicrophone(deviceId);
 
-        if (result?.videoOnlyStream) {
-          setLocalStream(result.videoOnlyStream);
+          if (result?.videoOnlyStream) {
+            setLocalStream(result.videoOnlyStream);
+          }
         }
+      } catch (error) {
+        console.error("Failed to switch microphone:", error);
       }
-    } catch (error) {
-      console.error('Failed to switch microphone:', error);
-    }
-  }, [currentRoom]);
+    },
+    [currentRoom]
+  );
 
-  const getPreviewStream = useCallback(async (cameraId?: string, micId?: string) => {
-    try {
-      const constraints: any = {};
+  const getPreviewStream = useCallback(
+    async (cameraId?: string, micId?: string) => {
+      try {
+        const constraints: any = {};
 
-      if (cameraId || selectedDevices?.camera) {
-        constraints.video = {
-          deviceId: { exact: cameraId || selectedDevices?.camera },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 }
-        };
-      } else {
-        constraints.video = true;
+        if (cameraId || selectedDevices?.camera) {
+          constraints.video = {
+            deviceId: { exact: cameraId || selectedDevices?.camera },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 },
+          };
+        } else {
+          constraints.video = true;
+        }
+
+        if (micId || selectedDevices?.microphone) {
+          constraints.audio = {
+            deviceId: { exact: micId || selectedDevices?.microphone },
+            echoCancellation: true,
+            noiseSuppression: true,
+          };
+        } else {
+          constraints.audio = true;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        setPreviewStream(stream);
+        return stream;
+      } catch (error) {
+        console.error("Failed to get preview stream:", error);
+        throw error;
       }
-
-      if (micId || selectedDevices?.microphone) {
-        constraints.audio = {
-          deviceId: { exact: micId || selectedDevices?.microphone },
-          echoCancellation: true,
-          noiseSuppression: true
-        };
-      } else {
-        constraints.audio = true;
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      setPreviewStream(stream);
-      return stream;
-    } catch (error) {
-      console.error('Failed to get preview stream:', error);
-      throw error;
-    }
-  }, [selectedDevices]);
+    },
+    [selectedDevices]
+  );
 
   const stopPreviewStream = useCallback(() => {
     if (previewStream) {
-      previewStream.getTracks().forEach(track => track.stop());
+      previewStream.getTracks().forEach((track) => track.stop());
       setPreviewStream(null);
     }
   }, [previewStream]);
 
-  const replaceMediaStream = useCallback(async (newStream: MediaStream) => {
-    if (!currentRoom) return;
+  const replaceMediaStream = useCallback(
+    async (newStream: MediaStream) => {
+      if (!currentRoom) return;
 
-    try {
-      const local = currentRoom.localParticipant as any;
-      if (local?.publisher) {
-        const result = await local.replaceMediaStream(newStream);
+      try {
+        const local = currentRoom.localParticipant as any;
+        if (local?.publisher) {
+          const result = await local.replaceMediaStream(newStream);
 
-        if (result?.videoOnlyStream) {
-          setLocalStream(result.videoOnlyStream);
+          if (result?.videoOnlyStream) {
+            setLocalStream(result.videoOnlyStream);
+          }
+
+          setMicEnabled(result.hasAudio);
+          setVideoEnabled(result.hasVideo);
         }
-
-        setMicEnabled(result.hasAudio);
-        setVideoEnabled(result.hasVideo);
+      } catch (error) {
+        console.error("Failed to replace media stream:", error);
+        throw error;
       }
-    } catch (error) {
-      console.error('Failed to replace media stream:', error);
-      throw error;
-    }
-  }, [currentRoom]);
+    },
+    [currentRoom]
+  );
 
   const value = useMemo(
     () => ({
@@ -582,4 +618,3 @@ export const ErmisClassroomProvider = ({ config, videoRef: initialVideoRef, chil
     </ErmisClassroomContext.Provider>
   );
 };
-

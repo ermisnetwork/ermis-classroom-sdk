@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Multi-Source Switch Test</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      h1 {
+        text-align: center;
+        color: #333;
+      }
+      .container {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+      .panel {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+      .panel-title {
+        font-size: 14px;
+        color: #666;
+        margin: 0 0 10px 0;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+      video {
+        width: 100%;
+        height: auto;
+        background: #000;
+        border-radius: 4px;
+        margin-bottom: 10px;
+        border: 2px solid transparent;
+      }
+      .active-source video {
+        border-color: #4caf50;
+      }
+      .controls {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 15px;
+      }
+      button {
+        padding: 10px 16px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+      }
+      button:hover {
+        background: #0056b3;
+      }
+      button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      button.active {
+        background: #4caf50;
+      }
+      button.danger {
+        background: #f44336;
+      }
+      button.danger:hover {
+        background: #d32f2f;
+      }
+      .status {
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 10px;
+        font-size: 12px;
+        background: #e7f3ff;
+        border-left: 4px solid #007bff;
+      }
+      .status.error {
+        background: #ffe7e7;
+        border-left-color: #d32f2f;
+      }
+      .status.success {
+        background: #e7ffe7;
+        border-left-color: #4caf50;
+      }
+      .stats {
+        background: #f9f9f9;
+        padding: 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: monospace;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      .stat-line {
+        padding: 4px 0;
+        border-bottom: 1px solid #eee;
+        display: flex;
+        justify-content: space-between;
+      }
+      .stat-label {
+        color: #666;
+      }
+      .stat-value {
+        color: #333;
+        font-weight: bold;
+      }
+      h3 {
+        margin: 0 0 15px 0;
+        font-size: 16px;
+        color: #333;
+      }
+      .logs-panel {
+        grid-column: 1 / -1;
+      }
+      .logs-panel h3 {
+        margin-bottom: 10px;
+      }
+      #logs {
+        max-height: 200px;
+      }
+      .logs-panel .stat-line {
+        display: block;
+        padding: 3px 0;
+        font-size: 11px;
+      }
+      .source-selector {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+      }
+      .source-selector button {
+        flex: 1;
+        padding: 12px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Multi-Source Stream Switch Test</h1>
+    <p style="text-align: center; color: #666">
+      Compare Camera vs Screen Capture with smooth encoding/decoding
+    </p>
+
+    <div class="container">
+      <!-- Camera Input -->
+      <div class="panel">
+        <div class="panel-title">Source 1: Camera</div>
+        <video id="cameraVideo" autoplay playsinline></video>
+        <div class="status" id="cameraStatus">Not started</div>
+        <div class="controls">
+          <button onclick="startCamera()">Start</button>
+          <button onclick="stopCamera()" class="danger">Stop</button>
+        </div>
+        <div class="stats">
+          <div class="stat-line">
+            <span class="stat-label">Status:</span>
+            <span class="stat-value" id="cameraStreamStatus">idle</span>
+          </div>
+          <div class="stat-line">
+            <span class="stat-label">Resolution:</span>
+            <span class="stat-value" id="cameraRes">-</span>
+          </div>
+          <div class="stat-line">
+            <span class="stat-label">FPS:</span>
+            <span class="stat-value" id="cameraFps">-</span>
+          </div>
+          <div class="stat-line">
+            <span class="stat-label">Frames:</span>
+            <span class="stat-value" id="cameraFrames">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Display/Screen Input -->
+      <div class="panel">
+        <div class="panel-title">Source 2: Screen Capture</div>
+        <video id="screenVideo" autoplay playsinline></video>
+        <div class="status" id="screenStatus">Not started</div>
+        <div class="controls">
+          <button onclick="startScreen()">Start</button>
+          <button onclick="stopScreen()" class="danger">Stop</button>
+        </div>
+        <div class="stats">
+          <div class="stat-line">
+            <span class="stat-label">Status:</span>
+            <span class="stat-value" id="screenStreamStatus">idle</span>
+          </div>
+          <div class="stat-line">
+            <span class="stat-label">Resolution:</span>
+            <span class="stat-value" id="screenRes">-</span>
+          </div>
+          <div class="stat-line">
+            <span class="stat-label">FPS:</span>
+            <span class="stat-value" id="screenFps">-</span>
+          </div>
+          <div class="stat-line">
+            <span class="stat-label">Frames:</span>
+            <span class="stat-value" id="screenFrames">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Output -->
+      <div class="panel">
+        <div class="panel-title">Output: Encoded → Decoded</div>
+        <video id="outputVideo" autoplay playsinline></video>
+        <div class="status" id="outputStatus">Ready</div>
+        <div class="source-selector">
+          <button id="selectCamera" onclick="selectSource('camera')">
+            Use Camera
+          </button>
+          <button id="selectScreen" onclick="selectSource('screen')">
+            Use Screen
+          </button>
+        </div>
+        <div class="controls">
+          <button onclick="startEncoding()">Start Encoding</button>
+          <button onclick="stopEncoding()" class="danger">Stop</button>
+        </div>
+        <div class="stats">
+          <div class="stat-line">
+            <span class="stat-label">Current Source:</span>
+            <span class="stat-value" id="currentSource">-</span>
+          </div>
+          <div class="stat-line">
+            <span class="stat-label">Encoded Frames:</span>
+            <span class="stat-value" id="encodedFrames">0</span>
+          </div>
+          <div class="stat-line">
+            <span class="stat-label">Decoded Frames:</span>
+            <span class="stat-value" id="decodedFrames">0</span>
+          </div>
+          <div class="stat-line">
+            <span class="stat-label">Encode Queue:</span>
+            <span class="stat-value" id="encodeQueue">0</span>
+          </div>
+          <div class="stat-line">
+            <span class="stat-label">Processing:</span>
+            <span class="stat-value" id="isProcessing">no</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="panel logs-panel">
+      <h3>Event Logs</h3>
+      <div class="stats" id="logs"></div>
+    </div>
+
+    <script type="module">
+      let initAudioRecorder;
+      import { OpusAudioDecoder } from "/opus_decoder/opusDecoder.js";
+      (async function loadModule() {
+        try {
+          // const opusModule = await import(
+          //   `/stream_audio/opusStreamer1.js?t=${Date.now()}`
+          // );
+          const opusModule = await import(
+            `/opus_decoder/opusDecoder.js?t=${Date.now()}`
+          );
+          initAudioRecorder = opusModule.initAudioRecorder;
+          //   opusAudioDecoder = opusModule.opusAudioDecoder;
+          console.log("OpusStreamer module loaded");
+        } catch (err) {
+          console.error("Error loading modules:", err);
+        }
+      })();
+
+      const videoEncoderConfig = {
+        codec: "avc1.640c34",
+        width: 1280,
+        height: 720,
+        bitrate: 30,
+        framerate: 30,
+      };
+
+      let state = {
+        cameraStream: null,
+        screenStream: null,
+        currentSource: null,
+        currentReader: null,
+        videoEncoder: null,
+        videoDecoder: null,
+        videoWriter: null,
+        generator: null,
+        isEncoding: false,
+        isProcessing: false,
+        frameCounter: 0,
+        encodedFrames: 0,
+        decodedFrames: 0,
+        cameraFrames: 0,
+        screenFrames: 0,
+        lastEncoderConfig: null,
+        cameraAudioStream: null,
+        screenAudioStream: null,
+        opusAudioGenerator: null,
+        opusAudioWriter: null,
+        audioRecorder: null,
+        opusDecoder: null,
+        currentAudioStream: null,
+        baseTimestamp: 0,
+      };
+      let audioContext = null;
+      let audioWorkletNode = null;
+      let mediaStreamDestinationNode = null;
+      const videoElements = {
+        camera: document.getElementById("cameraVideo"),
+        screen: document.getElementById("screenVideo"),
+        output: document.getElementById("outputVideo"),
+      };
+
+      function log(message, isError = false) {
+        const logsDiv = document.getElementById("logs");
+        const time = new Date().toLocaleTimeString();
+        const entry = document.createElement("div");
+        entry.className = "stat-line";
+        entry.style.color = isError ? "#d32f2f" : "#333";
+        entry.textContent = `[${time}] ${message}`;
+        logsDiv.insertBefore(entry, logsDiv.firstChild);
+        if (logsDiv.children.length > 50)
+          logsDiv.removeChild(logsDiv.lastChild);
+      }
+
+      function updateStatus(
+        element,
+        message,
+        isError = false,
+        isSuccess = false
+      ) {
+        const statusDiv = document.getElementById(element);
+        statusDiv.textContent = message;
+        statusDiv.className = "status";
+        if (isError) statusDiv.classList.add("error");
+        if (isSuccess) statusDiv.classList.add("success");
+        log(message, isError);
+      }
+
+      async function startCamera() {
+        try {
+          if (state.cameraStream) {
+            state.cameraStream.getTracks().forEach((t) => t.stop());
+          }
+
+          const cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 640 },
+              height: { ideal: 480 },
+              frameRate: { ideal: 30 },
+            },
+            audio: true,
+          });
+
+          const cameraVideoTrack = cameraStream.getVideoTracks()[0];
+          const settings = cameraVideoTrack.getSettings();
+
+          const cameraAudioTrack = cameraStream.getAudioTracks()[0];
+          state.cameraAudioStream = new MediaStream();
+          if (cameraAudioTrack) {
+            state.cameraAudioStream.addTrack(cameraAudioTrack);
+          }
+
+          state.cameraStream = new MediaStream();
+          state.cameraStream.addTrack(cameraVideoTrack);
+
+          videoElements.camera.srcObject = state.cameraStream;
+          document.getElementById(
+            "cameraRes"
+          ).textContent = `${settings.width}x${settings.height}`;
+          document.getElementById("cameraFps").textContent = settings.frameRate;
+          document.getElementById("cameraStreamStatus").textContent = "active";
+
+          updateStatus("cameraStatus", "Camera started", false, true);
+        } catch (error) {
+          updateStatus("cameraStatus", `Error: ${error.message}`, true);
+        }
+      }
+
+      async function startScreen() {
+        try {
+          if (state.screenStream) {
+            state.screenStream.getTracks().forEach((t) => t.stop());
+          }
+
+          const screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+              cursor: "always",
+            },
+            audio: true,
+          });
+
+          const track = screenStream.getVideoTracks()[0];
+          const settings = track.getSettings();
+
+          const screenAudioTrack = screenStream.getAudioTracks()[0];
+
+          state.audioScreenStream = new MediaStream([screenAudioTrack]);
+
+          state.screenStream = new MediaStream([track]);
+
+          videoElements.screen.srcObject = state.screenStream;
+          document.getElementById(
+            "screenRes"
+          ).textContent = `${settings.width}x${settings.height}`;
+          document.getElementById("screenFps").textContent = settings.frameRate;
+          document.getElementById("screenStreamStatus").textContent = "active";
+
+          updateStatus("screenStatus", "Screen capture started", false, true);
+        } catch (error) {
+          if (error.name !== "NotAllowedError") {
+            updateStatus("screenStatus", `Error: ${error.message}`, true);
+          }
+        }
+      }
+
+      function stopCamera() {
+        if (state.cameraStream) {
+          state.cameraStream.getTracks().forEach((t) => t.stop());
+          state.cameraStream = null;
+        }
+        document.getElementById("cameraStreamStatus").textContent = "idle";
+        document.getElementById("cameraFrames").textContent = "0";
+        state.cameraFrames = 0;
+        if (state.currentSource === "camera") {
+          stopEncoding();
+        }
+        updateStatus("cameraStatus", "Camera stopped");
+      }
+
+      function stopScreen() {
+        if (state.screenStream) {
+          state.screenStream.getTracks().forEach((t) => t.stop());
+          state.screenStream = null;
+        }
+        document.getElementById("screenStreamStatus").textContent = "idle";
+        document.getElementById("screenFrames").textContent = "0";
+        state.screenFrames = 0;
+        if (state.currentSource === "screen") {
+          stopEncoding();
+        }
+        updateStatus("screenStatus", "Screen capture stopped");
+      }
+
+      async function initEncoder() {
+        initAudioSystem().catch((e) => {
+          console.error("Audio system init error:", e);
+        });
+        if (state.videoEncoder) {
+          await state.videoEncoder.flush().catch(() => {});
+          state.videoEncoder.close();
+        }
+
+        const stream =
+          state.currentSource === "camera"
+            ? state.cameraStream
+            : state.screenStream;
+        const track = stream?.getVideoTracks()[0];
+        if (!track) {
+          throw new Error("No video track");
+        }
+
+        const settings = track.getSettings();
+
+        state.videoEncoder = new VideoEncoder({
+          output: (chunk, metadata) => {
+            state.encodedFrames++;
+            document.getElementById("encodedFrames").textContent =
+              state.encodedFrames;
+            if (metadata.decoderConfig && state.videoDecoder) {
+              state.videoDecoder.configure(metadata.decoderConfig);
+            }
+            if (state.videoDecoder) {
+              state.baseTimestamp = chunk.timestamp / 1000;
+              state.videoDecoder.decode(chunk);
+            }
+          },
+          error: (e) =>
+            updateStatus("outputStatus", `Encoder error: ${e.message}`, true),
+        });
+
+        state.videoEncoder.configure(videoEncoderConfig);
+
+        state.lastEncoderConfig = {
+          width: settings.width,
+          height: settings.height,
+          frameRate: settings.frameRate,
+        };
+
+        const audioRecorderOptions = {
+          encoderApplication: 2051,
+          encoderComplexity: 0,
+          encoderFrameSize: 20,
+          timeSlice: 100,
+        };
+
+        state.currentAudioStream =
+          state.currentSource === "camera"
+            ? state.cameraAudioStream
+            : state.screenAudioStream;
+
+        state.audioRecorder = await initAudioRecorder(
+          state.currentAudioStream,
+          audioRecorderOptions
+        );
+        let audioTimestamp = 0;
+        state.audioRecorder.ondataavailable = (typedArray) => {
+          const chunk = new EncodedAudioChunk({
+            timestamp: audioTimestamp,
+            type: "key",
+            data: typedArray,
+          });
+          if (state.opusDecoder) state.opusDecoder.decode(chunk);
+          audioTimestamp += 85333; // Increment timestamp for next chunk
+        };
+
+        await state.audioRecorder.start({
+          timeSlice: audioRecorderOptions.timeSlice,
+        });
+
+        log(
+          `✓ Encoder initialized: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`
+        );
+      }
+
+      async function initDecoder() {
+        if (state.videoDecoder) {
+          await state.videoDecoder.flush().catch(() => {});
+          state.videoDecoder.close();
+        }
+
+        state.videoDecoder = new VideoDecoder({
+          output: async (frame) => {
+            state.decodedFrames++;
+            document.getElementById("decodedFrames").textContent =
+              state.decodedFrames;
+
+            if (state.videoWriter) {
+              try {
+                await state.videoWriter.write(frame);
+              } catch (e) {
+                console.error("Write error:", e);
+              }
+            }
+            frame.close();
+          },
+          error: (e) =>
+            updateStatus("outputStatus", `Decoder error: ${e.message}`, true),
+        });
+
+        state.videoDecoder.configure({
+          codec: videoEncoderConfig.codec,
+        });
+
+        state.opusDecoder = new OpusAudioDecoder({
+          output: async (audioData) => {
+            const channelData = [];
+            for (let i = 0; i < audioData.numberOfChannels; i++) {
+              const channel = new Float32Array(audioData.numberOfFrames);
+              audioData.copyTo(channel, { planeIndex: i });
+              channelData.push(channel);
+            }
+            audioWorkletNode.port.postMessage({
+              type: "audioData",
+              channelData: channelData,
+              timestamp: audioData.timestamp,
+              sampleRate: audioData.sampleRate,
+              numberOfFrames: audioData.numberOfFrames,
+              numberOfChannels: audioData.numberOfChannels,
+            });
+            audioData.close();
+          },
+          error: (e) => console.error("Opus decoder error:", e),
+        });
+
+        state.opusDecoder.configure();
+
+        log("✓ Decoder initialized");
+      }
+
+      async function initGenerator() {
+        if (state.generator) {
+          await state.generator.stop().catch(() => {});
+        }
+
+        state.generator = new MediaStreamTrackGenerator({ kind: "video" });
+        state.videoWriter = state.generator.writable.getWriter();
+        videoElements.output.srcObject = new MediaStream([state.generator]);
+        state.opusAudioGenerator = new MediaStreamTrackGenerator({
+          kind: "audio",
+        });
+        state.opusAudioWriter = state.opusAudioGenerator.writable.getWriter();
+
+        videoElements.output.srcObject.addTrack(state.opusAudioGenerator);
+        log("✓ MediaStreamTrackGenerator created");
+      }
+
+      async function selectSource(source) {
+        if (!state.isEncoding) {
+          updateStatus("outputStatus", "Start encoding first", true);
+          return;
+        }
+
+        const sourceStream =
+          source === "camera" ? state.cameraStream : state.screenStream;
+        if (!sourceStream) {
+          updateStatus("outputStatus", `${source} not available`, true);
+          return;
+        }
+
+        try {
+          log(`→ Switching to ${source}...`);
+          await switchSource(source);
+        } catch (error) {
+          updateStatus("outputStatus", `Switch error: ${error.message}`, true);
+        }
+      }
+
+      async function switchSource(source) {
+        // Dừng processing hiện tại
+        state.isProcessing = false;
+        document.getElementById("isProcessing").textContent = "no";
+
+        // Đóng reader cũ
+        if (state.currentReader) {
+          state.currentReader.cancel().catch(() => {});
+        }
+
+        // Chờ một chút để hoàn thành frame cuối
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        // Cập nhật source
+        state.currentSource = source;
+        document.getElementById("currentSource").textContent =
+          source.toUpperCase();
+
+        state.currentAudioStream =
+          source === "camera"
+            ? state.cameraAudioStream
+            : state.screenAudioStream;
+
+        // Kiểm tra format thay đổi
+        const newStream =
+          source === "camera" ? state.cameraStream : state.screenStream;
+        const newTrack = newStream.getVideoTracks()[0];
+        const newSettings = newTrack.getSettings();
+        console.warn("New source", source, "settings:", newSettings);
+
+        // Reset frame counter
+        state.frameCounter = 0;
+
+        // Restart processing
+        state.isProcessing = true;
+        document.getElementById("isProcessing").textContent = "yes";
+        processFrames();
+
+        updateStatus("outputStatus", `Switched to ${source}`, false, true);
+        log(`✓ Successfully switched to ${source}`);
+      }
+
+      function processFrames() {
+        if (!state.isProcessing || !state.isEncoding) return;
+
+        const stream =
+          state.currentSource === "camera"
+            ? state.cameraStream
+            : state.screenStream;
+        if (!stream) return;
+
+        console.warn("Processing from", state.currentSource, stream);
+
+        const track = stream.getVideoTracks()[0];
+        if (!track) return;
+
+        const processor = new MediaStreamTrackProcessor({ track });
+        state.currentReader = processor.readable.getReader();
+
+        (async () => {
+          try {
+            while (state.isProcessing && state.isEncoding) {
+              const { done, value: frame } = await state.currentReader.read();
+
+              if (done) break;
+
+              if (state.currentSource === "camera") {
+                state.cameraFrames++;
+                document.getElementById("cameraFrames").textContent =
+                  state.cameraFrames;
+              } else {
+                state.screenFrames++;
+                document.getElementById("screenFrames").textContent =
+                  state.screenFrames;
+              }
+
+              state.frameCounter++;
+              const keyFrame = state.frameCounter % 30 === 0;
+
+              if (
+                state.videoEncoder &&
+                state.videoEncoder.encodeQueueSize <= 2
+              ) {
+                state.videoEncoder.encode(frame, { keyFrame });
+                document.getElementById("encodeQueue").textContent =
+                  state.videoEncoder.encodeQueueSize;
+              }
+
+              frame.close();
+            }
+          } catch (error) {
+            if (error.name !== "AbortError") {
+              updateStatus(
+                "outputStatus",
+                `Processing error: ${error.message}`,
+                true
+              );
+            }
+          }
+        })();
+      }
+
+      async function startEncoding() {
+        if (!state.cameraStream && !state.screenStream) {
+          updateStatus("outputStatus", "Start a camera or screen first", true);
+          return;
+        }
+
+        try {
+          // Auto-select first available source
+          if (!state.currentSource) {
+            if (state.cameraStream) {
+              state.currentSource = "camera";
+            } else if (state.screenStream) {
+              state.currentSource = "screen";
+            }
+          }
+
+          await initEncoder();
+          await initDecoder();
+          await initGenerator();
+
+          state.isEncoding = true;
+          state.isProcessing = true;
+          state.encodedFrames = 0;
+          state.decodedFrames = 0;
+          state.frameCounter = 0;
+
+          document.getElementById("currentSource").textContent =
+            state.currentSource.toUpperCase();
+          document.getElementById("isProcessing").textContent = "yes";
+
+          updateStatus("outputStatus", "Encoding started", false, true);
+          processFrames();
+        } catch (error) {
+          updateStatus("outputStatus", `Start error: ${error.message}`, true);
+        }
+      }
+
+      async function stopEncoding() {
+        state.isEncoding = false;
+        state.isProcessing = false;
+        document.getElementById("isProcessing").textContent = "no";
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        if (state.currentReader) {
+          state.currentReader.cancel().catch(() => {});
+        }
+
+        if (state.videoEncoder) {
+          state.videoEncoder.close();
+          state.videoEncoder = null;
+        }
+
+        if (state.videoDecoder) {
+          state.videoDecoder.close();
+          state.videoDecoder = null;
+        }
+
+        if (state.videoWriter) {
+          state.videoWriter.close();
+          state.videoWriter = null;
+        }
+
+        if (state.generator) {
+          await state.generator.stop().catch(() => {});
+          state.generator = null;
+        }
+
+        document.getElementById("currentSource").textContent = "-";
+        updateStatus("outputStatus", "Encoding stopped");
+      }
+
+      async function initAudioSystem() {
+        try {
+          if (audioContext && audioContext.state !== "closed") {
+            await audioContext.close();
+          }
+          audioContext = new (window.AudioContext || window.webkitAudioContext)(
+            { sampleRate: 48000 }
+          );
+          await audioContext.audioWorklet.addModule(
+            `audio-worklet1.js?t=${Date.now()}`
+          );
+          audioWorkletNode = new AudioWorkletNode(
+            audioContext,
+            "jitter-resistant-processor"
+          );
+          // Create a MediaStreamDestination to get a MediaStreamTrack from the AudioContext
+          mediaStreamDestinationNode =
+            audioContext.createMediaStreamDestination();
+          audioWorkletNode.connect(mediaStreamDestinationNode);
+
+          audioWorkletNode.port.onmessage = (event) => {
+            const { type, bufferMs, isPlaying, newBufferSize } = event.data;
+          };
+
+          return true;
+        } catch (e) {
+          if (audioContext && audioContext.state !== "closed") {
+            audioContext.close().catch((err) => {
+              console.error("Error closing AudioContext:", err);
+            });
+          }
+          audioContext = null;
+          return false;
+        }
+      }
+      log("Ready to start");
+      window.startCamera = startCamera;
+      window.stopCamera = stopCamera;
+      window.startScreen = startScreen;
+      window.stopScreen = stopScreen;
+      window.selectSource = selectSource;
+      window.startEncoding = startEncoding;
+      window.stopEncoding = stopEncoding;
+    </script>
+  </body>
+</html>
