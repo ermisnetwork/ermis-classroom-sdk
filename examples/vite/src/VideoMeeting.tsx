@@ -196,18 +196,18 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
 
   const handleReplaceStream = async () => {
     try {
-      setIsLoading(true);
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: previewCameraId
-          ? { deviceId: { exact: previewCameraId } }
-          : true,
-        audio: previewMicId ? { deviceId: { exact: previewMicId } } : true,
-      });
-      await replaceMediaStream(newStream);
-      alert("Media stream replaced successfully!");
+      // setIsLoading(true);
+      // const newStream = await navigator.mediaDevices.getUserMedia({
+      //   video: previewCameraId
+      //     ? { deviceId: { exact: previewCameraId } }
+      //     : true,
+      //   audio: previewMicId ? { deviceId: { exact: previewMicId } } : true,
+      // });
+      // await replaceMediaStream(newStream);
+      // console.log("Media stream replaced successfully!");
     } catch (error) {
       console.error("Failed to replace stream:", error);
-      alert("Failed to replace media stream");
+      console.log("Failed to replace media stream");
     } finally {
       setIsLoading(false);
     }
@@ -557,7 +557,10 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
               <DeviceLabel>Camera</DeviceLabel>
               <DeviceSelect
                 value={selectedDevices?.camera || ""}
-                onChange={(e) => switchCamera(e.target.value)}
+                onChange={(e) => {
+                  console.log(e.target.value);
+                  switchCamera(e.target.value);
+                }}
                 disabled={!videoEnabled}
               >
                 {devices?.cameras?.map((camera: any) => (

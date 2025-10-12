@@ -295,6 +295,10 @@ export default class Publisher extends EventEmitter {
     await this.sendMeetingEvent("mic_on");
   }
 
+  /*
+    * Switch to a different camera by deviceId
+    just switches the video track in the existing stream, handle new track 
+  */
   async switchCamera(deviceId) {
     if (!this.hasCamera) {
       throw new Error("Camera not available");
@@ -335,38 +339,25 @@ export default class Publisher extends EventEmitter {
         throw new Error("Failed to get video track from new camera");
       }
 
-      console.log("[Publisher] Stopping video processing...");
-      await this.stopVideoProcessing();
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      const oldVideoTrack = this.stream.getVideoTracks()[0];
 
-      const oldStream = this.stream;
-      this.stream = newStream;
+      this.stream.removeTrack(oldVideoTrack);
+      this.stream.addTrack(newVideoTrack);
+      oldVideoTrack.stop();
 
-      const videoOnlyStream = new MediaStream();
-      const videoTracks = this.stream.getVideoTracks();
-      if (videoTracks.length > 0) {
-        videoOnlyStream.addTrack(videoTracks[0]);
-      }
-
-      console.log("[Publisher] Starting video capture with new stream...");
-      // await this.startVideoCapture();
-
-      if (oldStream) {
-        console.log("[Publisher] Cleaning up old stream...");
-        oldStream.getTracks().forEach((track) => track.stop());
-      }
-
-      this.handleNewStream();
+      this.handleNewTrack(newVideoTrack);
 
       this.emit("cameraSwitch", {
         deviceId,
         stream: this.stream,
-        videoOnlyStream,
+        videoOnlyStream: newStream,
       });
 
       console.log("[Publisher] Camera switched successfully");
       this.onStatusUpdate(`Camera switched successfully`);
 
-      return { stream: this.stream, videoOnlyStream };
+      return { stream: this.stream, videoOnlyStream: newStream };
     } catch (error) {
       console.error("[Publisher] Failed to switch camera:", error);
       this.onStatusUpdate(`Failed to switch camera: ${error.message}`, true);
@@ -374,7 +365,10 @@ export default class Publisher extends EventEmitter {
     }
   }
 
-  async handleNewStream() {
+  async handleNewTrack(track) {
+    if (!track) {
+      throw new Error("No video track found in new stream");
+    }
     try {
       const wasPublishing = this.isPublishing;
       this.isPublishing = false;
@@ -383,21 +377,15 @@ export default class Publisher extends EventEmitter {
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Close existing video reader and processor
-      if (this.videoReader) {
-        this.videoReader.cancel();
-      }
+      // if (this.videoReader) {
+      //   this.videoReader.cancel();
+      // }
 
-      if (this.videoProcessor) {
-        if (this.videoProcessor.readable) {
-          this.videoProcessor.readable.cancel();
-        }
-      }
-
-      const track = this.stream.getVideoTracks()[0];
-
-      if (!track) {
-        throw new Error("No video track found in new stream");
-      }
+      // if (this.videoProcessor) {
+      //   if (this.videoProcessor.readable) {
+      //     this.videoProcessor.readable.cancel();
+      //   }
+      // }
 
       console.log("Switched to new video track:", track);
 
@@ -413,7 +401,7 @@ export default class Publisher extends EventEmitter {
 
       // Reset frame counter and base timestamp
       // window.videoBaseTimestamp = undefined;
-      // let frameCounter = 0;
+      let frameCounter = 0;
 
       // Get list of camera encoders
       const cameraEncoders = Array.from(this.videoEncoders.entries()).filter(
@@ -516,14 +504,23 @@ export default class Publisher extends EventEmitter {
       //just switch the audio track in the existing stream
       this.currentCamAudioStream = newStream;
 
-      this.emit("microphoneSwitch", {
-        deviceId,
-      });
+      const newAudioTrack = newStream.getAudioTracks()[0];
+      console.log("New audio track obtained:", newAudioTrack);
 
       console.log("[Publisher] Microphone switched successfully");
       this.onStatusUpdate(`Microphone switched successfully`);
+      const videoOnlyStream = new MediaStream();
+      const videoTracks = this.stream.getVideoTracks();
+      if (videoTracks.length > 0) {
+        videoOnlyStream.addTrack(videoTracks[0]);
+      }
+      this.emit("microphoneSwitch", {
+        deviceId,
+        stream: this.stream,
+        videoOnlyStream,
+      });
 
-      return;
+      return { stream: this.stream, videoOnlyStream };
     } catch (error) {
       console.error("[Publisher] Failed to switch microphone:", error);
       this.onStatusUpdate(
@@ -534,87 +531,87 @@ export default class Publisher extends EventEmitter {
     }
   }
 
-  // async replaceMediaStream(newStream) {
-  //   if (!this.isPublishing) {
-  //     throw new Error("Not currently publishing");
-  //   }
+  async replaceMediaStream(newStream) {
+    if (!this.isPublishing) {
+      throw new Error("Not currently publishing");
+    }
 
-  //   if (!newStream || !(newStream instanceof MediaStream)) {
-  //     throw new Error("Invalid MediaStream provided");
-  //   }
+    if (!newStream || !(newStream instanceof MediaStream)) {
+      throw new Error("Invalid MediaStream provided");
+    }
 
-  //   try {
-  //     console.log("[Publisher] Replacing media stream...");
-  //     this.onStatusUpdate("Replacing media stream...");
+    try {
+      console.log("[Publisher] Replacing media stream...");
+      this.onStatusUpdate("Replacing media stream...");
 
-  //     const hasVideo = newStream.getVideoTracks().length > 0;
-  //     const hasAudio = newStream.getAudioTracks().length > 0;
+      const hasVideo = newStream.getVideoTracks().length > 0;
+      const hasAudio = newStream.getAudioTracks().length > 0;
 
-  //     if (!hasVideo && !hasAudio) {
-  //       throw new Error("MediaStream has no tracks");
-  //     }
+      if (!hasVideo && !hasAudio) {
+        throw new Error("MediaStream has no tracks");
+      }
 
-  //     const wasVideoActive = this.hasCamera && this.cameraEnabled;
-  //     const wasAudioActive = this.hasMic && this.micEnabled;
+      const wasVideoActive = this.hasCamera && this.cameraEnabled;
+      const wasAudioActive = this.hasMic && this.micEnabled;
 
-  //     if (wasVideoActive && hasVideo) {
-  //       console.log("[Publisher] Stopping video processing...");
-  //       await this.stopVideoProcessing();
-  //     }
+      // if (wasVideoActive && hasVideo) {
+      //   console.log("[Publisher] Stopping video processing...");
+      //   await this.stopVideoProcessing();
+      // }
 
-  //     if (wasAudioActive && hasAudio) {
-  //       console.log("[Publisher] Stopping audio processing...");
-  //       await this.stopAudioProcessing();
-  //     }
+      // if (wasAudioActive && hasAudio) {
+      //   console.log("[Publisher] Stopping audio processing...");
+      //   await this.stopAudioProcessing();
+      // }
 
-  //     const oldStream = this.stream;
-  //     this.stream = newStream;
+      const oldStream = this.stream;
+      this.stream = newStream;
 
-  //     this.hasCamera = hasVideo;
-  //     this.hasMic = hasAudio;
-  //     this.cameraEnabled = hasVideo;
-  //     this.micEnabled = hasAudio;
+      this.hasCamera = hasVideo;
+      this.hasMic = hasAudio;
+      this.cameraEnabled = hasVideo;
+      this.micEnabled = hasAudio;
 
-  //     if (hasVideo) {
-  //       console.log("[Publisher] Starting video capture with new stream...");
-  //       await this.startVideoCapture();
-  //     }
+      if (hasVideo) {
+        console.log("[Publisher] Starting video capture with new stream...");
+        await this.startVideoCapture();
+      }
 
-  //     if (hasAudio) {
-  //       console.log("[Publisher] Starting audio streaming with new stream...");
-  //       this.audioProcessor = await this.startOpusAudioStreaming();
-  //     }
+      if (hasAudio) {
+        console.log("[Publisher] Starting audio streaming with new stream...");
+        this.audioProcessor = await this.startOpusAudioStreaming();
+      }
 
-  //     if (oldStream) {
-  //       console.log("[Publisher] Cleaning up old stream...");
-  //       oldStream.getTracks().forEach((track) => track.stop());
-  //     }
+      if (oldStream) {
+        console.log("[Publisher] Cleaning up old stream...");
+        oldStream.getTracks().forEach((track) => track.stop());
+      }
 
-  //     const videoOnlyStream = new MediaStream();
-  //     if (hasVideo) {
-  //       videoOnlyStream.addTrack(newStream.getVideoTracks()[0]);
-  //     }
+      const videoOnlyStream = new MediaStream();
+      if (hasVideo) {
+        videoOnlyStream.addTrack(newStream.getVideoTracks()[0]);
+      }
 
-  //     this.emit("mediaStreamReplaced", {
-  //       stream: this.stream,
-  //       videoOnlyStream,
-  //       hasVideo,
-  //       hasAudio,
-  //     });
+      this.emit("mediaStreamReplaced", {
+        stream: this.stream,
+        videoOnlyStream,
+        hasVideo,
+        hasAudio,
+      });
 
-  //     console.log("[Publisher] Media stream replaced successfully");
-  //     this.onStatusUpdate("Media stream replaced successfully");
+      console.log("[Publisher] Media stream replaced successfully");
+      this.onStatusUpdate("Media stream replaced successfully");
 
-  //     return { stream: this.stream, videoOnlyStream, hasVideo, hasAudio };
-  //   } catch (error) {
-  //     console.error("[Publisher] Failed to replace media stream:", error);
-  //     this.onStatusUpdate(
-  //       `Failed to replace media stream: ${error.message}`,
-  //       true
-  //     );
-  //     throw error;
-  //   }
-  // }
+      return { stream: this.stream, videoOnlyStream, hasVideo, hasAudio };
+    } catch (error) {
+      console.error("[Publisher] Failed to replace media stream:", error);
+      this.onStatusUpdate(
+        `Failed to replace media stream: ${error.message}`,
+        true
+      );
+      throw error;
+    }
+  }
 
   async stopVideoProcessing() {
     if (this.videoReader) {
@@ -1346,6 +1343,7 @@ export default class Publisher extends EventEmitter {
 
     try {
       const dataArray = new Uint8Array(typedArray);
+
       // Check for Opus header "OggS"
       if (
         dataArray.length >= 4 &&
