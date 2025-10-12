@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     open: true,
     host: true,
-    port: 4000,
+    port: 5173,
     allowedHosts: true,
   },
   // Configure base URL for production deployment

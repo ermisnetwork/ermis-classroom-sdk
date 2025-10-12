@@ -167,13 +167,40 @@ class Subscriber extends EventEmitter {
    * Load MediaStreamTrackGenerator polyfill if needed
    */
   async _loadPolyfill() {
-    if (!window.MediaStreamTrackGenerator) {
-      try {
-        await import(this.mstgPolyfillUrl);
-      } catch (error) {
-        console.warn("Failed to load MSTG polyfill:", error);
-      }
+    // Skip if browser already supports it
+    if (window.MediaStreamTrackGenerator) {
+      console.log("✅ Browser already supports MediaStreamTrackGenerator");
+      return;
     }
+
+    // Determine the polyfill URL (absolute)
+    const url = this.mstgPolyfillUrl || `${location.origin}/polyfills/MSTG_polyfill.js`;
+    console.log("⚙️ Loading MSTG polyfill from:", url);
+
+    // Prevent loading twice
+    if (document.querySelector(`script[src="${url}"]`)) {
+      console.log("ℹ️ MSTG polyfill already loaded");
+      return;
+    }
+
+    // Dynamically load the script
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = url;
+      script.async = true;
+
+      script.onload = () => {
+        console.log("✅ MSTG polyfill loaded successfully");
+        resolve();
+      };
+
+      script.onerror = (err) => {
+        console.error("❌ Failed to load MSTG polyfill:", err);
+        reject(err);
+      };
+
+      document.head.appendChild(script);
+    });
   }
 
   /**
@@ -195,6 +222,7 @@ class Subscriber extends EventEmitter {
       };
 
       const mediaUrl = `wss://sfu-adaptive-bitrate-webrtc.ermis-network.workers.dev/meeting/${this.roomId}/${this.streamId}`;
+      console.log("try to init worker with url:", mediaUrl);
 
       this.worker.postMessage(
         {
