@@ -17,6 +17,7 @@ export default class Publisher extends EventEmitter {
     this.publishUrl = options.publishUrl;
     this.streamType = options.streamType || "camera"; // 'camera' or 'display'
     this.streamId = options.streamId || "test_stream";
+    this.userId = options.userId || null; // User ID for screen share tile mapping
 
     // Video configuration
     this.currentConfig = {
@@ -523,9 +524,9 @@ export default class Publisher extends EventEmitter {
     await this.createEventStream();
 
     for (const subStream of this.subStreams) {
-      if (!subStream.channelName.startsWith("screen")) {
-        await this.createBidirectionalStream(subStream.channelName);
-      }
+      await this.createBidirectionalStream(subStream.channelName);
+      // if (!subStream.channelName.startsWith("screen")) {
+      // }
     }
 
     this.isChannelOpen = true;
@@ -1140,6 +1141,9 @@ export default class Publisher extends EventEmitter {
         videoDecoderConfig: null,
       };
 
+      // Track whether screen share has audio
+      this.hasScreenAudio = !!audioTrack;
+
       // Setup screen share audio if available
       if (audioTrack) {
         const audioRecorderOptions = {
@@ -1178,9 +1182,15 @@ export default class Publisher extends EventEmitter {
       const reader = this.screenVideoProcessor.readable.getReader();
       let frameCounter = 0;
 
-      // Handle video track ending
-      videoTrack.onended = () => {
-        this.stopShareScreen();
+      // Handle video track ending (when user clicks Chrome's "Stop sharing" button)
+      videoTrack.onended = async () => {
+        console.log("[Publisher] Screen share video track ended (user stopped sharing)");
+        await this.stopShareScreen();
+        // Emit event to notify UI
+        this.emit("screenShareStopped", {
+          reason: "user_stopped",
+          timestamp: Date.now()
+        });
       };
 
       // Process screen share video frames
@@ -1215,6 +1225,7 @@ export default class Publisher extends EventEmitter {
       })();
 
       this.onStatusUpdate("Screen sharing started");
+      console.log("[Publisher] Screen sharing started, waiting for server confirmation to pin");
     } catch (error) {
       this.onStatusUpdate(
         `Failed to start screen share: ${error.message}`,
@@ -1277,12 +1288,14 @@ export default class Publisher extends EventEmitter {
       }
 
       // Reset state
+      this.hasScreenAudio = false;
       this.screenAudioBaseTime = 0;
       this.screenAudioSamplesSent = 0;
       this.screenAudioConfig = null;
       window.screenBaseTimestamp = null;
 
       this.onStatusUpdate("Screen sharing stopped");
+      console.log("[Publisher] Screen sharing stopped, waiting for server confirmation to unpin");
     } catch (error) {
       this.onStatusUpdate(
         `Error stopping screen share: ${error.message}`,
@@ -1321,7 +1334,14 @@ export default class Publisher extends EventEmitter {
         this.screenVideoEncoder.videoDecoderConfig
       );
 
-      this.sendScreenDecoderConfigs(channelName);
+      // Only send configs if:
+      // 1. No screen audio, OR
+      // 2. Audio config is ready
+      if (!this.hasScreenAudio || this.screenAudioConfig) {
+        this.sendScreenDecoderConfigs(channelName);
+      } else {
+        console.log("Video config ready, waiting for audio config...");
+      }
     }
 
     if (!streamData.configSent) return;
@@ -1413,12 +1433,17 @@ export default class Publisher extends EventEmitter {
     const streamData = this.publishStreams.get(channelName);
     if (!streamData || streamData.configSent) return;
 
-    const hasAudio = this.screenAudioRecorder !== null;
     const videoReady =
       this.screenVideoEncoder && this.screenVideoEncoder.metadataReady;
-    const audioReady = !hasAudio || this.screenAudioConfig;
+    // Video config is required, audio config is optional
+    if (!videoReady) {
+      console.log("SendScreenDecoderConfig: Video config not ready yet");
+      return;
+    }
 
-    if (!videoReady || !audioReady) {
+    // If we have screen audio but no audio config yet, wait for it
+    if (this.hasScreenAudio && !this.screenAudioConfig) {
+      console.log("SendScreenDecoderConfig: Waiting for audio config...");
       return;
     }
 

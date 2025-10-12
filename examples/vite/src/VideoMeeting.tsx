@@ -77,6 +77,7 @@ const ParticipantVideoContainer = styled.div<{
   $isSmall?: boolean;
   $isLocal?: boolean;
   $isPinned?: boolean;
+  $isScreenShare?: boolean;
 }>`
   position: relative;
   background: #111;
@@ -101,12 +102,18 @@ const ParticipantVideoContainer = styled.div<{
     border: 3px solid #ffd700;
     box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
   `}
+  ${(props) =>
+    props.$isScreenShare &&
+    `
+    border: 2px solid #00aaff;
+    box-shadow: 0 0 8px rgba(0, 170, 255, 0.4);
+  `}
 
   video {
     width: 100%;
     height: 100%;
-    object-fit: cover;
-    transform: scaleX(-1);
+    object-fit: ${(props) => (props.$isScreenShare ? "contain" : "cover")};
+    transform: ${(props) => (props.$isScreenShare ? "none" : "scaleX(-1)")};
   }
 
   &:hover .participant-actions {
@@ -136,6 +143,18 @@ const OwnerBadge = styled.span`
   border-radius: 2px;
   font-size: 10px;
   font-weight: bold;
+`;
+
+const ScreenShareBadge = styled.span`
+  background: #00aaff;
+  color: #fff;
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 `;
 
 const Button = styled.button<{ variant?: "primary" | "danger" }>`
@@ -423,6 +442,7 @@ const VideoMeeting: React.FC = () => {
   const [pendingPinAction, setPendingPinAction] = useState<{ userId: string, type: 'local' } | null>(null);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
+  const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
 
   // Sử dụng useRef để lưu trữ client instance - chỉ tạo 1 lần
   const clientRef = useRef<any>(null);
@@ -465,6 +485,27 @@ const VideoMeeting: React.FC = () => {
       document.removeEventListener("click", handleClickOutside);
     };
   }, [pinMenuOpen]);
+
+  // Set srcObject for screen share streams when they change
+  useEffect(() => {
+    console.log("Setting srcObject for screen share streams:", screenShareStreams);
+    screenShareStreams.forEach((data, userId) => {
+      const videoId = `${userId}-screenshare`;
+      const videoElement = videoRefs.current.get(videoId);
+      if (videoElement && data.stream) {
+        console.log(`Setting srcObject for ${videoId}:`, data.stream);
+        console.log(`Stream active:`, data.stream.active);
+        console.log(`Stream tracks:`, data.stream.getTracks());
+        videoElement.srcObject = data.stream;
+        videoElement.play().catch(e => console.warn("Video play failed:", e));
+      } else {
+        console.warn(`Cannot set srcObject for ${videoId}:`, {
+          hasElement: !!videoElement,
+          hasStream: !!data.stream
+        });
+      }
+    });
+  }, [screenShareStreams]);
 
   // Setup SDK Event Listeners
   const setupEventListeners = useCallback((client: any) => {
@@ -667,18 +708,27 @@ const VideoMeeting: React.FC = () => {
     // Screen share events
     client.on("screenShareStarted", (data: any) => {
       console.log("Screen share started", data);
+      console.log("Screen share data.stream:", data.stream);
+      console.log("Screen share data.participant:", data.participant);
       setIsScreenSharing(true);
 
       // Add local screen share to the map
       if (data.stream && data.participant) {
+        console.log("Adding screen share to map for userId:", data.participant.userId);
         setScreenShareStreams((prev) => {
           const newMap = new Map(prev);
           newMap.set(data.participant.userId, {
             stream: data.stream,
             userName: data.participant.userId,
           });
+          console.log("Screen share map after add:", newMap);
           return newMap;
         });
+
+        // Auto-pin the screen share for everyone
+        handlePinForEveryone(data.participant.userId);
+      } else {
+        console.error("Missing stream or participant data:", data);
       }
     });
 
@@ -692,16 +742,24 @@ const VideoMeeting: React.FC = () => {
         newMap.delete(userId);
         return newMap;
       });
+
+      // Auto-unpin when screen share stops (if it was pinned)
+      if (currentRoom?.pinnedParticipant?.userId === userId && pinType === 'everyone') {
+        handlePinForEveryone(userId);
+      }
     });
 
     client.on("remoteScreenShareStreamReady", (data: any) => {
-      console.log("Remote screen share stream ready:", data.participant.userId);
+      console.log("Remote screen share stream ready:", data);
+      console.log("Remote screen share participant:", data.participant);
+      console.log("Remote screen share stream:", data.stream);
       setScreenShareStreams((prev) => {
         const newMap = new Map(prev);
         newMap.set(data.participant.userId, {
           stream: data.stream,
           userName: data.participant.userId,
         });
+        console.log("Remote screen share map after add:", newMap);
         return newMap;
       });
     });
@@ -953,7 +1011,8 @@ const VideoMeeting: React.FC = () => {
     const isHost = currentRoom?.localParticipant?.role === "owner";
     const pinnedUserId = currentRoom?.pinnedParticipant?.userId;
 
-    if (totalParticipants === 1) {
+    // If only 1 participant and no screen shares, show full screen
+    if (totalParticipants === 1 && screenShareStreams.size === 0) {
       // Only local user - show full screen
       return (
         <ParticipantVideoContainer
@@ -1040,6 +1099,8 @@ const VideoMeeting: React.FC = () => {
     ];
 
     // Add screen share tiles
+    console.log("Screen share streams in render:", screenShareStreams);
+    console.log("Screen share streams size:", screenShareStreams.size);
     const screenShareTiles = Array.from(screenShareStreams.entries()).map(([screenShareUserId, data]) => ({
       userId: `${screenShareUserId}-screenshare`,
       isLocal: screenShareUserId === userId, // Mark as local if it's the current user's screen share
@@ -1051,9 +1112,11 @@ const VideoMeeting: React.FC = () => {
       stream: data.stream,
       role: undefined,
     }));
+    console.log("Screen share tiles:", screenShareTiles);
 
     // Combine regular participants with screen share tiles
     const allTiles = [...allParticipants, ...screenShareTiles];
+    console.log("All tiles (participants + screen shares):", allTiles);
 
     return allTiles.map((participant: any) => {
       const isPinned = pinnedUserId === participant.userId;
@@ -1063,6 +1126,7 @@ const VideoMeeting: React.FC = () => {
         <ParticipantVideoContainer
           key={participant.userId}
           $isPinned={isPinned}
+          $isScreenShare={isScreenShareTile}
         >
           <video
             autoPlay
@@ -1072,8 +1136,14 @@ const VideoMeeting: React.FC = () => {
               participant.isLocal && !isScreenShareTile
                 ? localVideoRef
                 : (videoElement) => {
-                  if (videoElement && participant.stream) {
-                    videoElement.srcObject = participant.stream;
+                  if (videoElement) {
+                    videoRefs.current.set(participant.userId, videoElement);
+                    if (participant.stream && !isScreenShareTile) {
+                      console.log(`Setting srcObject for ${participant.userId}:`, participant.stream);
+                      videoElement.srcObject = participant.stream;
+                    }
+                  } else {
+                    videoRefs.current.delete(participant.userId);
                   }
                 }
             }
@@ -1087,8 +1157,8 @@ const VideoMeeting: React.FC = () => {
           <ParticipantInfo>
             {isScreenShareTile
               ? participant.isLocal
-                ? "You - Screen Share"
-                : `${participant.userName} - Screen Share`
+                ? "You"
+                : participant.userName
               : participant.isLocal ? "You" : participant.userId
             }
             {!participant.isAudioEnabled && !isScreenShareTile && (
@@ -1096,7 +1166,13 @@ const VideoMeeting: React.FC = () => {
                 <MdMicOff />
               </span>
             )}
-            {participant.role === "owner" && <OwnerBadge>OWNER</OwnerBadge>}
+            {participant.role === "owner" && !isScreenShareTile && <OwnerBadge>OWNER</OwnerBadge>}
+            {isScreenShareTile && (
+              <ScreenShareBadge>
+                <MdScreenShare size={12} />
+                SCREEN SHARE
+              </ScreenShareBadge>
+            )}
             {!isScreenShareTile && (participant as any).isScreenSharing && (
               <span title="Sharing screen">📺</span>
             )}
@@ -1105,56 +1181,57 @@ const VideoMeeting: React.FC = () => {
                 <MdPanTool />
               </span>
             )}
-            {isPinned && !isScreenShareTile && (
+            {isPinned && (
               <span title="Pinned" style={{ color: "#ffd700" }}>
                 <MdPushPin />
               </span>
             )}
           </ParticipantInfo>
 
-          {/* Don't show pin actions for screen share tiles */}
-          {!isScreenShareTile && (
-            <ParticipantActions className="participant-actions">
-              <PinButtonContainer>
-                <ActionButton
-                  $isActive={isPinned}
+          <ParticipantActions className="participant-actions">
+            <PinButtonContainer>
+              <ActionButton
+                $isActive={isPinned}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPinMenuOpen(pinMenuOpen === participant.userId ? null : participant.userId);
+                }}
+                title="Pin options"
+              >
+                {isPinned ? <MdPushPin size={16} /> : <MdOutlinePushPin size={16} />}
+              </ActionButton>
+
+              <PinMenu $show={pinMenuOpen === participant.userId}>
+                <PinMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    setPinMenuOpen(pinMenuOpen === participant.userId ? null : participant.userId);
+                    // Pin locally uses the virtual userId (userId-screenshare for screen shares)
+                    handlePinLocal(participant.userId);
+                    setPinMenuOpen(null);
                   }}
-                  title="Pin options"
                 >
-                  {isPinned ? <MdPushPin size={16} /> : <MdOutlinePushPin size={16} />}
-                </ActionButton>
-
-                <PinMenu $show={pinMenuOpen === participant.userId}>
-                  <PinMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handlePinLocal(participant.userId);
+                  <MdPushPin size={14} />
+                  Pin locally {pinType === 'local' && isPinned && '✓'}
+                </PinMenuItem>
+                <PinMenuItem
+                  $disabled={!isHost}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isHost) {
+                      // For pin everyone: screen shares need the actual userId (screenShareUserId),
+                      // regular participants use their userId
+                      const targetUserId = isScreenShareTile ? participant.screenShareUserId : participant.userId;
+                      handlePinForEveryone(targetUserId);
                       setPinMenuOpen(null);
-                    }}
-                  >
-                    <MdPushPin size={14} />
-                    Pin locally {pinType === 'local' && isPinned && '✓'}
-                  </PinMenuItem>
-                  <PinMenuItem
-                    $disabled={!isHost}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (isHost) {
-                        handlePinForEveryone(participant.userId);
-                        setPinMenuOpen(null);
-                      }
-                    }}
-                  >
-                    <MdPushPin size={14} />
-                    Pin for everyone {pinType === 'everyone' && isPinned && '✓'} {!isHost && "(Host only)"}
-                  </PinMenuItem>
-                </PinMenu>
-              </PinButtonContainer>
-            </ParticipantActions>
-          )}
+                    }
+                  }}
+                >
+                  <MdPushPin size={14} />
+                  Pin for everyone {pinType === 'everyone' && isPinned && '✓'} {!isHost && "(Host only)"}
+                </PinMenuItem>
+              </PinMenu>
+            </PinButtonContainer>
+          </ParticipantActions>
         </ParticipantVideoContainer>
       );
     });
@@ -1196,7 +1273,7 @@ const VideoMeeting: React.FC = () => {
       )}
 
       <VideoContainer>
-        <MainVideoStyled $totalParticipants={participants.size + screenShareStreams.size}>
+        <MainVideoStyled $totalParticipants={participants.size + 1 + screenShareStreams.size}>
           {renderParticipantVideos()}
         </MainVideoStyled>
 

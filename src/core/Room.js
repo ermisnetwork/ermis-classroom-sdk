@@ -765,6 +765,7 @@ class Room extends EventEmitter {
       publishUrl,
       streamType: "camera",
       streamId: this.streamId,
+      userId: this.localParticipant.userId, // Pass userId for screen share tile mapping
       width: 1280,
       height: 720,
       framerate: 30,
@@ -782,6 +783,16 @@ class Room extends EventEmitter {
     // Setup stream event forwarding
     publisher.on("localStreamReady", (data) => {
       this.emit("localStreamReady", {
+        ...data,
+        participant: this.localParticipant.getInfo(),
+        roomId: this.id,
+      });
+    });
+
+    // Listen for screen share stopped event from publisher
+    publisher.on("screenShareStopped", (data) => {
+      this.localParticipant.isScreenSharing = false;
+      this.emit("screenShareStopped", {
         ...data,
         participant: this.localParticipant.getInfo(),
         roomId: this.id,
@@ -858,10 +869,12 @@ class Room extends EventEmitter {
         audio: true,
       });
 
-      // Start screen share through publisher
+      // Start screen share through publisher first
       await this.localParticipant.publisher.startShareScreen(screenStream);
 
       this.localParticipant.isScreenSharing = true;
+
+      // Emit with original stream for UI (both can share the same stream)
       this.emit("screenShareStarted", {
         room: this,
         stream: screenStream,
@@ -1074,6 +1087,9 @@ class Room extends EventEmitter {
       if (participant && participant.userId !== this.localParticipant?.userId) {
         participant.isScreenSharing = true;
         this.emit("remoteScreenShareStarted", { room: this, participant });
+      } else if (participant && participant.userId === this.localParticipant?.userId) {
+        // Local screen share confirmed by server
+        participant.isScreenSharing = true;
       }
     }
 
@@ -1082,6 +1098,9 @@ class Room extends EventEmitter {
       if (participant && participant.userId !== this.localParticipant?.userId) {
         participant.isScreenSharing = false;
         this.emit("remoteScreenShareStopped", { room: this, participant });
+      } else if (participant && participant.userId === this.localParticipant?.userId) {
+        // Local screen share stopped confirmed by server
+        participant.isScreenSharing = false;
       }
     }
 
