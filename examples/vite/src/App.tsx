@@ -9,9 +9,9 @@ function App() {
   return (
     <ErmisClassroomProvider
       config={{
-        host: "daibo.ermis.network:9993",
+        host: "daibo.ermis.network:9994",
         debug: true,
-        webtpUrl: "https://daibo.ermis.network:9993/meeting/wt",
+        webtpUrl: "https://daibo.ermis.network:9994/meeting/wt",
       }}
       videoRef={videoRef}
     >
