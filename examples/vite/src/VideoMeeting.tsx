@@ -43,9 +43,6 @@ interface VideoMeetingProps {
 export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
   const [userId, setUserId] = useState("tuannt20591@gmail.com");
   const [roomCode, setRoomCode] = useState("5fay-jmyt-jvqn");
-  const [roomName, setRoomName] = useState("");
-  const [availableRooms, setAvailableRooms] = useState<any[]>([]);
-  const [isLoadingRooms, setIsLoadingRooms] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [pinMenuOpen, setPinMenuOpen] = useState<string | null>(null);
@@ -108,10 +105,10 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
       await authenticate(userId);
       setIsConnected(true);
     } catch (error) {
-      console.error("Failed to get room list:", error);
-      alert("Failed to get room list");
+      console.error("Authentication failed:", error);
+      alert("Authentication failed");
     } finally {
-      setIsLoadingRooms(false);
+      setIsLoading(false);
     }
   };
 
@@ -495,228 +492,150 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
         </LoginSection>
       )}
 
-      {/* Join Room Section */}
-      <LoginSection>
-        <SectionTitle>Join Existing Room</SectionTitle>
-        <InlineFormGroup>
-          <FormGroup style={{ marginBottom: 0, flex: 1 }}>
-            <Label htmlFor="roomCode">Room Code *</Label>
-            <Input
-              id="roomCode"
-              type="text"
-              value={roomCode}
-              onChange={(e) => setRoomCode(e.target.value)}
-              placeholder="Enter room code (e.g., 5fay-jmyt-jvqn)"
-              onKeyPress={(e) => e.key === "Enter" && handleJoinRoom()}
-            />
-          </FormGroup>
-          <Button onClick={handleJoinRoom} disabled={isLoading || !roomCode.trim()}>
-            {isLoading ? "Joining..." : "Join Room"}
-          </Button>
-        </InlineFormGroup>
-      </LoginSection>
+      <VideoContainer>
+        <MainVideoStyled $totalParticipants={participants.size}>
+          {renderParticipantVideos()}
+        </MainVideoStyled>
 
-      {/* Available Rooms Section */}
-      <LoginSection>
-        <SectionTitle style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          Available Rooms
-          <RefreshButton
-            onClick={handleGetRoomList}
-            disabled={isLoadingRooms}
-          >
-            {isLoadingRooms ? "Loading..." : "Refresh"}
-          </RefreshButton></SectionTitle>
+        {/* Control Buttons */}
+        {inRoom && (
+          <ControlsContainer>
+            <ControlButton
+              variant="mic"
+              $isActive={micEnabled}
+              onClick={toggleMicrophone}
+              title={micEnabled ? "Mute microphone" : "Unmute microphone"}
+            >
+              {micEnabled ? <MdMic size={20} /> : <MdMicOff size={20} />}
+            </ControlButton>
 
+            <ControlButton
+              variant="video"
+              $isActive={videoEnabled}
+              onClick={toggleCamera}
+              title={videoEnabled ? "Turn off camera" : "Turn on camera"}
+            >
+              {videoEnabled ? (
+                <MdVideocam size={20} />
+              ) : (
+                <MdVideocamOff size={20} />
+              )}
+            </ControlButton>
 
-        <RoomList>
-          {availableRooms.length === 0 ? (
-            <EmptyState>
-              {isLoadingRooms ? "Loading rooms..." : "No rooms available. Click 'Refresh Room List' to check again."}
-            </EmptyState>
-          ) : (
-            availableRooms.map((room, index) => (
-              <RoomItem key={room.id || index}>
-                <RoomInfo>
-                  <RoomTitle>{room.room_name || `Room ${index + 1}`}</RoomTitle>
-                  <div>
-                    {room.room_type === 'main' && (
-                      <RoomCode>{room.room_code}</RoomCode>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-                    <span style={{
-                      fontSize: '11px',
-                      padding: '2px 6px',
-                      borderRadius: '10px',
-                      backgroundColor: room.room_type === 'main' ? '#e3f2fd' : '#f3e5f5',
-                      color: room.room_type === 'main' ? '#1976d2' : '#7b1fa2',
-                      fontWeight: '500',
-                      textTransform: 'uppercase'
-                    }}>
-                      {room.room_type || 'unknown'}
-                    </span>
-                  </div>
-                  <RoomCreator>
-                    Created by: {room.user_id || 'Unknown'}
-                  </RoomCreator>
-                </RoomInfo>
-                <SmallButton
-                  onClick={() => handleJoinRoomFromList(room)}
-                  disabled={isLoading}
-                >
-                  {isLoading ? "Joining..." : "Join"}
-                </SmallButton>
-              </RoomItem>
-            ))
-          )}
-        </RoomList>
-      </LoginSection>
-    </SectionsContainer>
-  )
-} <VideoContainer style={{ display: isInRoom ? 'block' : 'none' }}>
-  <MainVideoStyled $totalParticipants={participants.size}>
-    {renderParticipantVideos()}
-  </MainVideoStyled>
+            <ControlButton
+              $isActive={handRaised}
+              onClick={toggleRaiseHand}
+              title={handRaised ? "Lower hand" : "Raise hand"}
+            >
+              <MdPanTool size={20} />
+            </ControlButton>
 
-  {/* Control Buttons */}
-  {inRoom && (
-    <ControlsContainer>
-      <ControlButton
-        variant="mic"
-        $isActive={micEnabled}
-        onClick={toggleMicrophone}
-        title={micEnabled ? "Mute microphone" : "Unmute microphone"}
-      >
-        {micEnabled ? <MdMic size={20} /> : <MdMicOff size={20} />}
-      </ControlButton>
+            <ControlButton
+              $isActive={showDeviceSettings}
+              onClick={() => setShowDeviceSettings(!showDeviceSettings)}
+              title="Device settings"
+            >
+              <MdSettings size={20} />
+            </ControlButton>
 
-      <ControlButton
-        variant="video"
-        $isActive={videoEnabled}
-        onClick={toggleCamera}
-        title={videoEnabled ? "Turn off camera" : "Turn on camera"}
-      >
-        {videoEnabled ? (
-          <MdVideocam size={20} />
-        ) : (
-          <MdVideocamOff size={20} />
+            <ControlButton
+              variant="leave"
+              onClick={leaveRoom}
+              title="Leave room"
+            >
+              <MdCallEnd size={20} />
+            </ControlButton>
+          </ControlsContainer>
         )}
-      </ControlButton>
 
-      <ControlButton
-        $isActive={handRaised}
-        onClick={toggleRaiseHand}
-        title={handRaised ? "Lower hand" : "Raise hand"}
-      >
-        <MdPanTool size={20} />
-      </ControlButton>
+        {inRoom && (
+          <DeviceSettingsPanel $show={showDeviceSettings}>
+            <DeviceSettingsTitle>Device Settings</DeviceSettingsTitle>
 
-      <ControlButton
-        $isActive={showDeviceSettings}
-        onClick={() => setShowDeviceSettings(!showDeviceSettings)}
-        title="Device settings"
-      >
-        <MdSettings size={20} />
-      </ControlButton>
+            <DeviceGroup>
+              <DeviceLabel>Camera</DeviceLabel>
+              <DeviceSelect
+                value={selectedDevices?.camera || ""}
+                onChange={(e) => {
+                  console.log(e.target.value);
+                  switchCamera(e.target.value);
+                }}
+                disabled={!videoEnabled}
+              >
+                {devices?.cameras?.map((camera: any) => (
+                  <option key={camera.deviceId} value={camera.deviceId}>
+                    {camera.label}
+                  </option>
+                ))}
+              </DeviceSelect>
+            </DeviceGroup>
 
-      <ControlButton
-        variant="leave"
-        onClick={leaveRoom}
-        title="Leave room"
-      >
-        <MdCallEnd size={20} />
-      </ControlButton>
-    </ControlsContainer>
-  )}
+            <DeviceGroup>
+              <DeviceLabel>Microphone</DeviceLabel>
+              <DeviceSelect
+                value={selectedDevices?.microphone || ""}
+                onChange={(e) => switchMicrophone(e.target.value)}
+                disabled={!micEnabled}
+              >
+                {devices?.microphones?.map((mic: any) => (
+                  <option key={mic.deviceId} value={mic.deviceId}>
+                    {mic.label}
+                  </option>
+                ))}
+              </DeviceSelect>
+            </DeviceGroup>
 
-  {inRoom && (
-    <DeviceSettingsPanel $show={showDeviceSettings}>
-      <DeviceSettingsTitle>Device Settings</DeviceSettingsTitle>
-
-      <DeviceGroup>
-        <DeviceLabel>Camera</DeviceLabel>
-        <DeviceSelect
-          value={selectedDevices?.camera || ""}
-          onChange={(e) => {
-            console.log(e.target.value);
-            switchCamera(e.target.value);
-          }}
-          disabled={!videoEnabled}
-        >
-          {devices?.cameras?.map((camera: any) => (
-            <option key={camera.deviceId} value={camera.deviceId}>
-              {camera.label}
-            </option>
-          ))}
-        </DeviceSelect>
-      </DeviceGroup>
-
-      <DeviceGroup>
-        <DeviceLabel>Microphone</DeviceLabel>
-        <DeviceSelect
-          value={selectedDevices?.microphone || ""}
-          onChange={(e) => switchMicrophone(e.target.value)}
-          disabled={!micEnabled}
-        >
-          {devices?.microphones?.map((mic: any) => (
-            <option key={mic.deviceId} value={mic.deviceId}>
-              {mic.label}
-            </option>
-          ))}
-        </DeviceSelect>
-      </DeviceGroup>
-
-      <DeviceGroup style={{ marginTop: "20px" }}>
-        <DeviceLabel>Replace Entire Stream</DeviceLabel>
-        <div
-          style={{ display: "flex", gap: "10px", marginBottom: "10px" }}
-        >
-          <select
-            value={previewCameraId}
-            onChange={(e) => setPreviewCameraId(e.target.value)}
-            style={{
-              flex: 1,
-              padding: "8px",
-              borderRadius: "4px",
-              border: "1px solid #ccc",
-            }}
-          >
-            <option value="">Default Camera</option>
-            {devices?.cameras?.map((camera: any) => (
-              <option key={camera.deviceId} value={camera.deviceId}>
-                {camera.label}
-              </option>
-            ))}
-          </select>
-          <select
-            value={previewMicId}
-            onChange={(e) => setPreviewMicId(e.target.value)}
-            style={{
-              flex: 1,
-              padding: "8px",
-              borderRadius: "4px",
-              border: "1px solid #ccc",
-            }}
-          >
-            <option value="">Default Microphone</option>
-            {devices?.microphones?.map((mic: any) => (
-              <option key={mic.deviceId} value={mic.deviceId}>
-                {mic.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <Button
-          onClick={handleReplaceStream}
-          disabled={isLoading}
-          style={{ width: "100%" }}
-        >
-          {isLoading ? "Replacing..." : "Replace Stream"}
-        </Button>
-      </DeviceGroup>
-    </DeviceSettingsPanel>
-  )}
-</VideoContainer>
-    </Container >
+            <DeviceGroup style={{ marginTop: "20px" }}>
+              <DeviceLabel>Replace Entire Stream</DeviceLabel>
+              <div
+                style={{ display: "flex", gap: "10px", marginBottom: "10px" }}
+              >
+                <select
+                  value={previewCameraId}
+                  onChange={(e) => setPreviewCameraId(e.target.value)}
+                  style={{
+                    flex: 1,
+                    padding: "8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ccc",
+                  }}
+                >
+                  <option value="">Default Camera</option>
+                  {devices?.cameras?.map((camera: any) => (
+                    <option key={camera.deviceId} value={camera.deviceId}>
+                      {camera.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={previewMicId}
+                  onChange={(e) => setPreviewMicId(e.target.value)}
+                  style={{
+                    flex: 1,
+                    padding: "8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ccc",
+                  }}
+                >
+                  <option value="">Default Microphone</option>
+                  {devices?.microphones?.map((mic: any) => (
+                    <option key={mic.deviceId} value={mic.deviceId}>
+                      {mic.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button
+                onClick={handleReplaceStream}
+                disabled={isLoading}
+                style={{ width: "100%" }}
+              >
+                {isLoading ? "Replacing..." : "Replace Stream"}
+              </Button>
+            </DeviceGroup>
+          </DeviceSettingsPanel>
+        )}
+      </VideoContainer>
+    </Container>
   );
 }
