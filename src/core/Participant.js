@@ -13,6 +13,7 @@ class Participant extends EventEmitter {
     this.role = config.role || "participant";
     this.roomId = config.roomId;
     this.isLocal = config.isLocal || false;
+    this.name = config.name;
 
     // Media state
     this.isAudioEnabled = true;
@@ -30,6 +31,13 @@ class Participant extends EventEmitter {
 
     // Status
     this.connectionStatus = "disconnected"; // 'connecting', 'connected', 'disconnected', 'failed'
+  }
+
+  /**
+   * Get name
+   */
+  getName() {
+    return this.name || "";
   }
 
   /**
@@ -247,6 +255,41 @@ class Participant extends EventEmitter {
     }
   }
 
+  async replaceMediaStream(newStream) {
+    if (!this.isLocal || !this.publisher) {
+      throw new Error("Cannot replace media stream: not a local participant or no publisher");
+    }
+
+    if (!newStream || !(newStream instanceof MediaStream)) {
+      throw new Error("Invalid MediaStream provided");
+    }
+
+    try {
+      const result = await this.publisher.replaceMediaStream(newStream);
+
+      this.isVideoEnabled = result.hasVideo;
+      this.isAudioEnabled = result.hasAudio;
+
+      this.emit("mediaStreamReplaced", {
+        participant: this,
+        stream: result.stream,
+        videoOnlyStream: result.videoOnlyStream,
+        hasAudio: result.hasAudio,
+        hasVideo: result.hasVideo,
+      });
+
+      return result;
+    } catch (error) {
+      console.error("Failed to replace media stream:", error);
+      this.emit("error", {
+        participant: this,
+        error,
+        action: "replaceMediaStream",
+      });
+      throw error;
+    }
+  }
+
   /**
    * Update microphone status from server event
    */
@@ -323,6 +366,7 @@ class Participant extends EventEmitter {
       isPinned: this.isPinned,
       isScreenSharing: this.isScreenSharing,
       connectionStatus: this.connectionStatus,
+      name: this.name,
     };
   }
 }

@@ -17,6 +17,7 @@ export default class Publisher extends EventEmitter {
     this.publishUrl = options.publishUrl;
     this.streamType = options.streamType || "camera"; // 'camera' or 'display'
     this.streamId = options.streamId || "test_stream";
+    this.preConfiguredStream = options.mediaStream || null;
 
     // Video configuration
     this.currentConfig = {
@@ -38,6 +39,9 @@ export default class Publisher extends EventEmitter {
     this.stream = null;
     this.audioProcessor = null;
     this.videoProcessor = null;
+    this.videoReader = null;
+    this.screenVideoProcessor = null;
+    this.screenVideoReader = null;
     this.webTransport = null;
     this.isChannelOpen = false;
     this.sequenceNumber = 0;
@@ -52,9 +56,9 @@ export default class Publisher extends EventEmitter {
     // Callbacks
     this.onStatusUpdate =
       options.onStatusUpdate || ((message, isError) => console.log(message));
-    this.onStreamStart = options.onStreamStart || (() => { });
-    this.onStreamStop = options.onStreamStop || (() => { });
-    this.onServerEvent = options.onServerEvent || ((event) => { });
+    this.onStreamStart = options.onStreamStart || (() => {});
+    this.onStreamStop = options.onStreamStop || (() => {});
+    this.onServerEvent = options.onServerEvent || ((event) => {});
 
     // Initialize modules
     this.wasmInitialized = false;
@@ -106,6 +110,10 @@ export default class Publisher extends EventEmitter {
         channelName: "mic_48k",
       },
     ];
+
+    this.currentCamAudioStream = null;
+    this.currentScreenAudioStream = null;
+    this.triggerWorker = null;
   }
 
   async init() {
@@ -115,9 +123,7 @@ export default class Publisher extends EventEmitter {
 
   async loadAllDependencies() {
     try {
-      if (
-        !document.querySelector('script[src*="MSTP_polyfill.js"]')
-      ) {
+      if (!document.querySelector('script[src*="MSTP_polyfill.js"]')) {
         await new Promise((resolve, reject) => {
           const script = document.createElement("script");
           script.src = "/polyfills/MSTP_polyfill.js";
@@ -275,7 +281,6 @@ export default class Publisher extends EventEmitter {
     await this.sendMeetingEvent("mic_off");
   }
 
-  // Turn on mic (resume encoding audio chunks)
   async turnOnMic() {
     if (!this.hasMic) {
       console.warn("Cannot turn on mic: no microphone available");
@@ -287,9 +292,372 @@ export default class Publisher extends EventEmitter {
     this.micEnabled = true;
     this.onStatusUpdate("Mic turned on");
 
-    // Send mic_on event to server
     await this.sendMeetingEvent("mic_on");
   }
+
+  /*
+    * Switch to a different camera by deviceId
+    just switches the video track in the existing stream, handle new track 
+  */
+  async switchCamera(deviceId) {
+    if (!this.hasCamera) {
+      throw new Error("Camera not available");
+    }
+
+    if (!this.isPublishing) {
+      throw new Error("Not currently publishing");
+    }
+
+    try {
+      console.log(`[Publisher] Switching camera to device: ${deviceId}`);
+      this.onStatusUpdate("Switching camera...");
+
+      const videoConstraints = {
+        deviceId: { exact: deviceId },
+        width: { ideal: this.currentConfig.width },
+        height: { ideal: this.currentConfig.height },
+        frameRate: { ideal: this.currentConfig.framerate },
+      };
+
+      const audioConstraints =
+        this.hasMic && this.stream?.getAudioTracks().length > 0
+          ? {
+              sampleRate: this.kSampleRate,
+              channelCount: 1,
+              echoCancellation: true,
+              noiseSuppression: true,
+            }
+          : false;
+
+      console.log("[Publisher] Requesting new media stream...");
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints,
+        audio: audioConstraints,
+      });
+
+      if (!newStream.getVideoTracks()[0]) {
+        throw new Error("Failed to get video track from new camera");
+      }
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      const oldVideoTrack = this.stream.getVideoTracks()[0];
+
+      this.stream.removeTrack(oldVideoTrack);
+      this.stream.addTrack(newVideoTrack);
+      oldVideoTrack.stop();
+
+      this.handleNewTrack(newVideoTrack);
+
+      this.emit("cameraSwitch", {
+        deviceId,
+        stream: this.stream,
+        videoOnlyStream: newStream,
+      });
+
+      console.log("[Publisher] Camera switched successfully");
+      this.onStatusUpdate(`Camera switched successfully`);
+
+      return { stream: this.stream, videoOnlyStream: newStream };
+    } catch (error) {
+      console.error("[Publisher] Failed to switch camera:", error);
+      this.onStatusUpdate(`Failed to switch camera: ${error.message}`, true);
+      throw error;
+    }
+  }
+
+  async handleNewTrack(track) {
+    if (!track) {
+      throw new Error("No video track found in new stream");
+    }
+    try {
+      const wasPublishing = this.isPublishing;
+      this.isPublishing = false;
+
+      //wait a bit to ensure all frames are processed
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Close existing video reader and processor
+      // if (this.videoReader) {
+      //   this.videoReader.cancel();
+      // }
+
+      // if (this.videoProcessor) {
+      //   if (this.videoProcessor.readable) {
+      //     this.videoProcessor.readable.cancel();
+      //   }
+      // }
+
+      console.log("Switched to new video track:", track);
+
+      // Initialize new video processor
+      this.videoProcessor = new MediaStreamTrackProcessor(
+        track,
+        this.triggerWorker,
+        true
+      );
+
+      this.videoReader = this.videoProcessor.readable.getReader();
+      console.log("New video processor reader created:", this.videoReader);
+
+      // Reset frame counter and base timestamp
+      // window.videoBaseTimestamp = undefined;
+      let frameCounter = 0;
+
+      // Get list of camera encoders
+      const cameraEncoders = Array.from(this.videoEncoders.entries()).filter(
+        ([_, obj]) => obj.channelName.startsWith("cam")
+      );
+
+      // Restart video frame processing
+      this.isPublishing = wasPublishing;
+
+      if (this.isPublishing) {
+        this.startVideoFrameProcessing(frameCounter, cameraEncoders);
+      }
+
+      this.onStatusUpdate("Camera switched successfully", false);
+      return true;
+    } catch (error) {
+      this.isPublishing = false;
+      const errorMsg = `Camera switch error: ${error.message}`;
+      this.onStatusUpdate(errorMsg, true);
+      console.error(errorMsg, error);
+      return false;
+    }
+  }
+
+  startVideoFrameProcessing(initialFrameCounter = 0, cameraEncoders) {
+    let frameCounter = initialFrameCounter;
+
+    (async () => {
+      try {
+        while (this.isPublishing) {
+          const result = await this.videoReader.read();
+
+          if (result.done) break;
+
+          const frame = result.value;
+
+          if (!window.videoBaseTimestamp) {
+            window.videoBaseTimestamp = frame.timestamp;
+          }
+
+          if (!this.cameraEnabled) {
+            console.log("Camera disabled, skipping frame");
+            frame.close();
+            continue;
+          }
+
+          frameCounter++;
+          const keyFrame = frameCounter % 30 === 0;
+
+          for (let i = 0; i < cameraEncoders.length; i++) {
+            const [quality, encoderObj] = cameraEncoders[i];
+            const isLastEncoder = i === cameraEncoders.length - 1;
+
+            if (encoderObj.encoder.encodeQueueSize <= 2) {
+              const frameToEncode = isLastEncoder
+                ? frame
+                : new VideoFrame(frame);
+              encoderObj.encoder.encode(frameToEncode, { keyFrame });
+              frameToEncode.close();
+            }
+          }
+        }
+      } catch (error) {
+        this.onStatusUpdate(`Video processing error: ${error.message}`, true);
+        console.error("Video capture error:", error);
+      }
+    })();
+  }
+
+  async switchMicrophone(deviceId) {
+    if (!this.hasMic) {
+      throw new Error("Microphone not available");
+    }
+
+    if (!this.isPublishing) {
+      throw new Error("Not currently publishing");
+    }
+
+    try {
+      console.log(`[Publisher] Switching microphone to device: ${deviceId}`);
+      this.onStatusUpdate("Switching microphone...");
+
+      const audioConstraints = {
+        deviceId: { exact: deviceId },
+        sampleRate: this.kSampleRate,
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+      };
+
+      console.log("[Publisher] Requesting new media stream...");
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints,
+      });
+
+      if (!newStream.getAudioTracks()[0]) {
+        throw new Error("Failed to get audio track from new microphone");
+      }
+
+      //just switch the audio track in the existing stream
+      this.currentCamAudioStream = newStream;
+
+      const newAudioTrack = newStream.getAudioTracks()[0];
+      console.log("New audio track obtained:", newAudioTrack);
+
+      console.log("[Publisher] Microphone switched successfully");
+      this.onStatusUpdate(`Microphone switched successfully`);
+      const videoOnlyStream = new MediaStream();
+      const videoTracks = this.stream.getVideoTracks();
+      if (videoTracks.length > 0) {
+        videoOnlyStream.addTrack(videoTracks[0]);
+      }
+      this.emit("microphoneSwitch", {
+        deviceId,
+        stream: this.stream,
+        videoOnlyStream,
+      });
+
+      return { stream: this.stream, videoOnlyStream };
+    } catch (error) {
+      console.error("[Publisher] Failed to switch microphone:", error);
+      this.onStatusUpdate(
+        `Failed to switch microphone: ${error.message}`,
+        true
+      );
+      throw error;
+    }
+  }
+
+  async replaceMediaStream(newStream) {
+    if (!this.isPublishing) {
+      throw new Error("Not currently publishing");
+    }
+
+    if (!newStream || !(newStream instanceof MediaStream)) {
+      throw new Error("Invalid MediaStream provided");
+    }
+
+    try {
+      console.log("[Publisher] Replacing media stream...");
+      this.onStatusUpdate("Replacing media stream...");
+
+      const hasVideo = newStream.getVideoTracks().length > 0;
+      const hasAudio = newStream.getAudioTracks().length > 0;
+
+      if (!hasVideo && !hasAudio) {
+        throw new Error("MediaStream has no tracks");
+      }
+
+      const wasVideoActive = this.hasCamera && this.cameraEnabled;
+      const wasAudioActive = this.hasMic && this.micEnabled;
+
+      // if (wasVideoActive && hasVideo) {
+      //   console.log("[Publisher] Stopping video processing...");
+      //   await this.stopVideoProcessing();
+      // }
+
+      // if (wasAudioActive && hasAudio) {
+      //   console.log("[Publisher] Stopping audio processing...");
+      //   await this.stopAudioProcessing();
+      // }
+
+      const oldStream = this.stream;
+      this.stream = newStream;
+
+      this.hasCamera = hasVideo;
+      this.hasMic = hasAudio;
+      this.cameraEnabled = hasVideo;
+      this.micEnabled = hasAudio;
+
+      if (hasVideo) {
+        console.log("[Publisher] Starting video capture with new stream...");
+        await this.startVideoCapture();
+      }
+
+      if (hasAudio) {
+        console.log("[Publisher] Starting audio streaming with new stream...");
+        this.audioProcessor = await this.startOpusAudioStreaming();
+      }
+
+      if (oldStream) {
+        console.log("[Publisher] Cleaning up old stream...");
+        oldStream.getTracks().forEach((track) => track.stop());
+      }
+
+      const videoOnlyStream = new MediaStream();
+      if (hasVideo) {
+        videoOnlyStream.addTrack(newStream.getVideoTracks()[0]);
+      }
+
+      this.emit("mediaStreamReplaced", {
+        stream: this.stream,
+        videoOnlyStream,
+        hasVideo,
+        hasAudio,
+      });
+
+      console.log("[Publisher] Media stream replaced successfully");
+      this.onStatusUpdate("Media stream replaced successfully");
+
+      return { stream: this.stream, videoOnlyStream, hasVideo, hasAudio };
+    } catch (error) {
+      console.error("[Publisher] Failed to replace media stream:", error);
+      this.onStatusUpdate(
+        `Failed to replace media stream: ${error.message}`,
+        true
+      );
+      throw error;
+    }
+  }
+
+  async stopVideoProcessing() {
+    if (this.videoReader) {
+      try {
+        await this.videoReader.cancel();
+        this.videoReader = null;
+      } catch (error) {
+        console.warn("Error canceling video reader:", error);
+      }
+    }
+
+    if (this.videoProcessor) {
+      try {
+        this.videoProcessor = null;
+      } catch (error) {
+        console.warn("Error stopping video processor:", error);
+      }
+    }
+
+    if (this.videoEncoders && this.videoEncoders.size > 0) {
+      this.videoEncoders.forEach((encoderObj) => {
+        try {
+          if (encoderObj.encoder && encoderObj.encoder.state !== "closed") {
+            encoderObj.encoder.close();
+          }
+        } catch (error) {
+          console.warn("Error closing video encoder:", error);
+        }
+      });
+      this.videoEncoders.clear();
+    }
+  }
+
+  async stopAudioProcessing() {
+    if (this.audioProcessor) {
+      try {
+        if (typeof this.audioProcessor.stop === "function") {
+          await this.audioProcessor.stop();
+        }
+      } catch (error) {
+        console.warn("Error stopping audio processor:", error);
+      }
+      this.audioProcessor = null;
+    }
+  }
+
   async pinForEveryone(targetStreamId) {
     await this.sendMeetingEvent("pin_for_everyone", targetStreamId);
   }
@@ -350,11 +718,43 @@ export default class Publisher extends EventEmitter {
     }
   }
 
-  async getMediaStream() {
+  async getMediaStream(deviceIds = {}) {
+    if (this.preConfiguredStream) {
+      this.stream = this.preConfiguredStream;
+      console.log("Using pre-configured media stream");
+
+      const audioTracks = this.stream.getAudioTracks();
+      const videoTracks = this.stream.getVideoTracks();
+      this.hasMic = audioTracks.length > 0;
+      this.hasCamera = videoTracks.length > 0;
+      this.micEnabled = this.hasMic;
+      this.cameraEnabled = this.hasCamera;
+
+      console.log(
+        `Pre-configured stream - Video: ${this.hasCamera}, Audio: ${this.hasMic}`
+      );
+
+      const videoOnlyStream = new MediaStream();
+      if (videoTracks.length > 0) {
+        videoOnlyStream.addTrack(videoTracks[0]);
+      }
+
+      this.emit("localStreamReady", {
+        stream: this.stream,
+        videoOnlyStream: videoOnlyStream,
+        streamType: this.streamType,
+        streamId: this.streamId,
+        config: this.currentConfig,
+        hasAudio: audioTracks.length > 0,
+        hasVideo: videoTracks.length > 0,
+      });
+
+      return;
+    }
+
     if (this.streamType === "camera") {
       const constraints = {};
 
-      // Only request audio if hasMic is true
       if (this.hasMic) {
         constraints.audio = {
           sampleRate: this.kSampleRate,
@@ -362,15 +762,20 @@ export default class Publisher extends EventEmitter {
           echoCancellation: true,
           noiseSuppression: true,
         };
+        if (deviceIds.microphone) {
+          constraints.audio.deviceId = { exact: deviceIds.microphone };
+        }
       }
 
-      // Only request video if hasCamera is true
       if (this.hasCamera) {
         constraints.video = {
           width: { ideal: this.currentConfig.width },
           height: { ideal: this.currentConfig.height },
           frameRate: { ideal: this.currentConfig.framerate },
         };
+        if (deviceIds.camera) {
+          constraints.video.deviceId = { exact: deviceIds.camera };
+        }
       }
 
       // Check if at least one media type is requested
@@ -381,7 +786,9 @@ export default class Publisher extends EventEmitter {
 
       try {
         this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-        console.log(`Media stream obtained - Video: ${this.hasCamera}, Audio: ${this.hasMic}`);
+        console.log(
+          `Media stream obtained - Video: ${this.hasCamera}, Audio: ${this.hasMic}`
+        );
       } catch (error) {
         console.error("Error accessing media devices:", error);
 
@@ -390,28 +797,42 @@ export default class Publisher extends EventEmitter {
           console.log("Retrying with fallback...");
           try {
             // Try video only
-            this.stream = await navigator.mediaDevices.getUserMedia({ video: constraints.video });
+            this.stream = await navigator.mediaDevices.getUserMedia({
+              video: constraints.video,
+            });
             console.warn("Fallback: Got video only, no audio available");
             this.hasMic = false;
             this.micEnabled = false;
           } catch (videoError) {
             try {
               // Try audio only
-              this.stream = await navigator.mediaDevices.getUserMedia({ audio: constraints.audio });
+              this.stream = await navigator.mediaDevices.getUserMedia({
+                audio: constraints.audio,
+              });
               console.warn("Fallback: Got audio only, no video available");
               this.hasCamera = false;
               this.cameraEnabled = false;
             } catch (audioError) {
               console.error("Failed to get any media stream");
-              this.onStatusUpdate("No media devices available - permission denied or no devices found", true);
+              this.onStatusUpdate(
+                "No media devices available - permission denied or no devices found",
+                true
+              );
               // Don't throw, just return - this allows the app to continue without media
               return;
             }
           }
         } else {
           // Single device requested but failed
-          console.error(`Failed to access ${this.hasCamera ? 'camera' : 'microphone'}`);
-          this.onStatusUpdate(`Cannot access ${this.hasCamera ? 'camera' : 'microphone'} - permission denied or device not found`, true);
+          console.error(
+            `Failed to access ${this.hasCamera ? "camera" : "microphone"}`
+          );
+          this.onStatusUpdate(
+            `Cannot access ${
+              this.hasCamera ? "camera" : "microphone"
+            } - permission denied or device not found`,
+            true
+          );
           // Don't throw, just return
           return;
         }
@@ -461,7 +882,7 @@ export default class Publisher extends EventEmitter {
 
     // Emit local stream ready event for app integration
     this.emit("localStreamReady", {
-      stream: this.stream,           // Full stream with audio + video
+      stream: this.stream, // Full stream with audio + video
       videoOnlyStream: videoOnlyStream, // Video only stream
       streamType: this.streamType,
       streamId: this.streamId,
@@ -474,7 +895,9 @@ export default class Publisher extends EventEmitter {
     if (audioTracks.length > 0) mediaInfo.push("audio");
     if (videoTracks.length > 0) mediaInfo.push("video");
 
-    this.onStatusUpdate(`${this.streamType} stream ready (${mediaInfo.join(" + ") || "no media"})`);
+    this.onStatusUpdate(
+      `${this.streamType} stream ready (${mediaInfo.join(" + ") || "no media"})`
+    );
   }
 
   initVideoEncoders() {
@@ -751,19 +1174,19 @@ export default class Publisher extends EventEmitter {
       encoderObj.encoder.configure(encoderObj.config);
     });
 
-    const triggerWorker = new Worker("/polyfills/triggerWorker.js");
-    triggerWorker.postMessage({ frameRate: this.currentConfig.framerate });
+    this.triggerWorker = new Worker("/polyfills/triggerWorker.js");
+    this.triggerWorker.postMessage({ frameRate: this.currentConfig.framerate });
 
     const track = this.stream.getVideoTracks()[0];
     console.log("Using video track:", track);
     this.videoProcessor = new MediaStreamTrackProcessor(
       track,
-      triggerWorker,
+      this.triggerWorker,
       true
     );
 
-    const reader = this.videoProcessor.readable.getReader();
-    console.log("Video processor reader created:", reader);
+    this.videoReader = this.videoProcessor.readable.getReader();
+    console.log("Video processor reader created:", this.videoReader);
 
     let frameCounter = 0;
 
@@ -771,47 +1194,51 @@ export default class Publisher extends EventEmitter {
       ([_, obj]) => obj.channelName.startsWith("cam")
     );
 
+    if (this.isPublishing) {
+      this.startVideoFrameProcessing(frameCounter, cameraEncoders);
+    }
+
     // Process video frames
-    (async () => {
-      try {
-        while (this.isPublishing) {
-          const result = await reader.read();
+    // (async () => {
+    //   try {
+    //     while (this.isPublishing) {
+    //       const result = await this.videoReader.read();
 
-          if (result.done) break;
+    //       if (result.done) break;
 
-          const frame = result.value;
+    //       const frame = result.value;
 
-          if (!window.videoBaseTimestamp) {
-            window.videoBaseTimestamp = frame.timestamp;
-          }
+    //       if (!window.videoBaseTimestamp) {
+    //         window.videoBaseTimestamp = frame.timestamp;
+    //       }
 
-          if (!this.cameraEnabled) {
-            console.log("Camera disabled, skipping frame");
-            frame.close();
-            continue;
-          }
+    //       if (!this.cameraEnabled) {
+    //         console.log("Camera disabled, skipping frame");
+    //         frame.close();
+    //         continue;
+    //       }
 
-          frameCounter++;
-          const keyFrame = frameCounter % 30 === 0;
+    //       frameCounter++;
+    //       const keyFrame = frameCounter % 30 === 0;
 
-          for (let i = 0; i < cameraEncoders.length; i++) {
-            const [quality, encoderObj] = cameraEncoders[i];
-            const isLastEncoder = i === cameraEncoders.length - 1;
+    //       for (let i = 0; i < cameraEncoders.length; i++) {
+    //         const [quality, encoderObj] = cameraEncoders[i];
+    //         const isLastEncoder = i === cameraEncoders.length - 1;
 
-            if (encoderObj.encoder.encodeQueueSize <= 2) {
-              const frameToEncode = isLastEncoder
-                ? frame
-                : new VideoFrame(frame);
-              encoderObj.encoder.encode(frameToEncode, { keyFrame });
-              frameToEncode.close();
-            }
-          }
-        }
-      } catch (error) {
-        this.onStatusUpdate(`Video processing error: ${error.message}`, true);
-        console.error("Video capture error:", error);
-      }
-    })();
+    //         if (encoderObj.encoder.encodeQueueSize <= 2) {
+    //           const frameToEncode = isLastEncoder
+    //             ? frame
+    //             : new VideoFrame(frame);
+    //           encoderObj.encoder.encode(frameToEncode, { keyFrame });
+    //           frameToEncode.close();
+    //         }
+    //       }
+    //     }
+    //   } catch (error) {
+    //     this.onStatusUpdate(`Video processing error: ${error.message}`, true);
+    //     console.error("Video capture error:", error);
+    //   }
+    // })();
   }
 
   async startOpusAudioStreaming() {
@@ -833,8 +1260,9 @@ export default class Publisher extends EventEmitter {
       timeSlice: 100,
     };
 
+    this.currentCamAudioStream = new MediaStream([audioTrack]);
     const audioRecorder = await this.initAudioRecorder(
-      audioTrack,
+      this.currentCamAudioStream,
       audioRecorderOptions
     );
     audioRecorder.ondataavailable = (typedArray) =>
@@ -915,6 +1343,7 @@ export default class Publisher extends EventEmitter {
 
     try {
       const dataArray = new Uint8Array(typedArray);
+
       // Check for Opus header "OggS"
       if (
         dataArray.length >= 4 &&
@@ -937,7 +1366,10 @@ export default class Publisher extends EventEmitter {
             description: description,
           };
 
-          console.log(`[Audio Config] Preparing to send config for ${channelName}`, audioConfig);
+          console.log(
+            `[Audio Config] Preparing to send config for ${channelName}`,
+            audioConfig
+          );
           streamData.config = audioConfig;
           this.sendStreamConfig(channelName, audioConfig, "audio");
         }
@@ -1010,14 +1442,19 @@ export default class Publisher extends EventEmitter {
           },
         };
       }
-      console.log(`[Stream Config] Sending ${mediaType} config for ${channelName}`, configPacket);
+      console.log(
+        `[Stream Config] Sending ${mediaType} config for ${channelName}`,
+        configPacket
+      );
       const packet = new TextEncoder().encode(JSON.stringify(configPacket));
       await this.sendOverStream(channelName, packet);
 
       streamData.configSent = true;
       streamData.config = config;
 
-      console.log(`[Stream Config] ✅ Config sent successfully for ${channelName}`);
+      console.log(
+        `[Stream Config] ✅ Config sent successfully for ${channelName}`
+      );
       this.onStatusUpdate(`Config sent for stream: ${channelName}`);
     } catch (error) {
       console.error(`Failed to send config for ${channelName}:`, error);
@@ -1042,7 +1479,7 @@ export default class Publisher extends EventEmitter {
 
     const packet = new Uint8Array(
       HEADER_SIZE +
-      (data instanceof ArrayBuffer ? data.byteLength : data.length)
+        (data instanceof ArrayBuffer ? data.byteLength : data.length)
     );
     // type mapping
     // video-360p-key = 0
@@ -1149,8 +1586,10 @@ export default class Publisher extends EventEmitter {
           timeSlice: 100,
         };
 
+        this.currentScreenAudioStream = new MediaStream([audioTrack]);
+
         this.screenAudioRecorder = await this.initAudioRecorder(
-          audioTrack,
+          this.currentScreenAudioStream,
           audioRecorderOptions
         );
 
@@ -1166,16 +1605,16 @@ export default class Publisher extends EventEmitter {
       }
 
       // Start video processing
-      const triggerWorker = new Worker("/polyfills/triggerWorker.js");
-      triggerWorker.postMessage({ frameRate: screenConfig.framerate });
+      const screenTriggerWorker = new Worker("/polyfills/triggerWorker.js");
+      screenTriggerWorker.postMessage({ frameRate: screenConfig.framerate });
 
       this.screenVideoProcessor = new MediaStreamTrackProcessor(
         videoTrack,
-        triggerWorker,
+        screenTriggerWorker,
         true
       );
 
-      const reader = this.screenVideoProcessor.readable.getReader();
+      this.screenVideoReader = this.screenVideoProcessor.readable.getReader();
       let frameCounter = 0;
 
       // Handle video track ending
@@ -1187,7 +1626,7 @@ export default class Publisher extends EventEmitter {
       (async () => {
         try {
           while (this.isScreenSharing) {
-            const result = await reader.read();
+            const result = await this.screenVideoReader.read();
             if (result.done) break;
 
             const frame = result.value;
@@ -1244,6 +1683,21 @@ export default class Publisher extends EventEmitter {
         sender_stream_id: this.streamId,
       };
       await this.sendEvent(stopEvent);
+
+      // Cancel screen video reader first
+      if (this.screenVideoReader) {
+        try {
+          await this.screenVideoReader.cancel();
+          this.screenVideoReader = null;
+        } catch (error) {
+          console.warn("Error canceling screen video reader:", error);
+        }
+      }
+
+      // Stop screen video processor
+      if (this.screenVideoProcessor) {
+        this.screenVideoProcessor = null;
+      }
 
       // Stop and close video encoder
       if (this.screenVideoEncoder && this.screenVideoEncoder.encoder) {

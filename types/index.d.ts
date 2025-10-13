@@ -168,6 +168,44 @@ export interface MediaPermissions {
   microphone?: PermissionStatus;
 }
 
+export interface SelectedDevices {
+  camera: string | null;
+  microphone: string | null;
+  speaker: string | null;
+}
+
+export declare class MediaDeviceManager extends EventEmitter {
+  devices: MediaDevices;
+  selectedDevices: SelectedDevices;
+  permissions: {
+    camera: 'granted' | 'denied' | 'prompt';
+    microphone: 'granted' | 'denied' | 'prompt';
+  };
+  isMonitoring: boolean;
+
+  constructor();
+
+  initialize(): Promise<MediaDevices>;
+  refreshDevices(): Promise<MediaDevices>;
+  checkPermissions(): Promise<{
+    camera: 'granted' | 'denied' | 'prompt';
+    microphone: 'granted' | 'denied' | 'prompt';
+  }>;
+  startMonitoring(): void;
+  stopMonitoring(): void;
+  selectCamera(deviceId: string): MediaDeviceInfo;
+  selectMicrophone(deviceId: string): MediaDeviceInfo;
+  selectSpeaker(deviceId: string): MediaDeviceInfo;
+  getUserMedia(constraints?: MediaStreamConstraints): Promise<MediaStream>;
+  getDevices(): MediaDevices;
+  getSelectedDevices(): SelectedDevices;
+  getPermissions(): {
+    camera: 'granted' | 'denied' | 'prompt';
+    microphone: 'granted' | 'denied' | 'prompt';
+  };
+  destroy(): void;
+}
+
 // Event Emitter interface
 export declare abstract class EventEmitter {
   on(event: string, listener: (...args: any[]) => void): this;
@@ -213,6 +251,12 @@ export declare class Participant extends EventEmitter {
   setPublisher(publisher: any): void;
   setSubscriber(subscriber: any): void;
   updateMediaStream(newStream: MediaStream): void;
+  replaceMediaStream(newStream: MediaStream): Promise<{
+    stream: MediaStream;
+    videoOnlyStream: MediaStream;
+    hasVideo: boolean;
+    hasAudio: boolean;
+  }>;
   cleanup(): void;
   getDisplayName(): string;
   getInfo(): ParticipantInfo;
@@ -303,7 +347,7 @@ export declare class ErmisClient extends EventEmitter {
   manualAuthenticate(userId: string, token: string): void;
   logout(): Promise<void>;
   createRoom(config: RoomConfig): Promise<Room>;
-  joinRoom(roomCode: string): Promise<JoinResult>;
+  joinRoom(roomCode: string, mediaStream?: MediaStream): Promise<JoinResult>;
   leaveRoom(): Promise<void>;
   getRooms(options?: any): Promise<RoomInfo[]>;
   createSubRoom(config: SubRoomConfig): Promise<SubRoom>;
@@ -371,6 +415,8 @@ export declare class ErmisClassroom {
     readonly ERROR: "error";
   };
 
+  static createMediaDeviceManager(): MediaDeviceManager;
+
   static readonly MediaDevices: {
     getDevices(): Promise<MediaDevices>;
     getUserMedia(constraints?: MediaStreamConstraints): Promise<MediaStream>;
@@ -405,9 +451,6 @@ export declare class ErmisClassroom {
     options?: ConnectionOptions
   ): Promise<ErmisClient>;
 }
-
-// Named exports
-export { ErmisClient, Room, SubRoom, Participant, ApiClient, EventEmitter };
 
 // Default export
 export default ErmisClassroom;
