@@ -14,13 +14,14 @@ class Subscriber extends EventEmitter {
     this.host = config.host || "stream-gate.bandia.vn";
     this.userMediaWorker =
       config.userMediaWorker ||
-      "sfu-adaptive-bitrate-webrtc.ermis-network.workers.dev";
+      "sfu-adaptive-trung.ermis-network.workers.dev";
     this.screenShareWorker =
       config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev";
     this.isOwnStream = config.isOwnStream || false;
 
     // Media configuration
-    this.mediaWorkerUrl = config.mediaWorkerUrl || "/workers/media-worker-ab.js";
+    this.mediaWorkerUrl =
+      config.mediaWorkerUrl || "/workers/media-worker-ab.js";
     this.audioWorkletUrl =
       config.audioWorkletUrl || "/workers/audio-worklet1.js";
     this.mstgPolyfillUrl =
@@ -108,7 +109,7 @@ class Subscriber extends EventEmitter {
         this.emit("streamRemoved", {
           streamId: this.streamId,
           subscriberId: this.subscriberId,
-          roomId: this.roomId
+          roomId: this.roomId,
         });
       }
 
@@ -337,7 +338,7 @@ class Subscriber extends EventEmitter {
         streamId: this.streamId,
         subscriberId: this.subscriberId,
         roomId: this.roomId,
-        isOwnStream: this.isOwnStream
+        isOwnStream: this.isOwnStream,
       });
       this.emit("videoInitialized", { subscriber: this });
     } catch (error) {
