@@ -18,6 +18,9 @@ export default class Publisher extends EventEmitter {
     this.streamType = options.streamType || "camera"; // 'camera' or 'display'
     this.streamId = options.streamId || "test_stream";
     this.userId = options.userId || null; // User ID for screen share tile mapping
+    this.roomId = options.roomId || "test_room";
+    this.useWebRTC = options.useWebRTC || false;
+    this.preConfiguredStream = options.mediaStream || null;
 
     // Video configuration
     this.currentConfig = {
@@ -39,7 +42,11 @@ export default class Publisher extends EventEmitter {
     this.stream = null;
     this.audioProcessor = null;
     this.videoProcessor = null;
+    this.videoReader = null;
+    this.screenVideoProcessor = null;
+    this.screenVideoReader = null;
     this.webTransport = null;
+    this.webRtc = null;
     this.isChannelOpen = false;
     this.sequenceNumber = 0;
     this.isPublishing = false;
@@ -67,32 +74,74 @@ export default class Publisher extends EventEmitter {
     // Stream management
     this.publishStreams = new Map(); // key: channelName, value: {writer, reader, configSent, config}
     this.videoEncoders = new Map();
+    // this.fecEncoders = new Map();
     this.eventStream = null; // Dedicated event stream
 
+    this.webRtcServerUrl =
+      options.webRtcServerUrl || "daibo.ermis.network:9993";
+
+    // this.subStreams = [
+    //   {
+    //     name: "high",
+    //     width: 1280,
+    //     height: 720,
+    //     bitrate: 800_000,
+    //     framerate: 30,
+    //     channelName: "cam_720p",
+    //   },
+    //   // {
+    //   //   name: "low",
+    //   //   width: 854,
+    //   //   height: 480,
+    //   //   bitrate: 500_000,
+    //   //   framerate: 30,
+    //   //   channelName: "cam_360p",
+    //   // },
+    //   {
+    //     name: "low",
+    //     width: 640,
+    //     height: 360,
+    //     bitrate: 400_000,
+    //     framerate: 30,
+    //     channelName: "cam_360p",
+    //   },
+    //   {
+    //     name: "screen",
+    //     width: 1920,
+    //     height: 1080,
+    //     bitrate: 2_000_000,
+    //     framerate: 30,
+    //     channelName: "screen_share_1080p",
+    //   },
+    //   {
+    //     name: "microphone",
+    //     channelName: "mic_48k",
+    //   },
+    // ];
     this.subStreams = [
       {
-        name: "high",
-        width: 1280,
-        height: 720,
-        bitrate: 800_000,
-        framerate: 30,
-        channelName: "cam_720p",
+        name: "meeting_control",
+        channelName: CHANNEL_NAME.MEETING_CONTROL,
       },
-      // {
-      //   name: "low",
-      //   width: 854,
-      //   height: 480,
-      //   bitrate: 500_000,
-      //   framerate: 30,
-      //   channelName: "cam_360p",
-      // },
+      {
+        name: "microphone",
+        channelName: CHANNEL_NAME.MICROPHONE,
+      },
       {
         name: "low",
         width: 640,
         height: 360,
         bitrate: 400_000,
         framerate: 30,
-        channelName: "cam_360p",
+        channelName: CHANNEL_NAME.CAMERA_360P,
+      },
+      {
+        name: "high",
+        width: 1280,
+        height: 720,
+        bitrate: 800_000,
+        framerate: 30,
+        channelName: CHANNEL_NAME.CAMERA_720P,
       },
       {
         name: "screen",
@@ -100,13 +149,13 @@ export default class Publisher extends EventEmitter {
         height: 1080,
         bitrate: 2_000_000,
         framerate: 30,
-        channelName: "screen_share_1080p",
-      },
-      {
-        name: "microphone",
-        channelName: "mic_48k",
+        channelName: CHANNEL_NAME.SCREEN_SHARE_1080P,
       },
     ];
+
+    this.currentCamAudioStream = null;
+    this.currentScreenAudioStream = null;
+    this.triggerWorker = null;
   }
 
   async init() {
@@ -116,12 +165,10 @@ export default class Publisher extends EventEmitter {
 
   async loadAllDependencies() {
     try {
-      if (
-        !document.querySelector('script[src*="MSTP_polyfill.js"]')
-      ) {
+      if (!document.querySelector('script[src*="MSTP_polyfill.js"]')) {
         await new Promise((resolve, reject) => {
           const script = document.createElement("script");
-          script.src = "../polyfills/MSTP_polyfill.js";
+          script.src = "/polyfills/MSTP_polyfill.js";
           script.onload = () => resolve();
           script.onerror = () =>
             reject(new Error("Failed to load MSTP polyfill"));
@@ -276,7 +323,6 @@ export default class Publisher extends EventEmitter {
     await this.sendMeetingEvent("mic_off");
   }
 
-  // Turn on mic (resume encoding audio chunks)
   async turnOnMic() {
     if (!this.hasMic) {
       console.warn("Cannot turn on mic: no microphone available");
@@ -288,9 +334,372 @@ export default class Publisher extends EventEmitter {
     this.micEnabled = true;
     this.onStatusUpdate("Mic turned on");
 
-    // Send mic_on event to server
     await this.sendMeetingEvent("mic_on");
   }
+
+  /*
+    * Switch to a different camera by deviceId
+    just switches the video track in the existing stream, handle new track 
+  */
+  async switchCamera(deviceId) {
+    if (!this.hasCamera) {
+      throw new Error("Camera not available");
+    }
+
+    if (!this.isPublishing) {
+      throw new Error("Not currently publishing");
+    }
+
+    try {
+      console.log(`[Publisher] Switching camera to device: ${deviceId}`);
+      this.onStatusUpdate("Switching camera...");
+
+      const videoConstraints = {
+        deviceId: { exact: deviceId },
+        width: { ideal: this.currentConfig.width },
+        height: { ideal: this.currentConfig.height },
+        frameRate: { ideal: this.currentConfig.framerate },
+      };
+
+      const audioConstraints =
+        this.hasMic && this.stream?.getAudioTracks().length > 0
+          ? {
+            sampleRate: this.kSampleRate,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+          }
+          : false;
+
+      console.log("[Publisher] Requesting new media stream...");
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints,
+        audio: audioConstraints,
+      });
+
+      if (!newStream.getVideoTracks()[0]) {
+        throw new Error("Failed to get video track from new camera");
+      }
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      const oldVideoTrack = this.stream.getVideoTracks()[0];
+
+      this.stream.removeTrack(oldVideoTrack);
+      this.stream.addTrack(newVideoTrack);
+      oldVideoTrack.stop();
+
+      this.handleNewTrack(newVideoTrack);
+
+      this.emit("cameraSwitch", {
+        deviceId,
+        stream: this.stream,
+        videoOnlyStream: newStream,
+      });
+
+      console.log("[Publisher] Camera switched successfully");
+      this.onStatusUpdate(`Camera switched successfully`);
+
+      return { stream: this.stream, videoOnlyStream: newStream };
+    } catch (error) {
+      console.error("[Publisher] Failed to switch camera:", error);
+      this.onStatusUpdate(`Failed to switch camera: ${error.message}`, true);
+      throw error;
+    }
+  }
+
+  async handleNewTrack(track) {
+    if (!track) {
+      throw new Error("No video track found in new stream");
+    }
+    try {
+      const wasPublishing = this.isPublishing;
+      this.isPublishing = false;
+
+      //wait a bit to ensure all frames are processed
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Close existing video reader and processor
+      // if (this.videoReader) {
+      //   this.videoReader.cancel();
+      // }
+
+      // if (this.videoProcessor) {
+      //   if (this.videoProcessor.readable) {
+      //     this.videoProcessor.readable.cancel();
+      //   }
+      // }
+
+      console.log("Switched to new video track:", track);
+
+      // Initialize new video processor
+      this.videoProcessor = new MediaStreamTrackProcessor(
+        track,
+        this.triggerWorker,
+        true
+      );
+
+      this.videoReader = this.videoProcessor.readable.getReader();
+      console.log("New video processor reader created:", this.videoReader);
+
+      // Reset frame counter and base timestamp
+      // window.videoBaseTimestamp = undefined;
+      let frameCounter = 0;
+
+      // Get list of camera encoders
+      const cameraEncoders = Array.from(this.videoEncoders.entries()).filter(
+        ([_, obj]) => obj.channelName.startsWith("cam")
+      );
+
+      // Restart video frame processing
+      this.isPublishing = wasPublishing;
+
+      if (this.isPublishing) {
+        this.startVideoFrameProcessing(frameCounter, cameraEncoders);
+      }
+
+      this.onStatusUpdate("Camera switched successfully", false);
+      return true;
+    } catch (error) {
+      this.isPublishing = false;
+      const errorMsg = `Camera switch error: ${error.message}`;
+      this.onStatusUpdate(errorMsg, true);
+      console.error(errorMsg, error);
+      return false;
+    }
+  }
+
+  startVideoFrameProcessing(initialFrameCounter = 0, cameraEncoders) {
+    let frameCounter = initialFrameCounter;
+
+    (async () => {
+      try {
+        while (this.isPublishing) {
+          const result = await this.videoReader.read();
+
+          if (result.done) break;
+
+          const frame = result.value;
+
+          if (!window.videoBaseTimestamp) {
+            window.videoBaseTimestamp = frame.timestamp;
+          }
+
+          if (!this.cameraEnabled) {
+            console.log("Camera disabled, skipping frame");
+            frame.close();
+            continue;
+          }
+
+          frameCounter++;
+          const keyFrame = frameCounter % 30 === 0;
+
+          for (let i = 0; i < cameraEncoders.length; i++) {
+            const [quality, encoderObj] = cameraEncoders[i];
+            const isLastEncoder = i === cameraEncoders.length - 1;
+
+            if (encoderObj.encoder.encodeQueueSize <= 2) {
+              const frameToEncode = isLastEncoder
+                ? frame
+                : new VideoFrame(frame);
+              encoderObj.encoder.encode(frameToEncode, { keyFrame });
+              frameToEncode.close();
+            }
+          }
+        }
+      } catch (error) {
+        this.onStatusUpdate(`Video processing error: ${error.message}`, true);
+        console.error("Video capture error:", error);
+      }
+    })();
+  }
+
+  async switchMicrophone(deviceId) {
+    if (!this.hasMic) {
+      throw new Error("Microphone not available");
+    }
+
+    if (!this.isPublishing) {
+      throw new Error("Not currently publishing");
+    }
+
+    try {
+      console.log(`[Publisher] Switching microphone to device: ${deviceId}`);
+      this.onStatusUpdate("Switching microphone...");
+
+      const audioConstraints = {
+        deviceId: { exact: deviceId },
+        sampleRate: this.kSampleRate,
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+      };
+
+      console.log("[Publisher] Requesting new media stream...");
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints,
+      });
+
+      if (!newStream.getAudioTracks()[0]) {
+        throw new Error("Failed to get audio track from new microphone");
+      }
+
+      //just switch the audio track in the existing stream
+      this.currentCamAudioStream = newStream;
+
+      const newAudioTrack = newStream.getAudioTracks()[0];
+      console.log("New audio track obtained:", newAudioTrack);
+
+      console.log("[Publisher] Microphone switched successfully");
+      this.onStatusUpdate(`Microphone switched successfully`);
+      const videoOnlyStream = new MediaStream();
+      const videoTracks = this.stream.getVideoTracks();
+      if (videoTracks.length > 0) {
+        videoOnlyStream.addTrack(videoTracks[0]);
+      }
+      this.emit("microphoneSwitch", {
+        deviceId,
+        stream: this.stream,
+        videoOnlyStream,
+      });
+
+      return { stream: this.stream, videoOnlyStream };
+    } catch (error) {
+      console.error("[Publisher] Failed to switch microphone:", error);
+      this.onStatusUpdate(
+        `Failed to switch microphone: ${error.message}`,
+        true
+      );
+      throw error;
+    }
+  }
+
+  async replaceMediaStream(newStream) {
+    if (!this.isPublishing) {
+      throw new Error("Not currently publishing");
+    }
+
+    if (!newStream || !(newStream instanceof MediaStream)) {
+      throw new Error("Invalid MediaStream provided");
+    }
+
+    try {
+      console.log("[Publisher] Replacing media stream...");
+      this.onStatusUpdate("Replacing media stream...");
+
+      const hasVideo = newStream.getVideoTracks().length > 0;
+      const hasAudio = newStream.getAudioTracks().length > 0;
+
+      if (!hasVideo && !hasAudio) {
+        throw new Error("MediaStream has no tracks");
+      }
+
+      const wasVideoActive = this.hasCamera && this.cameraEnabled;
+      const wasAudioActive = this.hasMic && this.micEnabled;
+
+      // if (wasVideoActive && hasVideo) {
+      //   console.log("[Publisher] Stopping video processing...");
+      //   await this.stopVideoProcessing();
+      // }
+
+      // if (wasAudioActive && hasAudio) {
+      //   console.log("[Publisher] Stopping audio processing...");
+      //   await this.stopAudioProcessing();
+      // }
+
+      const oldStream = this.stream;
+      this.stream = newStream;
+
+      this.hasCamera = hasVideo;
+      this.hasMic = hasAudio;
+      this.cameraEnabled = hasVideo;
+      this.micEnabled = hasAudio;
+
+      if (hasVideo) {
+        console.log("[Publisher] Starting video capture with new stream...");
+        await this.startVideoCapture();
+      }
+
+      if (hasAudio) {
+        console.log("[Publisher] Starting audio streaming with new stream...");
+        this.audioProcessor = await this.startOpusAudioStreaming();
+      }
+
+      if (oldStream) {
+        console.log("[Publisher] Cleaning up old stream...");
+        oldStream.getTracks().forEach((track) => track.stop());
+      }
+
+      const videoOnlyStream = new MediaStream();
+      if (hasVideo) {
+        videoOnlyStream.addTrack(newStream.getVideoTracks()[0]);
+      }
+
+      this.emit("mediaStreamReplaced", {
+        stream: this.stream,
+        videoOnlyStream,
+        hasVideo,
+        hasAudio,
+      });
+
+      console.log("[Publisher] Media stream replaced successfully");
+      this.onStatusUpdate("Media stream replaced successfully");
+
+      return { stream: this.stream, videoOnlyStream, hasVideo, hasAudio };
+    } catch (error) {
+      console.error("[Publisher] Failed to replace media stream:", error);
+      this.onStatusUpdate(
+        `Failed to replace media stream: ${error.message}`,
+        true
+      );
+      throw error;
+    }
+  }
+
+  async stopVideoProcessing() {
+    if (this.videoReader) {
+      try {
+        await this.videoReader.cancel();
+        this.videoReader = null;
+      } catch (error) {
+        console.warn("Error canceling video reader:", error);
+      }
+    }
+
+    if (this.videoProcessor) {
+      try {
+        this.videoProcessor = null;
+      } catch (error) {
+        console.warn("Error stopping video processor:", error);
+      }
+    }
+
+    if (this.videoEncoders && this.videoEncoders.size > 0) {
+      this.videoEncoders.forEach((encoderObj) => {
+        try {
+          if (encoderObj.encoder && encoderObj.encoder.state !== "closed") {
+            encoderObj.encoder.close();
+          }
+        } catch (error) {
+          console.warn("Error closing video encoder:", error);
+        }
+      });
+      this.videoEncoders.clear();
+    }
+  }
+
+  async stopAudioProcessing() {
+    if (this.audioProcessor) {
+      try {
+        if (typeof this.audioProcessor.stop === "function") {
+          await this.audioProcessor.stop();
+        }
+      } catch (error) {
+        console.warn("Error stopping audio processor:", error);
+      }
+      this.audioProcessor = null;
+    }
+  }
+
   async pinForEveryone(targetStreamId) {
     await this.sendMeetingEvent("pin_for_everyone", targetStreamId);
   }
@@ -351,11 +760,43 @@ export default class Publisher extends EventEmitter {
     }
   }
 
-  async getMediaStream() {
+  async getMediaStream(deviceIds = {}) {
+    if (this.preConfiguredStream) {
+      this.stream = this.preConfiguredStream;
+      console.log("Using pre-configured media stream");
+
+      const audioTracks = this.stream.getAudioTracks();
+      const videoTracks = this.stream.getVideoTracks();
+      this.hasMic = audioTracks.length > 0;
+      this.hasCamera = videoTracks.length > 0;
+      this.micEnabled = this.hasMic;
+      this.cameraEnabled = this.hasCamera;
+
+      console.log(
+        `Pre-configured stream - Video: ${this.hasCamera}, Audio: ${this.hasMic}`
+      );
+
+      const videoOnlyStream = new MediaStream();
+      if (videoTracks.length > 0) {
+        videoOnlyStream.addTrack(videoTracks[0]);
+      }
+
+      this.emit("localStreamReady", {
+        stream: this.stream,
+        videoOnlyStream: videoOnlyStream,
+        streamType: this.streamType,
+        streamId: this.streamId,
+        config: this.currentConfig,
+        hasAudio: audioTracks.length > 0,
+        hasVideo: videoTracks.length > 0,
+      });
+
+      return;
+    }
+
     if (this.streamType === "camera") {
       const constraints = {};
 
-      // Only request audio if hasMic is true
       if (this.hasMic) {
         constraints.audio = {
           sampleRate: this.kSampleRate,
@@ -363,15 +804,20 @@ export default class Publisher extends EventEmitter {
           echoCancellation: true,
           noiseSuppression: true,
         };
+        if (deviceIds.microphone) {
+          constraints.audio.deviceId = { exact: deviceIds.microphone };
+        }
       }
 
-      // Only request video if hasCamera is true
       if (this.hasCamera) {
         constraints.video = {
           width: { ideal: this.currentConfig.width },
           height: { ideal: this.currentConfig.height },
           frameRate: { ideal: this.currentConfig.framerate },
         };
+        if (deviceIds.camera) {
+          constraints.video.deviceId = { exact: deviceIds.camera };
+        }
       }
 
       // Check if at least one media type is requested
@@ -382,7 +828,9 @@ export default class Publisher extends EventEmitter {
 
       try {
         this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-        console.log(`Media stream obtained - Video: ${this.hasCamera}, Audio: ${this.hasMic}`);
+        console.log(
+          `Media stream obtained - Video: ${this.hasCamera}, Audio: ${this.hasMic}`
+        );
       } catch (error) {
         console.error("Error accessing media devices:", error);
 
@@ -391,28 +839,41 @@ export default class Publisher extends EventEmitter {
           console.log("Retrying with fallback...");
           try {
             // Try video only
-            this.stream = await navigator.mediaDevices.getUserMedia({ video: constraints.video });
+            this.stream = await navigator.mediaDevices.getUserMedia({
+              video: constraints.video,
+            });
             console.warn("Fallback: Got video only, no audio available");
             this.hasMic = false;
             this.micEnabled = false;
           } catch (videoError) {
             try {
               // Try audio only
-              this.stream = await navigator.mediaDevices.getUserMedia({ audio: constraints.audio });
+              this.stream = await navigator.mediaDevices.getUserMedia({
+                audio: constraints.audio,
+              });
               console.warn("Fallback: Got audio only, no video available");
               this.hasCamera = false;
               this.cameraEnabled = false;
             } catch (audioError) {
               console.error("Failed to get any media stream");
-              this.onStatusUpdate("No media devices available - permission denied or no devices found", true);
+              this.onStatusUpdate(
+                "No media devices available - permission denied or no devices found",
+                true
+              );
               // Don't throw, just return - this allows the app to continue without media
               return;
             }
           }
         } else {
           // Single device requested but failed
-          console.error(`Failed to access ${this.hasCamera ? 'camera' : 'microphone'}`);
-          this.onStatusUpdate(`Cannot access ${this.hasCamera ? 'camera' : 'microphone'} - permission denied or device not found`, true);
+          console.error(
+            `Failed to access ${this.hasCamera ? "camera" : "microphone"}`
+          );
+          this.onStatusUpdate(
+            `Cannot access ${this.hasCamera ? "camera" : "microphone"
+            } - permission denied or device not found`,
+            true
+          );
           // Don't throw, just return
           return;
         }
@@ -462,7 +923,7 @@ export default class Publisher extends EventEmitter {
 
     // Emit local stream ready event for app integration
     this.emit("localStreamReady", {
-      stream: this.stream,           // Full stream with audio + video
+      stream: this.stream, // Full stream with audio + video
       videoOnlyStream: videoOnlyStream, // Video only stream
       streamType: this.streamType,
       streamId: this.streamId,
@@ -475,12 +936,17 @@ export default class Publisher extends EventEmitter {
     if (audioTracks.length > 0) mediaInfo.push("audio");
     if (videoTracks.length > 0) mediaInfo.push("video");
 
-    this.onStatusUpdate(`${this.streamType} stream ready (${mediaInfo.join(" + ") || "no media"})`);
+    this.onStatusUpdate(
+      `${this.streamType} stream ready (${mediaInfo.join(" + ") || "no media"})`
+    );
   }
 
   initVideoEncoders() {
     this.subStreams.forEach((subStream) => {
-      if (!subStream.channelName.startsWith("mic")) {
+      if (
+        !subStream.channelName.startsWith(CHANNEL_NAME.MICROPHONE) &&
+        !subStream.channelName.startsWith(CHANNEL_NAME.MEETING_CONTROL)
+      ) {
         console.log(`Setting up encoder for ${subStream.name}`);
         const encoder = new VideoEncoder({
           output: (chunk, metadata) =>
@@ -517,6 +983,14 @@ export default class Publisher extends EventEmitter {
   }
 
   async setupConnection() {
+    if (this.useWebRTC) {
+      await this.setupWebRTCConnection();
+    } else {
+      await this.setupWebTransportConnection();
+    }
+  }
+
+  async setupWebTransportConnection() {
     this.webTransport = new WebTransport(this.publishUrl);
     await this.webTransport.ready;
     console.log("WebTransport connected to server");
@@ -529,10 +1003,51 @@ export default class Publisher extends EventEmitter {
       // }
     }
 
+    await this.sendPublisherState();
     this.isChannelOpen = true;
     this.onStatusUpdate(
       "WebTransport connection established with event stream and media streams"
     );
+  }
+
+  async setupWebRTCConnection() {
+    try {
+      this.webRtc = new RTCPeerConnection();
+
+      for (const subStream of this.subStreams) {
+        if (!subStream.channelName.startsWith("screen")) {
+          await this.createDataChannel(subStream.channelName);
+        }
+      }
+
+      const offer = await this.webRtc.createOffer();
+      await this.webRtc.setLocalDescription(offer);
+
+      const response = await fetch(
+        `https://${this.webRtcServerUrl}/meeting/sdp/answer`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            offer,
+            room_id: this.roomId,
+            stream_id: this.streamId,
+          }),
+        }
+      );
+      console.log("Response from WebRTC server:", response);
+
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+
+      const answer = await response.json();
+      await this.webRtc.setRemoteDescription(answer);
+
+      this.isChannelOpen = true;
+    } catch (error) {
+      console.error("WebRTC setup error:", error);
+    }
   }
 
   async createEventStream() {
@@ -553,26 +1068,28 @@ export default class Publisher extends EventEmitter {
     // Setup reader cho event stream
     this.setupEventStreamReader(reader);
 
-    await this.sendPublisherState();
+    this.setupPingWorker();
+  }
 
-    const workerInterval = new Worker("/polyfills/intervalWorker.js");
-    workerInterval.postMessage({ interval: 1000 });
+  setupPingWorker() {
+    const senderType = this.useWebRTC ? "webrtc" : "webtransport";
+    const workerPing = new Worker("polyfills/intervalWorker.js");
+    workerPing.postMessage({ interval: 1000 });
     let lastPingTime = Date.now();
-
-    workerInterval.onmessage = (e) => {
+    workerPing.onmessage = (e) => {
       const ping = new TextEncoder().encode("ping");
-      this.sendOverEventStream(ping);
+      if (senderType === "webrtc") {
+        this.sendOverDataChannel("meeting_control", ping, FRAME_TYPE.PING);
+        console.log("Ping sent over WebRTC DataChannel");
+      } else if (senderType === "webtransport") {
+        console.log("Ping sent over WebTransport event stream");
+        this.sendOverEventStream(ping);
+      }
       if (Date.now() - lastPingTime > 1200) {
         console.warn("Ping delay detected, connection may be unstable");
       }
       lastPingTime = Date.now();
     };
-
-    // setInterval(() => {
-    //   const ping = new TextEncoder().encode("ping");
-    //   this.sendOverEventStream(ping);
-    //   console.log("Ping sent to server");
-    // }, 500);
   }
 
   setupEventStreamReader(reader) {
@@ -624,6 +1141,7 @@ export default class Publisher extends EventEmitter {
 
   async sendEvent(eventData) {
     const eventJson = JSON.stringify(eventData);
+
     await this.sendOverEventStream(eventJson);
   }
 
@@ -639,8 +1157,47 @@ export default class Publisher extends EventEmitter {
       timestamp: Date.now(),
     };
 
-    await this.sendEvent(stateEvent);
+    if (this.useWebRTC) {
+      const dataJson = JSON.stringify(stateEvent);
+      const eventToSend = new TextEncoder().encode(dataJson);
+      this.sendOverDataChannel(
+        CHANNEL_NAME.MEETING_CONTROL,
+        eventToSend,
+        FRAME_TYPE.EVENT
+      );
+    } else {
+      await this.sendEvent(stateEvent);
+    }
+
     this.onStatusUpdate("Publisher state sent to server");
+  }
+
+  async createDataChannel(channelName) {
+    const id = getDataChannelId(channelName);
+
+    const dataChannel = this.webRtc.createDataChannel(channelName, {
+      ordered: false,
+      id,
+      negotiated: true,
+    });
+
+    dataChannel.binaryType = "arraybuffer";
+
+    dataChannel.onopen = async () => {
+      this.publishStreams.set(channelName, {
+        id,
+        dataChannel,
+        dataChannelReady: true,
+        configSent: false,
+        config: null,
+      });
+      if (channelName === CHANNEL_NAME.MEETING_CONTROL) {
+        console.warn("datachannel state", dataChannel.readyState);
+        this.sendPublisherState();
+        this.setupPingWorker();
+      }
+      console.log(`WebRTC data channel (${channelName}) established`);
+    };
   }
 
   async createBidirectionalStream(channelName) {
@@ -665,32 +1222,32 @@ export default class Publisher extends EventEmitter {
     const initData = new TextEncoder().encode(channelName);
     await this.sendOverStream(channelName, initData);
 
-    this.setupStreamReader(channelName, reader);
+    // this.setupStreamReader(channelName, reader);
 
     console.log(`Stream created: ${channelName}`);
   }
 
-  setupStreamReader(channelName, reader) {
-    (async () => {
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) {
-            console.log(`Stream ${channelName} closed by server`);
-            break;
-          }
-          if (value) {
-            const msg = new TextDecoder().decode(value);
-            if (msg.startsWith("ack:") || msg.startsWith("config:")) {
-              console.log(`${channelName} received:`, msg);
-            }
-          }
-        }
-      } catch (err) {
-        console.error(`Error reading from stream ${channelName}:`, err);
-      }
-    })();
-  }
+  // setupStreamReader(channelName, reader) {
+  //   (async () => {
+  //     try {
+  //       while (true) {
+  //         const { value, done } = await reader.read();
+  //         if (done) {
+  //           console.log(`Stream ${channelName} closed by server`);
+  //           break;
+  //         }
+  //         if (value) {
+  //           const msg = new TextDecoder().decode(value);
+  //           if (msg.startsWith("ack:") || msg.startsWith("config:")) {
+  //             console.log(`${channelName} received:`, msg);
+  //           }
+  //         }
+  //       }
+  //     } catch (err) {
+  //       console.error(`Error reading from stream ${channelName}:`, err);
+  //     }
+  //   })();
+  // }
 
   async sendOverStream(channelName, frameBytes) {
     const streamData = this.publishStreams.get(channelName);
@@ -710,6 +1267,160 @@ export default class Publisher extends EventEmitter {
       console.error(`Failed to send over stream ${channelName}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Send data over WebRTC DataChannel with FEC encoding for keyframes
+   * @param {Uint8Array} packet - Packet created by createPacketWithHeader of binary data
+   * @param {number} sequenceNumber - Sequence number | required for ordering and FEC
+   * @param {number} packetType - Frame type (0-8, 0xFF for ping, 0xFE for event)
+   */
+  async sendOverDataChannel(channelName, packet, frameType) {
+    const dataChannel = this.publishStreams.get(channelName)?.dataChannel;
+    const sequenceNumber = this.sequenceNumber;
+
+    const dataChannelReady =
+      this.publishStreams.get(channelName)?.dataChannelReady;
+    if (
+      !dataChannelReady ||
+      !dataChannel ||
+      dataChannel.readyState !== "open"
+    ) {
+      console.warn("DataChannel not ready");
+      return;
+    }
+
+    try {
+      const needFecEncode =
+        frameType === 0 ||
+        frameType === 2 ||
+        frameType === 4 ||
+        frameType === 7 ||
+        frameType === FRAME_TYPE.CONFIG;
+      packet.length > 1000;
+
+      // define packetType , video : 0x00, audio 0x01, ping: 0xFF, event: 0xFE, config: 0xFD
+      const packetType = getTransportPacketType(frameType);
+
+      if (needFecEncode && packet.length > 100) {
+        let fecPackets = 2;
+
+        const MTU = 1024;
+        const HEADER_SIZE = 20; // 4 + 1 + 1 + 14
+        const chunkSize = MTU - HEADER_SIZE; // = 1004
+
+        const encoder = new this.WasmEncoder(packet, chunkSize);
+
+        const configBuf = encoder.getConfigBuffer();
+
+        // parse config buffer
+        // - 8 bytes: transfer_length (u64)
+        // - 2 bytes: symbol_size (u16)
+        // - 1 byte:  num_source_blocks (u8)
+        // - 2 bytes: num_sub_blocks (u16)
+        // - 1 byte:  symbol_alignment (u8)
+        const view = new DataView(configBuf.buffer);
+        const transferLength = view.getBigUint64(0, false);
+        const symbolSize = view.getUint16(8, false);
+        const sourceBlocks = view.getUint8(10);
+        const subBlocks = view.getUint16(11, false);
+        const alignment = view.getUint8(13);
+
+        const packets = encoder.encode(fecPackets);
+
+        const raptorQConfig = {
+          transferLength,
+          symbolSize,
+          sourceBlocks,
+          subBlocks,
+          alignment,
+        };
+
+        for (let i = 0; i < packets.length; i++) {
+          const fecPacket = packets[i];
+          const wrapper = this.createFecPacketWithHeader(
+            fecPacket,
+            sequenceNumber,
+            packetType,
+            raptorQConfig
+          );
+          dataChannel.send(wrapper);
+        }
+        return;
+      }
+
+      // No FEC encoding - send with regular wrapper
+
+      const wrapper = this.createRegularPacketWithHeader(
+        packet,
+        sequenceNumber,
+        packetType
+      );
+
+      dataChannel.send(wrapper);
+    } catch (error) {
+      console.error("Failed to send over DataChannel:", error);
+    }
+  }
+
+  /**
+   * Create regular packet with standard header (non-FEC)
+   * @param {Uint8Array} packet - Raw packet data
+   * @param {number} sequenceNumber - Sequence number for packet ordering
+   * @param {number} packetType - Packet type (0x00: video, 0x01: audio, etc.)
+   * @returns {Uint8Array} - Wrapped packet with standard header
+   */
+  createFecPacketWithHeader(packet, sequenceNumber, packetType, raptorQConfig) {
+    const { transferLength, symbolSize, sourceBlocks, subBlocks, alignment } =
+      raptorQConfig;
+
+    // Create header: 4 bytes seq + 1 byte FEC marker + 1 byte packet type + 14 bytes RaptorQ header
+    const header = new ArrayBuffer(4 + 1 + 1 + 14);
+    const view = new DataView(header);
+
+    // 4 bytes chunk id (sequence number)
+    view.setUint32(0, sequenceNumber, false); // big-endian
+    // 1 byte FEC marker
+    view.setUint8(4, 0xff); // FEC marker
+    // 1 byte packet type
+    view.setUint8(5, packetType);
+    // 14 bytes RaptorQ packet header
+    view.setBigUint64(6, transferLength, false);
+    view.setUint16(14, symbolSize, false);
+    view.setUint8(16, sourceBlocks);
+    view.setUint16(17, subBlocks, false);
+    view.setUint8(19, alignment);
+
+    // Combine header and packet data
+    const wrapper = new Uint8Array(header.byteLength + packet.length);
+    wrapper.set(new Uint8Array(header), 0);
+    wrapper.set(packet, header.byteLength);
+
+    return wrapper;
+  }
+
+  /**
+   * Create regular packet with standard header (non-FEC)
+   * @param {Uint8Array} packet - Raw packet data
+   * @param {number} sequenceNumber - Sequence number for packet ordering
+   * @param {number} packetType - Packet type (0x00: video, 0x01: audio, etc.)
+   * @returns {Uint8Array} - Wrapped packet with standard header
+   */
+  createRegularPacketWithHeader(packet, sequenceNumber, packetType) {
+    // Create wrapper: 4 bytes seq + 1 byte FEC flag + 1 byte packet type + data
+    const wrapper = new Uint8Array(6 + packet.length);
+    const view = new DataView(wrapper.buffer);
+
+    // 4 bytes sequence number
+    view.setUint32(0, sequenceNumber, false);
+    // 1 byte FEC flag (0x00 = not FEC)
+    view.setUint8(4, 0x00);
+    // 1 byte packet type
+    view.setUint8(5, packetType);
+    // Copy packet data
+    wrapper.set(packet, 6);
+
+    return wrapper;
   }
 
   async startStreaming() {
@@ -752,19 +1463,19 @@ export default class Publisher extends EventEmitter {
       encoderObj.encoder.configure(encoderObj.config);
     });
 
-    const triggerWorker = new Worker("/polyfills/triggerWorker.js");
-    triggerWorker.postMessage({ frameRate: this.currentConfig.framerate });
+    this.triggerWorker = new Worker("/polyfills/triggerWorker.js");
+    this.triggerWorker.postMessage({ frameRate: this.currentConfig.framerate });
 
     const track = this.stream.getVideoTracks()[0];
     console.log("Using video track:", track);
     this.videoProcessor = new MediaStreamTrackProcessor(
       track,
-      triggerWorker,
+      this.triggerWorker,
       true
     );
 
-    const reader = this.videoProcessor.readable.getReader();
-    console.log("Video processor reader created:", reader);
+    this.videoReader = this.videoProcessor.readable.getReader();
+    console.log("Video processor reader created:", this.videoReader);
 
     let frameCounter = 0;
 
@@ -772,47 +1483,51 @@ export default class Publisher extends EventEmitter {
       ([_, obj]) => obj.channelName.startsWith("cam")
     );
 
+    if (this.isPublishing) {
+      this.startVideoFrameProcessing(frameCounter, cameraEncoders);
+    }
+
     // Process video frames
-    (async () => {
-      try {
-        while (this.isPublishing) {
-          const result = await reader.read();
+    // (async () => {
+    //   try {
+    //     while (this.isPublishing) {
+    //       const result = await this.videoReader.read();
 
-          if (result.done) break;
+    //       if (result.done) break;
 
-          const frame = result.value;
+    //       const frame = result.value;
 
-          if (!window.videoBaseTimestamp) {
-            window.videoBaseTimestamp = frame.timestamp;
-          }
+    //       if (!window.videoBaseTimestamp) {
+    //         window.videoBaseTimestamp = frame.timestamp;
+    //       }
 
-          if (!this.cameraEnabled) {
-            console.log("Camera disabled, skipping frame");
-            frame.close();
-            continue;
-          }
+    //       if (!this.cameraEnabled) {
+    //         console.log("Camera disabled, skipping frame");
+    //         frame.close();
+    //         continue;
+    //       }
 
-          frameCounter++;
-          const keyFrame = frameCounter % 30 === 0;
+    //       frameCounter++;
+    //       const keyFrame = frameCounter % 30 === 0;
 
-          for (let i = 0; i < cameraEncoders.length; i++) {
-            const [quality, encoderObj] = cameraEncoders[i];
-            const isLastEncoder = i === cameraEncoders.length - 1;
+    //       for (let i = 0; i < cameraEncoders.length; i++) {
+    //         const [quality, encoderObj] = cameraEncoders[i];
+    //         const isLastEncoder = i === cameraEncoders.length - 1;
 
-            if (encoderObj.encoder.encodeQueueSize <= 2) {
-              const frameToEncode = isLastEncoder
-                ? frame
-                : new VideoFrame(frame);
-              encoderObj.encoder.encode(frameToEncode, { keyFrame });
-              frameToEncode.close();
-            }
-          }
-        }
-      } catch (error) {
-        this.onStatusUpdate(`Video processing error: ${error.message}`, true);
-        console.error("Video capture error:", error);
-      }
-    })();
+    //         if (encoderObj.encoder.encodeQueueSize <= 2) {
+    //           const frameToEncode = isLastEncoder
+    //             ? frame
+    //             : new VideoFrame(frame);
+    //           encoderObj.encoder.encode(frameToEncode, { keyFrame });
+    //           frameToEncode.close();
+    //         }
+    //       }
+    //     }
+    //   } catch (error) {
+    //     this.onStatusUpdate(`Video processing error: ${error.message}`, true);
+    //     console.error("Video capture error:", error);
+    //   }
+    // })();
   }
 
   async startOpusAudioStreaming() {
@@ -834,17 +1549,18 @@ export default class Publisher extends EventEmitter {
       timeSlice: 100,
     };
 
+    this.currentCamAudioStream = new MediaStream([audioTrack]);
     const audioRecorder = await this.initAudioRecorder(
-      audioTrack,
+      this.currentCamAudioStream,
       audioRecorderOptions
     );
     audioRecorder.ondataavailable = (typedArray) =>
-      this.handleOpusAudioChunk(typedArray, "mic_48k");
+      this.handleOpusAudioChunk(typedArray, CHANNEL_NAME.MICROPHONE);
 
     await audioRecorder.start({
       timeSlice: audioRecorderOptions.timeSlice,
     });
-
+    console.log("this publish streams", this.publishStreams);
     return audioRecorder;
   }
 
@@ -880,30 +1596,19 @@ export default class Publisher extends EventEmitter {
 
     const chunkData = new ArrayBuffer(chunk.byteLength);
     chunk.copyTo(chunkData);
-    let type;
-    switch (channelName) {
-      case "cam_360p":
-        type = chunk.type === "key" ? 0 : 1;
-        break;
-      case "cam_720p":
-        type = chunk.type === "key" ? 2 : 3;
-        break;
-      case "screen_share_1080p":
-        type = chunk.type === "key" ? 4 : 5;
-        break;
-      default:
-        type = 8; // other
-    }
-    // const type = chunk.type === "key" ? "video-key" : "video-delta";
-
+    const frameType = getFrameType(channelName, chunk.type);
     const packet = this.createPacketWithHeader(
       chunkData,
       chunk.timestamp,
-      type
+      frameType
     );
-
-    this.sendOverStream(channelName, packet);
-    this.sequenceNumber++;
+    if (this.useWebRTC) {
+      this.sendOverDataChannel(channelName, packet, frameType);
+      this.sequenceNumber++;
+      return;
+    } else {
+      this.sendOverStream(channelName, packet);
+    }
   }
 
   handleOpusAudioChunk(typedArray, channelName) {
@@ -916,6 +1621,7 @@ export default class Publisher extends EventEmitter {
 
     try {
       const dataArray = new Uint8Array(typedArray);
+
       // Check for Opus header "OggS"
       if (
         dataArray.length >= 4 &&
@@ -928,7 +1634,7 @@ export default class Publisher extends EventEmitter {
           const description = this.createPacketWithHeader(
             dataArray,
             performance.now() * 1000,
-            6
+            FRAME_TYPE.AUDIO
           );
 
           const audioConfig = {
@@ -938,8 +1644,12 @@ export default class Publisher extends EventEmitter {
             description: description,
           };
 
-          console.log(`[Audio Config] Preparing to send config for ${channelName}`, audioConfig);
+          console.log(
+            `[Audio Config] Preparing to send config for ${channelName}`,
+            audioConfig
+          );
           streamData.config = audioConfig;
+          console.warn("Send mic_48k config", audioConfig);
           this.sendStreamConfig(channelName, audioConfig, "audio");
         }
 
@@ -960,9 +1670,17 @@ export default class Publisher extends EventEmitter {
           Math.floor((this.opusSamplesSent * 1000000) / this.kSampleRate);
 
         if (streamData.configSent) {
-          const packet = this.createPacketWithHeader(dataArray, timestamp, 6);
-
-          this.sendOverStream(channelName, packet);
+          const packet = this.createPacketWithHeader(
+            dataArray,
+            timestamp,
+            FRAME_TYPE.AUDIO
+          );
+          if (this.useWebRTC) {
+            // audio chunk dont need fec and sequence number
+            this.sendOverDataChannel(channelName, packet, FRAME_TYPE.AUDIO);
+          } else {
+            this.sendOverStream(channelName, packet);
+          }
         }
       }
     } catch (error) {
@@ -1011,14 +1729,23 @@ export default class Publisher extends EventEmitter {
           },
         };
       }
-      console.log(`[Stream Config] Sending ${mediaType} config for ${channelName}`, configPacket);
+      console.log(
+        `[Stream Config] Sending ${mediaType} config for ${channelName}`,
+        configPacket
+      );
       const packet = new TextEncoder().encode(JSON.stringify(configPacket));
-      await this.sendOverStream(channelName, packet);
+      if (this.useWebRTC) {
+        this.sendOverDataChannel(channelName, packet, FRAME_TYPE.CONFIG);
+      } else {
+        await this.sendOverStream(channelName, packet);
+      }
 
       streamData.configSent = true;
       streamData.config = config;
 
-      console.log(`[Stream Config] ✅ Config sent successfully for ${channelName}`);
+      console.log(
+        `[Stream Config] ✅ Config sent successfully for ${channelName}`
+      );
       this.onStatusUpdate(`Config sent for stream: ${channelName}`);
     } catch (error) {
       console.error(`Failed to send config for ${channelName}:`, error);
@@ -1054,7 +1781,7 @@ export default class Publisher extends EventEmitter {
     // video-1080p-delta = 5
     // audio = 6
     // config = 7
-    // other = 8
+    // ping = 8
 
     packet[4] = type;
 
@@ -1153,8 +1880,10 @@ export default class Publisher extends EventEmitter {
           timeSlice: 100,
         };
 
+        this.currentScreenAudioStream = new MediaStream([audioTrack]);
+
         this.screenAudioRecorder = await this.initAudioRecorder(
-          audioTrack,
+          this.currentScreenAudioStream,
           audioRecorderOptions
         );
 
@@ -1170,16 +1899,16 @@ export default class Publisher extends EventEmitter {
       }
 
       // Start video processing
-      const triggerWorker = new Worker("/polyfills/triggerWorker.js");
-      triggerWorker.postMessage({ frameRate: screenConfig.framerate });
+      const screenTriggerWorker = new Worker("/polyfills/triggerWorker.js");
+      screenTriggerWorker.postMessage({ frameRate: screenConfig.framerate });
 
       this.screenVideoProcessor = new MediaStreamTrackProcessor(
         videoTrack,
-        triggerWorker,
+        screenTriggerWorker,
         true
       );
 
-      const reader = this.screenVideoProcessor.readable.getReader();
+      this.screenVideoReader = this.screenVideoProcessor.readable.getReader();
       let frameCounter = 0;
 
       // Handle video track ending (when user clicks Chrome's "Stop sharing" button)
@@ -1197,7 +1926,7 @@ export default class Publisher extends EventEmitter {
       (async () => {
         try {
           while (this.isScreenSharing) {
-            const result = await reader.read();
+            const result = await this.screenVideoReader.read();
             if (result.done) break;
 
             const frame = result.value;
@@ -1255,6 +1984,21 @@ export default class Publisher extends EventEmitter {
         sender_stream_id: this.streamId,
       };
       await this.sendEvent(stopEvent);
+
+      // Cancel screen video reader first
+      if (this.screenVideoReader) {
+        try {
+          await this.screenVideoReader.cancel();
+          this.screenVideoReader = null;
+        } catch (error) {
+          console.warn("Error canceling screen video reader:", error);
+        }
+      }
+
+      // Stop screen video processor
+      if (this.screenVideoProcessor) {
+        this.screenVideoProcessor = null;
+      }
 
       // Stop and close video encoder
       if (this.screenVideoEncoder && this.screenVideoEncoder.encoder) {
@@ -1348,15 +2092,20 @@ export default class Publisher extends EventEmitter {
 
     const chunkData = new ArrayBuffer(chunk.byteLength);
     chunk.copyTo(chunkData);
-    const type = chunk.type === "key" ? 4 : 5; // screen_share_1080p key/delta
+    const frameType = chunk.type === "key" ? 4 : 5; // screen_share_1080p key/delta
 
     const packet = this.createPacketWithHeader(
       chunkData,
       chunk.timestamp,
-      type
+      frameType
     );
 
-    this.sendOverStream(channelName, packet);
+    if (this.useWebRTC) {
+      this.sequenceNumber++;
+      this.sendOverDataChannel(channelName, packet, frameType);
+    } else {
+      this.sendOverStream(channelName, packet);
+    }
   }
 
   /**
@@ -1384,7 +2133,7 @@ export default class Publisher extends EventEmitter {
           const description = this.createPacketWithHeader(
             dataArray,
             performance.now() * 1000,
-            6
+            FRAME_TYPE.AUDIO
           );
 
           this.screenAudioConfig = {
@@ -1415,8 +2164,17 @@ export default class Publisher extends EventEmitter {
           Math.floor((this.screenAudioSamplesSent * 1000000) / 48000);
 
         if (streamData.configSent) {
-          const packet = this.createPacketWithHeader(dataArray, timestamp, 6);
-          this.sendOverStream(channelName, packet);
+          const packet = this.createPacketWithHeader(
+            dataArray,
+            timestamp,
+            FRAME_TYPE.AUDIO
+          );
+          if (this.useWebRTC) {
+            // audio chunk dont need fec and sequence number
+            this.sendOverDataChannel(channelName, packet, FRAME_TYPE.AUDIO);
+          } else {
+            this.sendOverStream(channelName, packet);
+          }
         }
 
         this.screenAudioSamplesSent += 960;
@@ -1480,7 +2238,11 @@ export default class Publisher extends EventEmitter {
 
       console.log("Sending screen share decoder configs:", config);
       const packet = new TextEncoder().encode(JSON.stringify(config));
-      await this.sendOverStream(channelName, packet);
+      if (this.useWebRTC) {
+        await this.sendOverDataChannel(channelName, packet, FRAME_TYPE.CONFIG);
+      } else {
+        await this.sendOverStream(channelName, packet);
+      }
 
       streamData.configSent = true;
       this.onStatusUpdate(`Screen share configs sent for: ${channelName}`);
@@ -1577,5 +2339,120 @@ export default class Publisher extends EventEmitter {
       sequenceNumber: this.sequenceNumber,
       activeStreams: Array.from(this.publishStreams.keys()),
     };
+  }
+}
+
+/**
+ * Frame type constants for different media streams and control messages
+ */
+const FRAME_TYPE = {
+  // Video frame types
+  CAM_360P_KEY: 0,
+  CAM_360P_DELTA: 1,
+  CAM_720P_KEY: 2,
+  CAM_720P_DELTA: 3,
+  SCREEN_SHARE_KEY: 4,
+  SCREEN_SHARE_DELTA: 5,
+  // Audio frame type
+  AUDIO: 6,
+  // Control message types
+  CONFIG: 0xfd,
+  EVENT: 0xfe,
+  PING: 0xff,
+};
+
+/**
+ * Transport packet type constants for network protocol
+ */
+const TRANSPORT_PACKET_TYPE = {
+  VIDEO: 0x00,
+  AUDIO: 0x01,
+  CONFIG: 0xfd,
+  EVENT: 0xfe,
+  PING: 0xff,
+};
+
+/**
+ * Helper function to get frame type based on channel name and chunk type
+ * @param {string} channelName - Channel name (cam_360p, cam_720p, screen_share_1080p)
+ * @param {string} chunkType - Chunk type ("key" or "delta")
+ * @returns {number} Frame type constant
+ */
+function getFrameType(channelName, chunkType) {
+  switch (channelName) {
+    case CHANNEL_NAME.CAMERA_360P:
+      return chunkType === "key"
+        ? FRAME_TYPE.CAM_360P_KEY
+        : FRAME_TYPE.CAM_360P_DELTA;
+    case CHANNEL_NAME.CAMERA_720P:
+      return chunkType === "key"
+        ? FRAME_TYPE.CAM_720P_KEY
+        : FRAME_TYPE.CAM_720P_DELTA;
+    case CHANNEL_NAME.SCREEN_SHARE_1080P:
+      return chunkType === "key"
+        ? FRAME_TYPE.SCREEN_SHARE_KEY
+        : FRAME_TYPE.SCREEN_SHARE_DELTA;
+    default:
+      return FRAME_TYPE.CAM_720P_KEY;
+    // fallback
+  }
+}
+
+/**
+ * Helper function to get transport packet type from frame type
+ * @param {number} frameType - Frame type constant
+ * @returns {number} Transport packet type constant
+ */
+function getTransportPacketType(frameType) {
+  switch (frameType) {
+    case FRAME_TYPE.PING:
+      return TRANSPORT_PACKET_TYPE.PING;
+    case FRAME_TYPE.EVENT:
+      return TRANSPORT_PACKET_TYPE.EVENT;
+    case FRAME_TYPE.CONFIG:
+      return TRANSPORT_PACKET_TYPE.CONFIG;
+    case FRAME_TYPE.AUDIO:
+      return TRANSPORT_PACKET_TYPE.AUDIO;
+    default:
+      return TRANSPORT_PACKET_TYPE.VIDEO;
+    // All video frame types
+  }
+}
+
+/**
+ * Channel name constants for different media streams
+ */
+const CHANNEL_NAME = {
+  // Control channels
+  MEETING_CONTROL: "meeting_control",
+  // Audio channels
+  MICROPHONE: "mic_48k",
+  // Video channels - Camera
+  CAMERA_360P: "cam_360p",
+  CAMERA_720P: "cam_720p",
+  // Video channels - Screen share
+  SCREEN_SHARE_1080P: "screen_share_1080p",
+};
+
+/**
+ * Helper function to get data channel ID from channel name
+ * @param {string} channelName - Channel name
+ * @returns {number} Data channel ID for WebRTC
+ */
+function getDataChannelId(channelName) {
+  switch (channelName) {
+    case CHANNEL_NAME.MEETING_CONTROL:
+      return 0;
+    case CHANNEL_NAME.MICROPHONE:
+      return 1;
+    case CHANNEL_NAME.CAMERA_360P:
+      return 2;
+    case CHANNEL_NAME.CAMERA_720P:
+      return 3;
+    case CHANNEL_NAME.SCREEN_SHARE_1080P:
+      return 4;
+    default:
+      return 5;
+    // fallback
   }
 }

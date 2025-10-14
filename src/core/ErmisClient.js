@@ -282,7 +282,7 @@ class ErmisClient extends EventEmitter {
   /**
    * Join a room by code
    */
-  async joinRoom(roomCode) {
+  async joinRoom(roomCode, mediaStream = null) {
     this._ensureAuthenticated();
 
     try {
@@ -309,8 +309,8 @@ class ErmisClient extends EventEmitter {
         this._setupRoomEvents(room);
       }
 
-      // Join the room
-      const joinResult = await room.join(this.state.user.id);
+      // Join the room with optional custom media stream
+      const joinResult = await room.join(this.state.user.id, mediaStream);
 
       // Update state
       this.state.currentRoom = room;

@@ -1,0 +1,149 @@
+name: Auto Release on Push
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'examples/**'
+      - '.github/**'
+      - 'tests/**'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if version was manually bumped
+        id: check
+        run: |
+          if git diff HEAD^ HEAD -- package.json | grep -q '"version"'; then
+            echo "Version was manually changed, skipping auto-release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "No version change detected, proceeding with auto-release"
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
+
+  auto-release:
+    needs: check-changes
+    if: needs.check-changes.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@ermisnetwork'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump patch version
+        id: version
+        run: |
+          OLD_VERSION=$(node -p "require('./package.json').version")
+          npm version patch --no-git-tag-version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "old_version=$OLD_VERSION" >> $GITHUB_OUTPUT
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "Bumped version from $OLD_VERSION to $NEW_VERSION"
+
+      - name: Commit version bump
+        run: |
+          git add package.json pnpm-lock.yaml
+          git commit -m "chore: auto bump version to ${{ steps.version.outputs.new_version }} [skip ci]"
+          git push origin main
+
+      - name: Build project
+        run: pnpm run build
+
+      - name: Create release archive
+        run: |
+          cd dist
+          tar -czf ../ermis-classroom-sdk-${{ steps.version.outputs.new_version }}.tar.gz .
+          cd ..
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.version.outputs.new_version }}
+          release_name: Release v${{ steps.version.outputs.new_version }}
+          body: |
+            ## Auto-release v${{ steps.version.outputs.new_version }}
+            
+            Automatically generated release with built distribution files.
+            
+            ### Installation
+            ```bash
+            npm install @ermisnetwork/ermis-classroom-sdk@${{ steps.version.outputs.new_version }}
+            ```
+            
+            ### Changes
+            - Version auto-bumped from ${{ steps.version.outputs.old_version }} to ${{ steps.version.outputs.new_version }}
+            - Latest changes from main branch
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./ermis-classroom-sdk-${{ steps.version.outputs.new_version }}.tar.gz
+          asset_name: ermis-classroom-sdk-${{ steps.version.outputs.new_version }}.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Publish to GitHub Packages
+        run: |
+          cd dist
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

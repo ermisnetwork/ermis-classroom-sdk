@@ -30,7 +30,7 @@ export async function ensureRecorderScriptLoaded() {
     }
 
     const script = document.createElement("script");
-    script.src = `opus_decoder/recorder.min.js?t=${Date.now()}`;
+    script.src = `/opus_decoder/recorder.min.js?t=${Date.now()}`;
 
     script.onload = () => {
       recorderScriptLoaded = true;
@@ -55,7 +55,7 @@ export async function ensureRecorderScriptLoaded() {
   return recorderScriptLoadPromise;
 }
 
-export async function initAudioRecorder(source, options = {}) {
+export async function initAudioRecorder(audioStream, options = {}) {
   try {
     await ensureRecorderScriptLoaded();
   } catch (err) {
@@ -89,7 +89,7 @@ export async function initAudioRecorder(source, options = {}) {
   }
 
   try {
-    const audioStream = new MediaStream([source]);
+    // const audioStream = new MediaStream([source]);
     console.log("Using provided MediaStreamTrack");
 
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -104,7 +104,7 @@ export async function initAudioRecorder(source, options = {}) {
       recordingGain: finalOptions.recordingGain,
       numberOfChannels: finalOptions.numberOfChannels,
       encoderSampleRate: finalOptions.encoderSampleRate,
-      encoderPath: `opus_decoder/encoderWorker.min.js?t=${Date.now()}`,
+      encoderPath: `/opus_decoder/encoderWorker.min.js?t=${Date.now()}`,
       sourceNode: sourceNode,
       streamPages: finalOptions.streamPages,
       encoderFrameSize: finalOptions.encoderFrameSize,

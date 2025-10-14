@@ -14,23 +14,18 @@ class Subscriber extends EventEmitter {
     this.host = config.host || "stream-gate.bandia.vn";
     this.userMediaWorker =
       config.userMediaWorker ||
-      "sfu-adaptive-bitrate-webrtc.ermis-network.workers.dev";
+      "sfu-adaptive-bitrate.ermis-network.workers.dev";
     this.screenShareWorker =
       config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev";
+    this.videoElement = config.videoElement;
     this.isOwnStream = config.isOwnStream || false;
 
     // Media configuration
-    this.mediaWorkerUrl = config.mediaWorkerUrl || "/workers/media-worker-ab.js";
+    this.mediaWorkerUrl = config.mediaWorkerUrl || "workers/media-worker-ab.js";
     this.audioWorkletUrl =
-      config.audioWorkletUrl || "/workers/audio-worklet1.js";
+      config.audioWorkletUrl || "workers/audio-worklet1.js";
     this.mstgPolyfillUrl =
-      config.mstgPolyfillUrl || "/polyfills/MSTG_polyfill.js";
-
-    // Screen share flag
-    this.isScreenSharing = config.isScreenSharing || false;
-
-    // Stream output flag
-    this.streamOutputEnabled = config.streamOutputEnabled !== false;
+      config.mstgPolyfillUrl || "polyfills/MSTG_polyfill.js";
 
     // State
     this.isStarted = false;
@@ -49,6 +44,9 @@ class Subscriber extends EventEmitter {
 
     // Audio mixer reference (will be set externally)
     this.audioMixer = null;
+
+    // Screen share flag
+    this.isScreenSharing = config.isScreenSharing || false;
   }
 
   /**
@@ -103,17 +101,13 @@ class Subscriber extends EventEmitter {
         this.worker = null;
       }
 
-      // Emit stream removal event for app integration
-      if (this.mediaStream) {
-        this.emit("streamRemoved", {
-          streamId: this.streamId,
-          subscriberId: this.subscriberId,
-          roomId: this.roomId
-        });
-      }
-
       // Close video components
       this._cleanupVideoSystem();
+
+      // Clear video element
+      if (this.videoElement) {
+        this.videoElement.srcObject = null;
+      }
 
       // Clear references
       this.audioWorkletNode = null;
@@ -178,40 +172,13 @@ class Subscriber extends EventEmitter {
    * Load MediaStreamTrackGenerator polyfill if needed
    */
   async _loadPolyfill() {
-    // Skip if browser already supports it
-    if (window.MediaStreamTrackGenerator) {
-      console.log("✅ Browser already supports MediaStreamTrackGenerator");
-      return;
+    if (!window.MediaStreamTrackGenerator) {
+      try {
+        await import(this.mstgPolyfillUrl);
+      } catch (error) {
+        console.warn("Failed to load MSTG polyfill:", error);
+      }
     }
-
-    // Determine the polyfill URL (absolute)
-    const url = this.mstgPolyfillUrl || `${location.origin}/polyfills/MSTG_polyfill.js`;
-    console.log("⚙️ Loading MSTG polyfill from:", url);
-
-    // Prevent loading twice
-    if (document.querySelector(`script[src="${url}"]`)) {
-      console.log("ℹ️ MSTG polyfill already loaded");
-      return;
-    }
-
-    // Dynamically load the script
-    await new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = url;
-      script.async = true;
-
-      script.onload = () => {
-        console.log("✅ MSTG polyfill loaded successfully");
-        resolve();
-      };
-
-      script.onerror = (err) => {
-        console.error("❌ Failed to load MSTG polyfill:", err);
-        reject(err);
-      };
-
-      document.head.appendChild(script);
-    });
   }
 
   /**
@@ -331,14 +298,11 @@ class Subscriber extends EventEmitter {
       // Create MediaStream with video track only
       this.mediaStream = new MediaStream([this.videoGenerator]);
 
-      // Emit remote stream ready event for app integration
-      this.emit("remoteStreamReady", {
-        stream: this.mediaStream,
-        streamId: this.streamId,
-        subscriberId: this.subscriberId,
-        roomId: this.roomId,
-        isOwnStream: this.isOwnStream
-      });
+      // Set video element source
+      if (this.videoElement) {
+        this.videoElement.srcObject = this.mediaStream;
+      }
+
       this.emit("videoInitialized", { subscriber: this });
     } catch (error) {
       throw new Error(`Video system initialization failed: ${error.message}`);
@@ -381,17 +345,7 @@ class Subscriber extends EventEmitter {
    * Handle messages from media worker
    */
   _handleWorkerMessage(e) {
-    const {
-      type,
-      frame,
-      message,
-      channelData,
-      sampleRate,
-      numberOfChannels,
-      timeStamp,
-      subscriberId,
-      audioEnabled,
-    } = e.data;
+    const { type, frame, message, audioEnabled } = e.data;
 
     switch (type) {
       case "videoData":

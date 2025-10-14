@@ -37,7 +37,6 @@ demo1.html
 node_modules/
 package-lock.json
 yarn.lock
-pnpm-lock.yaml
 
 # Git and CI
 .git/
