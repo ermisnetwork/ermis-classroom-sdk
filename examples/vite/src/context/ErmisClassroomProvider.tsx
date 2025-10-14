@@ -253,6 +253,21 @@ export const ErmisClassroomProvider = ({
       });
     });
 
+    // SubRoom event handlers
+    on("subRoomsCreated", (data: any) => {
+      console.log("Sub rooms created:", data);
+      // You might want to update some state here if needed
+    });
+
+    on("subRoomJoined", (data: any) => {
+      console.log("✅ subroom (legacy):", data);
+      setCurrentRoom(data.subRoom.room);
+      setParticipants(data.subRoom.participants.reduce((map: any, p: Participant) => {
+        map.set(p.userId, p);
+        return map;
+      }, new Map()));
+    });
+
     on(events.ERROR, (data: any) => {
       console.error(`SDK Error in ${data.action}:`, data.error?.message);
     });
@@ -268,11 +283,11 @@ export const ErmisClassroomProvider = ({
       }
       try {
         unsubRef.current.forEach((fn) => fn());
-      } catch {}
+      } catch { }
       unsubRef.current = [];
       try {
         clientRef.current.destroy?.();
-      } catch {}
+      } catch { }
       clientRef.current = null;
     }
 
@@ -285,11 +300,11 @@ export const ErmisClassroomProvider = ({
     return () => {
       try {
         unsubRef.current.forEach((fn) => fn());
-      } catch {}
+      } catch { }
       unsubRef.current = [];
       try {
         clientRef.current?.destroy?.();
-      } catch {}
+      } catch { }
       clientRef.current = null;
     };
   }, [cfgKey, setupEventListeners]);
@@ -552,6 +567,72 @@ export const ErmisClassroomProvider = ({
     [currentRoom]
   );
 
+  // SubRoom methods
+  const createSubRoom = useCallback(async (config: any) => {
+    const client = clientRef.current;
+    if (!client || !currentRoom) {
+      throw new Error("Client or current room not available");
+    }
+
+    try {
+      const result = await currentRoom.createSubRoom(config);
+      return result;
+    } catch (error) {
+      console.error("Failed to create sub room:", error);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  const getSubRooms = useCallback(async () => {
+    if (!currentRoom) {
+      throw new Error("Current room not available");
+    }
+
+    try {
+      const subRooms = await currentRoom.getSubRooms();
+      return subRooms;
+    } catch (error) {
+      console.error("Failed to get sub rooms:", error);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  const joinSubRoom = useCallback(async (subRoomId: string) => {
+    const client = clientRef.current;
+    if (!client || !currentRoom) {
+      throw new Error("Client or current room not available");
+    }
+
+    try {
+      const result = await client.apiClient.joinBreakoutRoom({
+        parent_room_id: currentRoom.id,
+        sub_room_id: subRoomId,
+      });
+      return result;
+    } catch (error) {
+      console.error("Failed to join sub room:", error);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  const leaveSubRoom = useCallback(async (subRoomId: string) => {
+    const client = clientRef.current;
+    if (!client || !currentRoom) {
+      throw new Error("Client or current room not available");
+    }
+
+    try {
+      const result = await client.apiClient.leaveBreakoutRoom({
+        parent_room_id: currentRoom.id,
+        sub_room_id: subRoomId,
+      });
+      return result;
+    } catch (error) {
+      console.error("Failed to leave sub room:", error);
+      throw error;
+    }
+  }, [currentRoom]);
+
   const value = useMemo(
     () => ({
       client: clientRef.current,
@@ -581,6 +662,11 @@ export const ErmisClassroomProvider = ({
       getPreviewStream,
       stopPreviewStream,
       replaceMediaStream,
+      // SubRoom methods
+      createSubRoom,
+      getSubRooms,
+      joinSubRoom,
+      leaveSubRoom,
     }),
     [
       participants,
@@ -609,6 +695,11 @@ export const ErmisClassroomProvider = ({
       getPreviewStream,
       stopPreviewStream,
       replaceMediaStream,
+      // SubRoom methods
+      createSubRoom,
+      getSubRooms,
+      joinSubRoom,
+      leaveSubRoom,
     ]
   );
 

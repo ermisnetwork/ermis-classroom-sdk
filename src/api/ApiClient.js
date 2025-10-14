@@ -125,8 +125,32 @@ class ApiClient {
   /**
    * Create a sub room
    */
-  async createSubRoom({ mainRoomId, rooms }) {
-    return await this.apiCall("/rooms", "POST", { main_room_id: mainRoomId, rooms });
+  async createSubRoom({ main_room_id, rooms }) {
+    return await this.apiCall("/rooms/breakout", "POST", { 
+      main_room_id, 
+      rooms 
+    });
+  }
+
+  /**
+   * Join sub room
+   */
+  async joinSubRoom({ parent_room_id, sub_room_id, appName = "Ermis-Meeting" }) {
+    return await this.apiCall("/rooms/join", "POST", {
+      app_name: appName,
+      parent_room_id,
+      sub_room_id
+    });
+  }
+
+  /**
+   * Leave breakout room and return to main room
+   */
+  async leaveBreakoutRoom({ parent_room_id, sub_room_id }) {
+    return await this.apiCall("/rooms/breakout/leave", "POST", {
+      parent_room_id,
+      sub_room_id
+    });
   }
 
   /**

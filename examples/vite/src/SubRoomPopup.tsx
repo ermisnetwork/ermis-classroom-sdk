@@ -357,9 +357,6 @@ const SubRoomPopup: React.FC<SubRoomPopupProps> = ({
   const [roomCount, setRoomCount] = useState(3);
   const [breakoutRooms, setBreakoutRooms] = useState<any[]>([]);
   const [isCreating, setIsCreating] = useState(false);
-  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(
-    null
-  );
 
   const remoteParticipants = participants.filter(
     (p) => !p.isLocal && p.role !== "owner"
@@ -390,88 +387,6 @@ const SubRoomPopup: React.FC<SubRoomPopupProps> = ({
 
     return distributedRooms;
   };
-
-  //Hàm kiểm tra assignment
-  const checkBreakoutRoomAssignment = async () => {
-    if (!currentRoom || !client) return;
-
-    try {
-      console.log("🔍 Checking for breakout room assignment...");
-
-      const currentUserId = client.getState()?.user?.id;
-
-      // Gọi API để lấy thông tin breakout rooms
-      const subRooms = await currentRoom.getSubRooms();
-      console.log("🔍 Found sub rooms:", subRooms);
-
-      for (const room of subRooms) {
-        // Lấy chi tiết room để có participants
-        const roomDetails = await client.apiClient.getRoomById(room.id);
-        console.log("🔍 Room details:", roomDetails);
-
-        const participants = roomDetails.participants || [];
-        const isUserInRoom = participants.some(
-          (p: any) => p.user_id === currentUserId
-        );
-
-        if (isUserInRoom) {
-          console.log(`🎯 User assigned to room: ${room.name}`);
-
-          // Dừng polling
-          if (pollingInterval) {
-            clearInterval(pollingInterval);
-            setPollingInterval(null);
-          }
-
-          if (isOpen) {
-            onClose();
-          }
-
-          // Join room
-          if (confirm(`Bạn được assign vào phòng: ${room.name}\n\nVào ngay?`)) {
-            const joinResponse = await client.apiClient.joinBreakoutRoom({
-              parent_room_id: currentRoom.id,
-              sub_room_id: room.id,
-            });
-
-            console.log("✅ Joined breakout room:", joinResponse);
-            alert(`✅ Đã vào phòng: ${room.name}`);
-          }
-
-          break;
-        }
-      }
-    } catch (error) {
-      console.error("❌ Error checking assignment:", error);
-    }
-  };
-
-  // polling kiem tra assignment
-  // useEffect(() => {
-  //   if (currentRoom && client) {
-  //     console.log("🔄 Starting breakout room assignment polling");
-
-  //     checkBreakoutRoomAssignment();
-
-  //     const interval = setInterval(checkBreakoutRoomAssignment, 5000);
-  //     setPollingInterval(interval);
-
-  //     return () => {
-  //       if (interval) {
-  //         clearInterval(interval);
-  //       }
-  //     };
-  //   }
-  // }, [currentRoom, client]);
-
-  // useEffect(() => {
-  //   return () => {
-  //     if (pollingInterval) {
-  //       console.log("🧹 Cleaning up polling interval");
-  //       clearInterval(pollingInterval);
-  //     }
-  //   };
-  // }, [pollingInterval]);
 
   useEffect(() => {
     if (isOpen) {
@@ -504,29 +419,37 @@ const SubRoomPopup: React.FC<SubRoomPopupProps> = ({
 
   if (!isOpen) return null;
 
-  // Step 2 handlers: Open all rooms
+  // Step 2 handlers: Create and open all breakout rooms
   const handleOpenAllRooms = async () => {
     if (!breakoutRooms.length || !client || !currentRoom) {
       console.error("Cannot create rooms: Missing required data");
+      alert("❌ Không thể tạo phòng: Thiếu dữ liệu cần thiết");
       return;
     }
 
     try {
       setIsCreating(true);
-      console.log(
-        "🔄 Creating breakout rooms with configuration:",
-        breakoutRooms
+      console.log("🔄 Creating breakout rooms with configuration:", breakoutRooms);
+
+      // Validate participants have required data
+      const hasValidParticipants = breakoutRooms.every(room =>
+        room.participants.every((p: any) => p.user_id && p.stream_id)
       );
-      // Format data đúng chuẩn API
+
+      if (!hasValidParticipants) {
+        throw new Error("Some participants are missing required data");
+      }
+
+      // Format data for API
       const formattedRooms = breakoutRooms.map((room) => ({
         room_name: room.room_name,
         participants: room.participants.map((p: any) => ({
-          userId: p.user_id,
-          streamId: p.stream_id,
+          user_id: p.user_id,
+          stream_id: p.stream_id,
         })),
       }));
 
-      console.log("📦 Calling createBreakoutRooms API with:", {
+      console.log("📦 Calling createSubRoom API with:", {
         main_room_id: currentRoom.id,
         rooms: formattedRooms,
       });
@@ -537,48 +460,13 @@ const SubRoomPopup: React.FC<SubRoomPopupProps> = ({
       });
 
       console.log("✅ Breakout rooms created:", result);
+      alert(`🎉 Tạo breakout rooms thành công!`);
 
-      // Tự động join vào room được assign
-      const currentUserId = client.getState()?.user?.id;
-      if (!currentUserId) {
-        throw new Error("Cannot get current user ID");
-      }
-
-      // let joinedRoom = null;
-
-      // // Tìm room mà current user được assign
-      // for (const room of createdRooms) {
-      //   console.log("room", room);
-      //   console.log(currentUserId, "currentUserid");
-      //   const isUserInRoom = room.participants?.some(
-      //     (p: any) => p.user_id === currentUserId
-      //   );
-      //   if (isUserInRoom) {
-      //     joinedRoom = room;
-      //     break;
-      //   }
-      // }
-      // console.log("joined Room", joinedRoom);
-      // if (joinedRoom) {
-      //   console.log(`🔄 Joining assigned room: ${joinedRoom.room_name}`);
-
-      //   const joinResponse = await client.apiClient.joinBreakoutRoom({
-      //     parent_room_id: currentRoom.id,
-      //     sub_room_id: joinedRoom.id || joinedRoom.room_id,
-      //   });
-
-      //   console.log("✅ Joined breakout room:", joinResponse);
-      //   alert(`✅ Đã tạo và vào phòng breakout: ${joinedRoom.room_name}`);
-      // } else {
-      //   console.log("ℹ️ User not assigned to any breakout room");
-      //   alert("🎉 Đã tạo breakout rooms thành công!");
-      // }
-
-      // Đóng popup
       onClose();
     } catch (error: any) {
       console.error("❌ Failed to create breakout rooms:", error);
-      alert(`❌ Lỗi khi tạo breakout rooms: ${error.message}`);
+      const errorMessage = error?.message || "Unknown error occurred";
+      alert(`❌ Lỗi khi tạo breakout rooms: ${errorMessage}`);
     } finally {
       setIsCreating(false);
     }

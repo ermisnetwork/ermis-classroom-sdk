@@ -22,6 +22,7 @@ export const VideoContainer = styled.div`
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   position: relative;
   width: 100%;
+  height: 100%;
 `;
 export const MainVideoStyled = styled.div<{ $totalParticipants: number }>`
   width: 100%;
@@ -45,7 +46,7 @@ export const MainVideoStyled = styled.div<{ $totalParticipants: number }>`
   video {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     background: #111;
     border-radius: 4px;
     transform: scaleX(-1);
@@ -61,7 +62,7 @@ export const ParticipantVideoContainer = styled.div<{
   border-radius: 4px;
   overflow: hidden;
   min-height: 150px;
-  aspect-ratio: 16 / 9;
+  // aspect-ratio: 16 / 9;
 
   ${(props) =>
     props.$isSmall &&
@@ -302,7 +303,7 @@ export const ActionButton = styled.button<{ $isActive?: boolean }>`
 
   &:hover {
     background: ${(props) =>
-      props.$isActive ? "rgba(255, 215, 0, 1)" : "rgba(0, 0, 0, 0.9)"};
+    props.$isActive ? "rgba(255, 215, 0, 1)" : "rgba(0, 0, 0, 0.9)"};
     transform: scale(1.1);
   }
 `;
@@ -349,7 +350,7 @@ export const PinMenuItem = styled.button<{ $disabled?: boolean }>`
 
   &:hover {
     background: ${(props) =>
-      props.$disabled ? "transparent" : "rgba(255, 255, 255, 0.1)"};
+    props.$disabled ? "transparent" : "rgba(255, 255, 255, 0.1)"};
   }
 
   svg {

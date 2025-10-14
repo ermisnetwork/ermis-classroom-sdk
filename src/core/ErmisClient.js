@@ -331,15 +331,15 @@ class ErmisClient extends EventEmitter {
         parentRoom: this.state.currentRoom,
       });
 
-      const subRoom = await this.state.currentRoom.createSubRoom(config);
+      const subRoomsData = await this.state.currentRoom.createSubRoom(config);
 
       this.emit("subRoomCreated", {
-        subRoom,
+        subRoomsData,
         parentRoom: this.state.currentRoom,
       });
-      this._debug("Sub room created:", subRoom.getInfo());
+      this._debug("Sub rooms created:", subRoomsData);
 
-      return subRoom;
+      return subRoomsData;
     } catch (error) {
       this.emit("error", { error, action: "createSubRoom" });
       throw error;
@@ -630,6 +630,7 @@ class ErmisClient extends EventEmitter {
       "messageUpdated",
       "typingStarted",
       "typingStopped",
+      "subRoomJoined",
       "error",
     ];
 
