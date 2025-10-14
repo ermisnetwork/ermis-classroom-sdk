@@ -114,6 +114,15 @@ export default class Publisher extends EventEmitter {
     this.currentCamAudioStream = null;
     this.currentScreenAudioStream = null;
     this.triggerWorker = null;
+    //
+    // debug
+    this.sequence360p = 0;
+    this.sequence720p = 0;
+    this.sequence1080p = 0;
+    this.debug360p = 0;
+    this.debug720p = 0;
+    this.debug1080p = 0;
+    this.intervalCountFrame();
   }
 
   async init() {
@@ -1032,11 +1041,12 @@ export default class Publisher extends EventEmitter {
       const bytes =
         typeof data === "string" ? new TextEncoder().encode(data) : data;
 
-      const len = bytes.length;
+      const len = bytes.length + 4;
       const out = new Uint8Array(4 + len);
       const view = new DataView(out.buffer);
       view.setUint32(0, len, false);
-      out.set(bytes, 4);
+      view.setUint32(4, 0, false); // Event stream sequence number always 0
+      out.set(bytes, 8);
       await this.eventStream.writer.write(out);
     } catch (error) {
       console.error("Failed to send over event stream:", error);
@@ -1122,11 +1132,21 @@ export default class Publisher extends EventEmitter {
     }
 
     try {
-      const len = frameBytes.length;
+      const len = frameBytes.length + 4;
       const out = new Uint8Array(4 + len);
       const view = new DataView(out.buffer);
       view.setUint32(0, len, false);
-      out.set(frameBytes, 4);
+      if (channelName === "cam_360p") {
+        view.setUint32(4, this.sequence360p, false);
+      } else if (channelName === "cam_720p") {
+        view.setUint32(4, this.sequence720p, false);
+      } else if (channelName === "cam_1080p") {
+        view.setUint32(4, this.sequence1080p, false);
+      } else {
+        view.setUint32(4, 0, false); // Default sequence number for other channels
+      }
+      out.set(frameBytes, 8);
+
       await streamData.writer.write(out);
     } catch (error) {
       console.error(`Failed to send over stream ${channelName}:`, error);
@@ -1330,7 +1350,29 @@ export default class Publisher extends EventEmitter {
     );
 
     this.sendOverStream(channelName, packet);
-    this.sequenceNumber++;
+    // this.sequenceNumber++;
+    if (channelName === "cam_360p") {
+      this.sequence360p++;
+      this.debug360p++;
+    } else if (channelName === "cam_720p") {
+      this.sequence720p++;
+      this.lastSent720p++;
+    } else if (channelName === "screen_share_1080p") {
+      this.sequence1080p++;
+      this.lastSent1080p++;
+    }
+  }
+
+  //interval for count frame per second
+  intervalCountFrame() {
+    setInterval(() => {
+      console.log(
+        `Sending FPS - 360p: ${this.debug360p},  720p: ${this.lastSent720p}, 1080p: ${this.lastSent1080p}, current sequence: 360p: ${this.sequence360p}, 720p: ${this.sequence720p}, 1080p: ${this.sequence1080p}`
+      );
+      this.debug360p = 0;
+      this.lastSent720p = 0;
+      this.lastSent1080p = 0;
+    }, 1000);
   }
 
   handleOpusAudioChunk(typedArray, channelName) {

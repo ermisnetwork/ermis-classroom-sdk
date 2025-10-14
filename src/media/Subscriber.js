@@ -15,7 +15,8 @@ class Subscriber extends EventEmitter {
     this.isOwnStream = config.isOwnStream || false;
 
     // Media configuration
-    this.mediaWorkerUrl = config.mediaWorkerUrl || "/workers/media-worker-ab.js";
+    this.mediaWorkerUrl =
+      config.mediaWorkerUrl || "/workers/media-worker-ab.js";
     this.audioWorkletUrl =
       config.audioWorkletUrl || "/workers/audio-worklet1.js";
     this.mstgPolyfillUrl =
@@ -97,7 +98,7 @@ class Subscriber extends EventEmitter {
         this.emit("streamRemoved", {
           streamId: this.streamId,
           subscriberId: this.subscriberId,
-          roomId: this.roomId
+          roomId: this.roomId,
         });
       }
 
@@ -194,7 +195,7 @@ class Subscriber extends EventEmitter {
         });
       };
 
-      const mediaUrl = `wss://sfu-adaptive-bitrate-webrtc.ermis-network.workers.dev/meeting/${this.roomId}/${this.streamId}`;
+      const mediaUrl = `wss://sfu-adaptive-trung.ermis-network.workers.dev/meeting/${this.roomId}/${this.streamId}`;
 
       this.worker.postMessage(
         {
@@ -293,7 +294,7 @@ class Subscriber extends EventEmitter {
         streamId: this.streamId,
         subscriberId: this.subscriberId,
         roomId: this.roomId,
-        isOwnStream: this.isOwnStream
+        isOwnStream: this.isOwnStream,
       });
       this.emit("videoInitialized", { subscriber: this });
     } catch (error) {
