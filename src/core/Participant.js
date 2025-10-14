@@ -29,6 +29,9 @@ class Participant extends EventEmitter {
     this.isScreenSharing = config.isScreenSharing || false;
     this.screenSubscriber = null;
 
+    // Sub-room state
+    this.subRoomId = config.subRoomId || null;
+
     // Status
     this.connectionStatus = "disconnected"; // 'connecting', 'connected', 'disconnected', 'failed'
   }

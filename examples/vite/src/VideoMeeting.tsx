@@ -11,6 +11,7 @@ import {
   MdScreenShare,
   MdStopScreenShare,
   MdSettings,
+  MdGroups,
 } from "react-icons/md";
 import {
   ActionButton,
@@ -39,6 +40,7 @@ import {
 } from "./VideoMeeting.styles.tsx";
 import { useErmisMeeting } from "./context";
 import type { ScreenShareData } from "./hooks/useErmisMeeting.ts";
+import SubRoomPopup from "./SubRoomPopup";
 
 interface VideoMeetingProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -61,6 +63,17 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
   const [showPreview, setShowPreview] = useState(false);
   const [previewCameraId, setPreviewCameraId] = useState<string>("");
   const [previewMicId, setPreviewMicId] = useState<string>("");
+
+  // New states for room management
+  const [currentView, setCurrentView] = useState<"join" | "create" | "list">("join");
+  const [newRoomName, setNewRoomName] = useState("");
+  const [newRoomType, setNewRoomType] = useState("main");
+  const [availableRooms, setAvailableRooms] = useState<any[]>([]);
+  const [isLoadingRooms, setIsLoadingRooms] = useState(false);
+  const [isCreatingRoom, setIsCreatingRoom] = useState(false);
+
+  // SubRoom states
+  const [showSubRoomPopup, setShowSubRoomPopup] = useState(false);
 
   const {
     participants,
@@ -85,12 +98,15 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
     switchMicrophone,
     getPreviewStream,
     stopPreviewStream,
-    replaceMediaStream,
+    client,
     screenShareStreams,
     isScreenSharing,
     toggleScreenShare
 
   } = useErmisMeeting();
+
+  console.log('---participants--', participants);
+
 
   useEffect(() => {
     if (videoRef?.current) {
@@ -244,6 +260,91 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
     } catch (error) {
       console.error("Failed to replace stream:", error);
       console.log("Failed to replace media stream");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Create room function
+  const handleCreateRoom = async () => {
+    if (!newRoomName.trim()) {
+      alert("Please enter a room name");
+      return;
+    }
+
+    try {
+      setIsCreatingRoom(true);
+      const room = await client.createRoom({
+        name: newRoomName,
+        type: newRoomType,
+        autoJoin: false, // Don't auto-join, let user choose
+      });
+
+      console.log("Room created successfully:", room);
+      alert(`Room created! Room code: ${room.code}`);
+
+      // Reset form
+      setNewRoomName("");
+      setNewRoomType("main");
+
+      // Switch to room list to show the new room
+      setCurrentView("list");
+      await fetchAvailableRooms();
+    } catch (error) {
+      console.error("Failed to create room:", error);
+      alert("Failed to create room. Please try again.");
+    } finally {
+      setIsCreatingRoom(false);
+    }
+  };
+
+  // Fetch available rooms function
+  const fetchAvailableRooms = async () => {
+    try {
+      setIsLoadingRooms(true);
+      const rooms = await client.getRooms({ page: 1, perPage: 20 });
+      console.log("Fetched rooms:", rooms);
+
+      setAvailableRooms(rooms.filter((room: any) => room.room_type !== 'sub') || []);
+    } catch (error) {
+      console.error("Failed to fetch rooms:", error);
+      alert("Failed to fetch rooms. Please try again.");
+    } finally {
+      setIsLoadingRooms(false);
+    }
+  };
+
+  // Join room from list
+  const handleJoinRoomFromList = async (room: any) => {
+    try {
+      setIsLoading(true);
+      setRoomCode(room.room_code);
+
+      let streamToUse = previewStream;
+
+      if (!streamToUse && (previewCameraId || previewMicId)) {
+        const constraints: any = {};
+
+        if (previewCameraId) {
+          constraints.video = { deviceId: { exact: previewCameraId } };
+        } else {
+          constraints.video = true;
+        }
+
+        if (previewMicId) {
+          constraints.audio = { deviceId: { exact: previewMicId } };
+        } else {
+          constraints.audio = true;
+        }
+
+        streamToUse = await navigator.mediaDevices.getUserMedia(constraints);
+      }
+
+      await joinRoom(room.room_code, streamToUse);
+      setCurrentView("join"); // Reset view after joining
+    } catch (error) {
+      console.error("Failed to join room:", error);
+      alert("Failed to join room");
     } finally {
       setIsLoading(false);
     }
@@ -492,87 +593,308 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
         </LoginSection>
       )}
 
-      {/* Room Join Section */}
+      {/* Room Management Section */}
       {isConnected && !inRoom && (
         <LoginSection>
-          <h2>Enter Room</h2>
-          <Input
-            type="text"
-            value={roomCode}
-            onChange={(e) => setRoomCode(e.target.value)}
-            placeholder="Enter room code"
-            onKeyPress={(e) => e.key === "Enter" && handleJoinRoom()}
-          />
-
-          <div style={{ marginTop: "20px", width: "100%" }}>
-            <h3 style={{ marginBottom: "10px" }}>Select Devices</h3>
-            <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
-              <select
-                value={previewCameraId}
-                onChange={(e) => handleDeviceChange("camera", e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: "8px",
-                  borderRadius: "4px",
-                  border: "1px solid #ccc",
-                }}
-              >
-                <option value="">Default Camera</option>
-                {devices?.cameras?.map((camera: any) => (
-                  <option key={camera.deviceId} value={camera.deviceId}>
-                    {camera.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={previewMicId}
-                onChange={(e) => handleDeviceChange("mic", e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: "8px",
-                  borderRadius: "4px",
-                  border: "1px solid #ccc",
-                }}
-              >
-                <option value="">Default Microphone</option>
-                {devices?.microphones?.map((mic: any) => (
-                  <option key={mic.deviceId} value={mic.deviceId}>
-                    {mic.label}
-                  </option>
-                ))}
-              </select>
+          {/* Navigation Tabs */}
+          <div style={{
+            display: "flex",
+            borderBottom: "2px solid #e0e0e0",
+            marginBottom: "20px",
+            backgroundColor: "#f8f9fa"
+          }}>
+            <div
+              onClick={() => setCurrentView("join")}
+              style={{
+                flex: 1,
+                padding: "12px 20px",
+                textAlign: "center",
+                cursor: "pointer",
+                borderBottom: currentView === "join" ? "3px solid #007bff" : "3px solid transparent",
+                backgroundColor: currentView === "join" ? "#ffffff" : "transparent",
+                color: currentView === "join" ? "#007bff" : "#6c757d",
+                fontWeight: currentView === "join" ? "600" : "normal",
+                transition: "all 0.3s ease",
+                borderTopLeftRadius: "8px",
+                borderTopRightRadius: currentView === "join" ? "8px" : "0px"
+              }}
+              onMouseEnter={(e) => {
+                if (currentView !== "join") {
+                  e.currentTarget.style.backgroundColor = "#f0f0f0";
+                  e.currentTarget.style.color = "#495057";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (currentView !== "join") {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                  e.currentTarget.style.color = "#6c757d";
+                }
+              }}
+            >
+              Join Room
             </div>
-            <div style={{ display: "flex", gap: "10px" }}>
-              {!showPreview ? (
-                <Button
-                  onClick={handleStartPreview}
-                  disabled={isLoading}
-                  style={{ flex: 1 }}
-                >
-                  Start Preview
-                </Button>
-              ) : (
-                <Button
-                  onClick={handleStopPreview}
-                  style={{ flex: 1, background: "#dc3545" }}
-                >
-                  Stop Preview
-                </Button>
-              )}
+            <div
+              onClick={() => setCurrentView("create")}
+              style={{
+                flex: 1,
+                padding: "12px 20px",
+                textAlign: "center",
+                cursor: "pointer",
+                borderBottom: currentView === "create" ? "3px solid #007bff" : "3px solid transparent",
+                backgroundColor: currentView === "create" ? "#ffffff" : "transparent",
+                color: currentView === "create" ? "#007bff" : "#6c757d",
+                fontWeight: currentView === "create" ? "600" : "normal",
+                transition: "all 0.3s ease"
+              }}
+              onMouseEnter={(e) => {
+                if (currentView !== "create") {
+                  e.currentTarget.style.backgroundColor = "#f0f0f0";
+                  e.currentTarget.style.color = "#495057";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (currentView !== "create") {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                  e.currentTarget.style.color = "#6c757d";
+                }
+              }}
+            >
+              Create Room
+            </div>
+            <div
+              onClick={() => {
+                setCurrentView("list");
+                fetchAvailableRooms();
+              }}
+              style={{
+                flex: 1,
+                padding: "12px 20px",
+                textAlign: "center",
+                cursor: "pointer",
+                borderBottom: currentView === "list" ? "3px solid #007bff" : "3px solid transparent",
+                backgroundColor: currentView === "list" ? "#ffffff" : "transparent",
+                color: currentView === "list" ? "#007bff" : "#6c757d",
+                fontWeight: currentView === "list" ? "600" : "normal",
+                transition: "all 0.3s ease",
+                borderTopRightRadius: "8px",
+                borderTopLeftRadius: currentView === "list" ? "8px" : "0px"
+              }}
+              onMouseEnter={(e) => {
+                if (currentView !== "list") {
+                  e.currentTarget.style.backgroundColor = "#f0f0f0";
+                  e.currentTarget.style.color = "#495057";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (currentView !== "list") {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                  e.currentTarget.style.color = "#6c757d";
+                }
+              }}
+            >
+              Room List
             </div>
           </div>
 
-          <Button
-            onClick={handleJoinRoom}
-            disabled={isLoading}
-            style={{ marginTop: "20px" }}
-          >
-            {isLoading ? "Joining..." : "Join Room"}
-          </Button>
+          {/* Join Room Section */}
+          {currentView === "join" && (
+            <>
+              <h2>Join Room</h2>
+              <Input
+                type="text"
+                value={roomCode}
+                onChange={(e) => setRoomCode(e.target.value)}
+                placeholder="Enter room code"
+                onKeyPress={(e) => e.key === "Enter" && handleJoinRoom()}
+              />
+            </>
+          )}
+
+          {/* Create Room Section */}
+          {currentView === "create" && (
+            <>
+              <h2>Create New Room</h2>
+              <Input
+                type="text"
+                value={newRoomName}
+                onChange={(e) => setNewRoomName(e.target.value)}
+                placeholder="Enter room name"
+                style={{ marginBottom: "10px" }}
+              />
+              <select
+                value={newRoomType}
+                onChange={(e) => setNewRoomType(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: "4px",
+                  border: "1px solid #ccc",
+                  marginBottom: "20px",
+                  fontSize: "16px",
+                }}
+              >
+                <option value="main">Main Room</option>
+                <option value="breakout">Breakout Room</option>
+                <option value="presentation">Presentation Room</option>
+                <option value="discussion">Discussion Room</option>
+              </select>
+              <Button
+                onClick={handleCreateRoom}
+                disabled={isCreatingRoom || !newRoomName.trim()}
+                style={{ marginBottom: "20px" }}
+              >
+                {isCreatingRoom ? "Creating..." : "Create Room"}
+              </Button>
+            </>
+          )}
+
+          {/* Room List Section */}
+          {currentView === "list" && (
+            <>
+              <h2>Available Rooms</h2>
+              <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+                <Button
+                  onClick={fetchAvailableRooms}
+                  disabled={isLoadingRooms}
+                  style={{ flex: 1 }}
+                >
+                  {isLoadingRooms ? "Loading..." : "Refresh"}
+                </Button>
+              </div>
+
+              <div
+                style={{
+                  maxHeight: "300px",
+                  overflowY: "auto",
+                  border: "1px solid #ccc",
+                  borderRadius: "4px",
+                  padding: "10px",
+                  marginBottom: "20px",
+                }}
+              >
+                {isLoadingRooms ? (
+                  <p>Loading rooms...</p>
+                ) : availableRooms.length === 0 ? (
+                  <p>No rooms available</p>
+                ) : (
+                  availableRooms.map((room) => (
+                    <div
+                      key={room.id}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "10px",
+                        border: "1px solid #eee",
+                        borderRadius: "4px",
+                        marginBottom: "8px",
+                        backgroundColor: "#f9f9f9",
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: "bold", color: "#333" }}>
+                          {room.room_name}
+                        </div>
+                        <div style={{ fontSize: "12px", color: "#666" }}>
+                          Code: {room.room_code} | Type: {room.room_type}
+                        </div>
+                        <div style={{ fontSize: "12px", color: "#666" }}>
+                          Created: {new Date(room.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <Button
+                        onClick={() => handleJoinRoomFromList(room)}
+                        disabled={isLoading}
+                        style={{
+                          padding: "6px 12px",
+                          fontSize: "12px",
+                          background: "#28a745",
+                        }}
+                      >
+                        {isLoading ? "Joining..." : "Join"}
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+
+          {(currentView === "join" || currentView === "create") && (
+            <>
+              <div style={{ marginTop: "20px", width: "100%" }}>
+                <h3 style={{ marginBottom: "10px" }}>Select Devices</h3>
+                <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
+                  <select
+                    value={previewCameraId}
+                    onChange={(e) => handleDeviceChange("camera", e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: "8px",
+                      borderRadius: "4px",
+                      border: "1px solid #ccc",
+                    }}
+                  >
+                    <option value="">Default Camera</option>
+                    {devices?.cameras?.map((camera: any) => (
+                      <option key={camera.deviceId} value={camera.deviceId}>
+                        {camera.label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={previewMicId}
+                    onChange={(e) => handleDeviceChange("mic", e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: "8px",
+                      borderRadius: "4px",
+                      border: "1px solid #ccc",
+                    }}
+                  >
+                    <option value="">Default Microphone</option>
+                    {devices?.microphones?.map((mic: any) => (
+                      <option key={mic.deviceId} value={mic.deviceId}>
+                        {mic.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  {!showPreview ? (
+                    <Button
+                      onClick={handleStartPreview}
+                      disabled={isLoading}
+                      style={{ flex: 1 }}
+                    >
+                      Start Preview
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handleStopPreview}
+                      style={{ flex: 1, background: "#dc3545" }}
+                    >
+                      Stop Preview
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {currentView === "join" && (
+                <Button
+                  onClick={handleJoinRoom}
+                  disabled={isLoading}
+                  style={{ marginTop: "20px" }}
+                >
+                  {isLoading ? "Joining..." : "Join Room"}
+                </Button>
+              )}
+            </>
+          )}
         </LoginSection>
       )}
 
-      <VideoContainer>
+      <VideoContainer style={{ display: inRoom ? "block" : "none" }}>
         <MainVideoStyled $totalParticipants={participants.size + 1 + screenShareStreams.size}>
           {renderParticipantVideos()}
         </MainVideoStyled>
@@ -629,6 +951,16 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
             >
               <MdSettings size={20} />
             </ControlButton>
+
+            {/* SubRoom button - only show for hosts */}
+            {currentRoom?.localParticipant?.role === "owner" && (
+              <ControlButton
+                onClick={() => setShowSubRoomPopup(true)}
+                title="Create Breakout Rooms"
+              >
+                <MdGroups size={20} />
+              </ControlButton>
+            )}
 
             <ControlButton
               variant="leave"
@@ -728,6 +1060,15 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
           </DeviceSettingsPanel>
         )}
       </VideoContainer>
-    </Container >
+
+      {/* SubRoom Popup */}
+      <SubRoomPopup
+        isOpen={showSubRoomPopup}
+        onClose={() => setShowSubRoomPopup(false)}
+        participants={Array.from(participants.values())}
+        currentRoom={currentRoom}
+        client={client}
+      />
+    </Container>
   );
 }
