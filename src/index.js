@@ -10,6 +10,7 @@ import Participant from "./core/Participant.js";
 import ApiClient from "./api/ApiClient.js";
 import EventEmitter from "./events/EventEmitter.js";
 import MediaDeviceManager from "./media/MediaDeviceManager.js";
+import * as BrowserDetection from "./utils/browserDetection.js";
 
 /**
  * SDK Version
@@ -91,6 +92,7 @@ class ErmisClassroom {
       SCREEN_SHARE_STOPPED: "screenShareStopped",
       REMOTE_SCREEN_SHARE_STARTED: "remoteScreenShareStarted",
       REMOTE_SCREEN_SHARE_STOPPED: "remoteScreenShareStopped",
+      REMOTE_SCREEN_SHARE_STREAM_READY: "remoteScreenShareStreamReady",
 
       // Pin for everyone events
       PARTICIPANT_PINNED_FOR_EVERYONE: "participantPinnedForEveryone",
@@ -218,7 +220,8 @@ export {
   Participant,
   ApiClient,
   EventEmitter,
-  MediaDeviceManager
+  MediaDeviceManager,
+  BrowserDetection
 };
 
 export default ErmisClassroom;

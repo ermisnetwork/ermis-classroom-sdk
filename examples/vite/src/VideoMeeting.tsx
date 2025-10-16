@@ -37,10 +37,12 @@ import {
   PinMenuItem,
   ScreenShareBadge,
   VideoContainer,
+  SidebarParticipants,
+  PinnedVideoContainer
 } from "./VideoMeeting.styles.tsx";
 import { useErmisMeeting } from "./context";
-import type { ScreenShareData } from "./hooks/useErmisMeeting.ts";
 import SubRoomPopup from "./SubRoomPopup";
+import type { ScreenShareData } from "./context/ErmisClassroomProvider.tsx";
 
 interface VideoMeetingProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -53,9 +55,6 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [pinMenuOpen, setPinMenuOpen] = useState<string | null>(null); // Stores participantId of open menu
-  const [pinType, setPinType] = useState<'local' | 'everyone' | null>(null); // Track pin type
-  const [showPinConfirm, setShowPinConfirm] = useState(false); // Confirmation dialog
-  const [pendingPinAction, setPendingPinAction] = useState<{ userId: string, type: 'local' } | null>(null);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
@@ -105,9 +104,6 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
 
   } = useErmisMeeting();
 
-  console.log('---participants--', participants);
-
-
   useEffect(() => {
     if (videoRef?.current) {
       if (inRoom && localStream) {
@@ -117,6 +113,14 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
       }
     }
   }, [videoRef, localStream, previewStream, inRoom]);
+
+  // Set srcObject for local video ref when in room
+  useEffect(() => {
+    if (localVideoRef?.current && inRoom && localStream) {
+      console.log("Setting local video stream:", localStream);
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localVideoRef, localStream, inRoom]);
 
   // Close pin menu when clicking outside
   useEffect(() => {
@@ -133,7 +137,9 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
   // Set srcObject for screen share streams when they change
   useEffect(() => {
     console.log("Setting srcObject for screen share streams:", screenShareStreams);
-    screenShareStreams.forEach((data: any, userId: any) => {
+
+    // Set streams for active screen shares
+    screenShareStreams?.forEach((data: any, userId: any) => {
       const videoId = `${userId}-screenshare`;
       const videoElement = videoRefs.current.get(videoId);
       if (videoElement && data.stream) {
@@ -149,8 +155,22 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
         });
       }
     });
-  }, [screenShareStreams]);
 
+    // Cleanup: Remove srcObject from video elements that are no longer in screenShareStreams
+    return () => {
+      videoRefs.current.forEach((videoElement, videoId) => {
+        if (videoId.endsWith('-screenshare')) {
+          const userId = videoId.replace('-screenshare', '');
+          if (!screenShareStreams?.has(userId)) {
+            console.log(`Cleaning up video element for ${videoId}`);
+            if (videoElement.srcObject) {
+              videoElement.srcObject = null;
+            }
+          }
+        }
+      });
+    };
+  }, [screenShareStreams]);
   // Login and authenticate
   const handleLogin = async () => {
     try {
@@ -361,14 +381,14 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
     const pinnedUserId = currentRoom?.pinnedParticipant?.userId;
 
     // If only 1 participant and no screen shares, show full screen
-    if (totalParticipants === 1 && screenShareStreams.size === 0) {
+    if (totalParticipants === 1 && (!screenShareStreams || screenShareStreams.size === 0)) {
       // Only local user - show full screen
       return (
         <ParticipantVideoContainer
           key="local"
           $isPinned={pinnedUserId === userId}
         >
-          <video ref={videoRef} autoPlay playsInline muted />
+          <video ref={localVideoRef} autoPlay playsInline muted />
           {!videoEnabled && (
             <LocalVideoOverlay>
               <MdVideocamOff />
@@ -441,9 +461,9 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
 
     // Add screen share tiles
     console.log("Screen share streams in render:", screenShareStreams);
-    console.log("Screen share streams size:", screenShareStreams.size);
+    console.log("Screen share streams size:", screenShareStreams?.size || 0);
     const screenShareTiles = Array.from(
-      screenShareStreams.entries(),
+      screenShareStreams?.entries() || [],
       ([screenShareUserId, data]: [string, ScreenShareData]) => ({
         userId: `${screenShareUserId}-screenshare`,
         isLocal: screenShareUserId === userId,
@@ -462,7 +482,13 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
     const allTiles = [...allParticipants, ...screenShareTiles];
     console.log("All tiles (participants + screen shares):", allTiles);
 
-    return allTiles.map((participant: any) => {
+    // Check if there's a pinned participant
+    const hasPinned = !!pinnedUserId;
+    const pinnedParticipant = hasPinned ? allTiles.find(p => p.userId === pinnedUserId) : null;
+    const unpinnedParticipants = hasPinned ? allTiles.filter(p => p.userId !== pinnedUserId) : allTiles;
+
+    // Helper function to render a single participant
+    const renderParticipant = (participant: any, isInSidebar: boolean = false) => {
       const isPinned = pinnedUserId === participant.userId;
       const isScreenShareTile = participant.isScreenShare === true;
 
@@ -471,18 +497,19 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
           key={participant.userId}
           $isPinned={isPinned}
           $isScreenShare={isScreenShareTile}
+          $isInSidebar={isInSidebar}
         >
           <video
             autoPlay
             playsInline
-            muted={participant.isLocal && !isScreenShareTile}
+            muted={participant.isLocal && isScreenShareTile}
             ref={
               participant.isLocal && !isScreenShareTile
                 ? localVideoRef
                 : (videoElement) => {
                   if (videoElement) {
                     videoRefs.current.set(participant.userId, videoElement);
-                    if (participant.stream && !isScreenShareTile) {
+                    if (participant.stream) {
                       console.log(`Setting srcObject for ${participant.userId}:`, participant.stream);
                       videoElement.srcObject = participant.stream;
                     }
@@ -525,7 +552,7 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
                 <MdPanTool />
               </span>
             )}
-            {isPinned && (
+            {isPinned && !isInSidebar && (
               <span title="Pinned" style={{ color: "#ffd700" }}>
                 <MdPushPin />
               </span>
@@ -572,7 +599,24 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
           </ParticipantActions>
         </ParticipantVideoContainer>
       );
-    });
+    };
+
+    // If someone is pinned, show pinned layout
+    if (hasPinned && pinnedParticipant) {
+      return (
+        <>
+          <SidebarParticipants>
+            {unpinnedParticipants.map((p) => renderParticipant(p, true))}
+          </SidebarParticipants>
+          <PinnedVideoContainer>
+            {renderParticipant(pinnedParticipant, false)}
+          </PinnedVideoContainer>
+        </>
+      );
+    }
+
+    // No pinned participant, show normal grid
+    return allTiles.map((participant: any) => renderParticipant(participant, false));
   };
 
   return (
@@ -895,7 +939,10 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
       )}
 
       <VideoContainer style={{ display: inRoom ? "block" : "none" }}>
-        <MainVideoStyled $totalParticipants={participants.size + 1 + screenShareStreams.size}>
+        <MainVideoStyled
+          $totalParticipants={participants.size + 1 + (screenShareStreams?.size || 0)}
+          $hasPinned={!!currentRoom?.pinnedParticipant?.userId}
+        >
           {renderParticipantVideos()}
         </MainVideoStyled>
 

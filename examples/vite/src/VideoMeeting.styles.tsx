@@ -24,7 +24,7 @@ export const VideoContainer = styled.div`
   width: 100%;
   height: 100%;
 `;
-export const MainVideoStyled = styled.div<{ $totalParticipants: number }>`
+export const MainVideoStyled = styled.div<{ $totalParticipants: number; $hasPinned: boolean }>`
   width: 100%;
   height: 100%;
   background: #000;
@@ -53,11 +53,50 @@ export const MainVideoStyled = styled.div<{ $totalParticipants: number }>`
   }
 `;
 
+export const PinnedVideoContainer = styled.div`
+  flex: 1;
+  position: relative;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0; /* Important for flex children */
+`;
+
+export const SidebarParticipants = styled.div`
+  height: 120px;
+  background: #111;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  padding: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-shrink: 0;
+
+  &::-webkit-scrollbar {
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: #1a1a1a;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 3px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: #555;
+  }
+`;
 export const ParticipantVideoContainer = styled.div<{
   $isSmall?: boolean;
   $isLocal?: boolean;
   $isPinned?: boolean;
   $isScreenShare?: boolean;
+  $isInSidebar?: boolean;
 }>`
   position: relative;
   background: #111;

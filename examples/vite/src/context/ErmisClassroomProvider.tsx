@@ -20,7 +20,10 @@ interface ErmisClassroomProviderProps {
   videoRef?: React.RefObject<HTMLVideoElement | null>;
   children: React.ReactNode;
 }
-
+export interface ScreenShareData {
+  userName: string;
+  stream: MediaStream | null; // adjust based on your actual stream type
+}
 export const ErmisClassroomProvider = ({
   config,
   videoRef: initialVideoRef,
@@ -65,6 +68,8 @@ export const ErmisClassroomProvider = ({
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [devices, setDevices] = useState<any>(null);
   const [selectedDevices, setSelectedDevices] = useState<any>(null);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [screenShareStreams, setScreenShareStreams] = useState<Map<string, ScreenShareData>>(new Map());
 
   const clientRef = useRef<any>(null);
   const deviceManagerRef = useRef<MediaDeviceManager | null>(null);
@@ -88,7 +93,7 @@ export const ErmisClassroomProvider = ({
         unsubs.push(() => client.removeListener(evt, handler));
       }
     };
-
+    // TODO! Define proper types for events
     on(events.LOCAL_STREAM_READY, (event: any) => {
       if (event.videoOnlyStream) {
         setLocalStream(event.videoOnlyStream);
@@ -201,10 +206,34 @@ export const ErmisClassroomProvider = ({
 
     on(events.SCREEN_SHARE_STARTED, (data: any) => {
       console.log("SCREEN_SHARE_STARTED", data);
+      setIsScreenSharing(true);
+      if (data.stream && data.participant) {
+        console.log("Screen share started for:", data.participant.userId);
+        setScreenShareStreams((prev) => {
+          const updated = new Map(prev);
+          updated.set(data.participant.userId, {
+            stream: data.stream,
+            userName: data.participant.name,
+          });
+          return updated;
+        });
+      } else {
+        console.warn("SCREEN_SHARE_STARTED event missing stream or participant data:", data);
+      }
     });
 
     on(events.SCREEN_SHARE_STOPPED, (data: any) => {
       console.log("SCREEN_SHARE_STOPPED", data);
+      setIsScreenSharing(false);
+      // Use data.room to get local participant's userId
+      if (data.room && data.room.localParticipant) {
+        const localUserId = data.room.localParticipant.userId;
+        setScreenShareStreams((prev) => {
+          const updated = new Map(prev);
+          updated.delete(localUserId);
+          return updated;
+        });
+      }
     });
 
     on(events.REMOTE_SCREEN_SHARE_STARTED, (data: any) => {
@@ -220,6 +249,7 @@ export const ErmisClassroomProvider = ({
     });
 
     on(events.REMOTE_SCREEN_SHARE_STOPPED, (data: any) => {
+      console.log("REMOTE_SCREEN_SHARE_STOPPED", data);
       setParticipants((prev) => {
         const updated = new Map(prev);
         const p = updated.get(data.participant.userId);
@@ -229,6 +259,29 @@ export const ErmisClassroomProvider = ({
         }
         return updated;
       });
+      setScreenShareStreams((prev) => {
+        const updated = new Map(prev);
+        updated.delete(data.participant.userId);
+        return updated;
+      });
+    });
+
+    // Listen for remote screen share stream ready
+    on(events.REMOTE_SCREEN_SHARE_STREAM_READY, (data: any) => {
+      console.log("REMOTE_SCREEN_SHARE_STREAM_READY", data);
+      if (data.stream && data.participant) {
+        setScreenShareStreams((prev) => {
+          const updated = new Map(prev);
+          updated.set(data.participant.userId, {
+            stream: data.stream,
+            userName: data.participant.name || data.participant.userId,
+          });
+          console.log("Remote screen share map after add: ", updated);
+          return updated;
+        });
+      } else {
+        console.warn("REMOTE_SCREEN_SHARE_STREAM_READY missing data:", data);
+      }
     });
 
     on(events.PARTICIPANT_PINNED_FOR_EVERYONE, () => {
@@ -338,7 +391,33 @@ export const ErmisClassroomProvider = ({
       deviceManagerRef.current = null;
     };
   }, []);
+  // Auto-pin/unpin screen shares when they appear/disappear
+  useEffect(() => {
+    if (!currentRoom) return;
 
+    // If there's a screen share, pin the first one
+    if (screenShareStreams.size > 0) {
+      const firstScreenShareUserId = Array.from(screenShareStreams.keys())[0];
+      const screenShareId = `${firstScreenShareUserId}-screenshare`;
+
+      // Only pin if not already pinned
+      if (currentRoom.pinnedParticipant?.userId !== screenShareId) {
+        console.log(`Auto-pinning screen share: ${screenShareId}`);
+        currentRoom.pinParticipant(screenShareId);
+        setPinType('local');
+        setParticipants(prev => new Map(prev)); // Force re-render
+      }
+    } else {
+      // No screen shares, unpin if currently pinned to a screen share
+      const pinnedId = currentRoom.pinnedParticipant?.userId;
+      if (pinnedId && pinnedId.endsWith('-screenshare') && pinType === 'local') {
+        console.log(`Auto-unpinning screen share: ${pinnedId}`);
+        currentRoom.unpinParticipant();
+        setPinType(null);
+        setParticipants(prev => new Map(prev)); // Force re-render
+      }
+    }
+  }, [screenShareStreams, currentRoom]);
   const authenticate = useCallback(async (userIdToAuth: string) => {
     const client = clientRef.current;
     if (!client) throw new Error("Client not initialized");
@@ -633,6 +712,22 @@ export const ErmisClassroomProvider = ({
     }
   }, [currentRoom]);
 
+  const toggleScreenShare = useCallback(async () => {
+    console.log("Toggling screen share");
+    if (!currentRoom) return;
+
+    try {
+      if (isScreenSharing) {
+        await currentRoom.stopScreenShare();
+      } else {
+        await currentRoom.startScreenShare();
+      }
+    } catch (error) {
+      console.error("Failed to toggle screen share:", error);
+      setIsScreenSharing(false);
+    }
+  }, [currentRoom, isScreenSharing]);
+
   const value = useMemo(
     () => ({
       client: clientRef.current,
@@ -667,6 +762,10 @@ export const ErmisClassroomProvider = ({
       getSubRooms,
       joinSubRoom,
       leaveSubRoom,
+      // Screen share
+      screenShareStreams,
+      isScreenSharing,
+      toggleScreenShare,
     }),
     [
       participants,
@@ -676,6 +775,8 @@ export const ErmisClassroomProvider = ({
       micEnabled,
       handRaised,
       pinType,
+      screenShareStreams,
+      isScreenSharing,
       authenticate,
       joinRoom,
       currentRoom,
@@ -700,6 +801,7 @@ export const ErmisClassroomProvider = ({
       getSubRooms,
       joinSubRoom,
       leaveSubRoom,
+      toggleScreenShare,
     ]
   );
 

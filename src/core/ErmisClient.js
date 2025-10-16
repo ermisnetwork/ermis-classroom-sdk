@@ -42,6 +42,8 @@ class ErmisClient extends EventEmitter {
     this.mediaConfig = {
       host: this.config.host,
       webtpUrl: this.config.webtpUrl,
+      userMediaWorker: config.userMediaWorker || "sfu-adaptive-trung.ermis-network.workers.dev",
+      screenShareWorker: config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev",
       defaultVideoConfig: {
         width: 1280,
         height: 720,

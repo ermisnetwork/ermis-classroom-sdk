@@ -19,6 +19,7 @@ A powerful and easy-to-use SDK for building online classroom applications with r
 - [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Browser Detection & Transport](#browser-detection--transport)
 - [Media Stream Management](#media-stream-management)
   - [Overview](#overview)
   - [Supported Configurations](#supported-configurations)
@@ -58,6 +59,7 @@ A powerful and easy-to-use SDK for building online classroom applications with r
 - 📱 **Device Management** - List and select cameras/microphones
 - 🎯 **Event-Driven Architecture** - React to all classroom events
 - 🛡️ **TypeScript Support** - Full type definitions included
+- 🌐 **Smart Transport Selection** - Auto-detect browser and use optimal transport (WebRTC for Safari, WebTransport for others)
 
 ---
 
@@ -229,6 +231,57 @@ await client.sendTypingIndicator(true);
 // Get message history
 const messages = client.getMessages(50);
 ```
+
+---
+
+## Browser Detection & Transport
+
+### Automatic Transport Selection
+
+The SDK automatically detects your browser and selects the optimal transport protocol:
+
+- **Safari (Desktop & iOS)** → Uses **WebRTC** (better compatibility)
+- **Chrome, Firefox, Edge** → Uses **WebTransport** (better performance)
+
+```javascript
+import ErmisClassroom, { BrowserDetection } from 'ermis-classroom-sdk';
+
+// SDK automatically selects transport when joining
+await client.joinRoom('ROOM-CODE');
+// Console will show: "🚀 Setting up publisher with WebRTC" or "WebTransport"
+```
+
+### Check Browser Capabilities
+
+```javascript
+// Check if Safari
+const isSafari = BrowserDetection.isSafari();
+const isIOS = BrowserDetection.isIOSSafari();
+
+// Check transport support
+const supportsWebTransport = BrowserDetection.isWebTransportSupported();
+const supportsWebRTC = BrowserDetection.isWebRTCSupported();
+
+// Get recommendation
+const transport = BrowserDetection.determineTransport();
+console.log('Use WebRTC:', transport.useWebRTC);
+console.log('Reason:', transport.reason);
+
+// Log detailed info
+BrowserDetection.logTransportInfo();
+```
+
+### Browser Compatibility
+
+| Browser | Version | WebTransport | WebRTC | Auto-Selected |
+|---------|---------|--------------|--------|---------------|
+| Chrome | 97+ | ✅ | ✅ | WebTransport |
+| Edge | 97+ | ✅ | ✅ | WebTransport |
+| Firefox | 114+ | ✅ | ✅ | WebTransport |
+| Safari | 16+ | ❌ | ✅ | WebRTC |
+| iOS Safari | 16+ | ❌ | ✅ | WebRTC |
+
+**📖 See full documentation:** [Browser Detection Guide](./docs/BROWSER_DETECTION.md)
 
 ---
 

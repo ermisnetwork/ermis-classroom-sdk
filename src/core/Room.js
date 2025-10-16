@@ -4,6 +4,7 @@ import Participant from "./Participant.js";
 import Publisher from "../media/Publisher.js";
 import Subscriber from "../media/Subscriber.js";
 import AudioMixer from "../media/AudioMixer.js";
+import { determineTransport, logTransportInfo } from "../utils/browserDetection.js";
 
 /**
  * Represents a meeting room
@@ -717,10 +718,16 @@ class Room extends EventEmitter {
   async _setupLocalPublisher(mediaStream = null) {
     if (!this.localParticipant || !this.streamId) return;
 
+    // Detect browser and determine transport
+    const transportInfo = logTransportInfo();
+    const useWebRTC = transportInfo.recommendedTransport.useWebRTC;
+
+    console.log(`🚀 Setting up publisher with ${useWebRTC ? 'WebRTC' : 'WebTransport'}`);
+
     // Video rendering handled by app through stream events
 
     const publishUrl = `${this.mediaConfig.webtpUrl}/${this.id}/${this.streamId}`;
-    console.log("trying to connect webtransport to", publishUrl);
+    console.log("trying to connect to", publishUrl);
 
     const publisher = new Publisher({
       publishUrl,
@@ -733,8 +740,8 @@ class Room extends EventEmitter {
       framerate: 30,
       bitrate: 1_500_000,
       roomId: this.id,
-      // use webtransport if supported, fallback to WebRTC in safari
-      useWebRTC: true,
+      // Auto-detect: use WebRTC for Safari, WebTransport for others
+      useWebRTC: useWebRTC,
       onStatusUpdate: (msg, isError) => {
         this.localParticipant.setConnectionStatus(isError ? "failed" : "connected");
       },
@@ -776,9 +783,9 @@ class Room extends EventEmitter {
       host: this.mediaConfig.host,
       streamOutputEnabled: true,
       // DO for adaptive camera url
-      userMediaWorker: "sfu-adaptive-bitrate-webrtc.ermis-network.workers.dev",
+      userMediaWorker: "sfu-adaptive-trung.ermis-network.workers.dev",
       // DO for screen share url
-      screenShareWorker: "sfu-webrtc-screen_share_test.ermis-network.workers.dev",
+      screenShareWorker: "sfu-screen-share.ermis-network.workers.dev",
       onStatus: (msg, isError) => {
         participant.setConnectionStatus(isError ? "failed" : "connected");
       },

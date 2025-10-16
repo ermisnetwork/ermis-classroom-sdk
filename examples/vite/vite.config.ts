@@ -6,9 +6,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     open: true,
-    host: true,
-    port: 5173,
-    allowedHosts: true,
+    // host: true,
+    port: 3001,
+    allowedHosts: ["meet.xoithit.lol"],
   },
   // Configure base URL for production deployment
   base: "/",

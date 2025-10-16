@@ -1089,9 +1089,7 @@ export default class Publisher extends EventEmitter {
       const ping = new TextEncoder().encode("ping");
       if (senderType === "webrtc") {
         this.sendOverDataChannel("meeting_control", ping, FRAME_TYPE.PING);
-        console.log("Ping sent over WebRTC DataChannel");
       } else if (senderType === "webtransport") {
-        console.log("Ping sent over WebTransport event stream");
         this.sendOverEventStream(ping);
       }
       if (Date.now() - lastPingTime > 1200) {
@@ -1282,7 +1280,15 @@ export default class Publisher extends EventEmitter {
       }
       out.set(frameBytes, 8);
 
-      await streamData.writer.write(out);
+      // Check if using WebTransport (has writer) or WebRTC DataChannel
+      if (streamData.writer) {
+        await streamData.writer.write(out);
+      } else if (streamData.dataChannel && streamData.dataChannel.readyState === 'open') {
+        streamData.dataChannel.send(out);
+      } else {
+        console.error(`Stream ${channelName} has no valid writer or dataChannel`);
+        throw new Error(`Stream ${channelName} is not ready`);
+      }
     } catch (error) {
       console.error(`Failed to send over stream ${channelName}:`, error);
       throw error;
@@ -1640,9 +1646,9 @@ export default class Publisher extends EventEmitter {
   //interval for count frame per second
   intervalCountFrame() {
     setInterval(() => {
-      console.log(
-        `Sending FPS - 360p: ${this.debug360p},  720p: ${this.lastSent720p}, 1080p: ${this.lastSent1080p}, current sequence: 360p: ${this.sequence360p}, 720p: ${this.sequence720p}, 1080p: ${this.sequence1080p}`
-      );
+      // console.log(
+      //   `Sending FPS - 360p: ${this.debug360p},  720p: ${this.lastSent720p}, 1080p: ${this.lastSent1080p}, current sequence: 360p: ${this.sequence360p}, 720p: ${this.sequence720p}, 1080p: ${this.sequence1080p}`
+      // );
       this.debug360p = 0;
       this.lastSent720p = 0;
       this.lastSent1080p = 0;
@@ -1908,6 +1914,7 @@ export default class Publisher extends EventEmitter {
 
       // Track whether screen share has audio
       this.hasScreenAudio = !!audioTrack;
+      console.log("[Publisher] Screen share audio track:", this.hasScreenAudio);
 
       // Setup screen share audio if available
       if (audioTrack) {
@@ -1919,14 +1926,15 @@ export default class Publisher extends EventEmitter {
         };
 
         this.currentScreenAudioStream = new MediaStream([audioTrack]);
-
+        console.log("[Publisher] Screen share audio recorder options:", audioRecorderOptions);
         this.screenAudioRecorder = await this.initAudioRecorder(
           this.currentScreenAudioStream,
           audioRecorderOptions
         );
 
-        this.screenAudioRecorder.ondataavailable = (typedArray) =>
+        this.screenAudioRecorder.ondataavailable = (typedArray) => {
           this.handleScreenAudioChunk(typedArray, channelName);
+        };
 
         await this.screenAudioRecorder.start({
           timeSlice: audioRecorderOptions.timeSlice,
@@ -1994,6 +2002,8 @@ export default class Publisher extends EventEmitter {
       this.onStatusUpdate("Screen sharing started");
       console.log("[Publisher] Screen sharing started, waiting for server confirmation to pin");
     } catch (error) {
+      console.error("[Publisher] Error starting screen share:", error);
+
       this.onStatusUpdate(
         `Failed to start screen share: ${error.message}`,
         true

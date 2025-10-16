@@ -456,6 +456,37 @@ export declare class ErmisClassroom {
   ): Promise<ErmisClient>;
 }
 
+// Browser Detection Types
+export interface TransportRecommendation {
+  useWebRTC: boolean;
+  reason: string;
+  browserInfo: {
+    isSafari: boolean;
+    isIOS: boolean;
+    webTransportSupported: boolean;
+    webRTCSupported: boolean;
+  };
+}
+
+export interface BrowserInfo {
+  userAgent: string;
+  isSafari: boolean;
+  isIOSSafari: boolean;
+  webTransportSupported: boolean;
+  webRTCSupported: boolean;
+  recommendedTransport: TransportRecommendation;
+}
+
+export namespace BrowserDetection {
+  export function isSafari(): boolean;
+  export function isIOSSafari(): boolean;
+  export function isWebTransportSupported(): boolean;
+  export function isWebRTCSupported(): boolean;
+  export function determineTransport(): TransportRecommendation;
+  export function getBrowserInfo(): BrowserInfo;
+  export function logTransportInfo(): BrowserInfo;
+}
+
 // Default export
 export default ErmisClassroom;
 

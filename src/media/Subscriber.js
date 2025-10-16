@@ -237,6 +237,11 @@ class Subscriber extends EventEmitter {
         ? this.screenShareWorker
         : this.userMediaWorker;
 
+      console.log("🔍 Subscriber init - isScreenSharing:", this.isScreenSharing);
+      console.log("🔍 Subscriber init - screenShareWorker:", this.screenShareWorker);
+      console.log("🔍 Subscriber init - userMediaWorker:", this.userMediaWorker);
+      console.log("🔍 Subscriber init - workerHost selected:", workerHost);
+
       const mediaUrl = `wss://${workerHost}/meeting/${this.roomId}/${this.streamId}`;
       console.log("try to init worker with url:", mediaUrl);
 
@@ -331,6 +336,13 @@ class Subscriber extends EventEmitter {
 
       // Create MediaStream with video track only
       this.mediaStream = new MediaStream([this.videoGenerator]);
+
+      console.log("🎥 Video system initialized, emitting remoteStreamReady:", {
+        streamId: this.streamId,
+        subscriberId: this.subscriberId,
+        isScreenSharing: this.isScreenSharing,
+        hasStream: !!this.mediaStream
+      });
 
       // Emit remote stream ready event for app integration
       this.emit("remoteStreamReady", {
