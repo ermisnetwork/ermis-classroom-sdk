@@ -6,10 +6,10 @@
   "scripts": {
     "build": "turbo run build",
     "build:sdk": "turbo run build --filter=@ermisnetwork/ermis-classroom-sdk...",
-    "build:example": "turbo run build --filter=@ermisnetwork/ermis-classroom-example-vite...",
+    "build:example-react": "turbo run build --filter=@ermisnetwork/ermis-classroom-example-vite-react...",
     "dev": "turbo run dev",
     "dev:sdk": "turbo run dev --filter=@ermisnetwork/ermis-classroom-sdk...",
-    "dev:example": "turbo run dev --filter=@ermisnetwork/ermis-classroom-example-vite...",
+    "dev:example-react": "turbo run dev --filter=@ermisnetwork/ermis-classroom-example-vite-react...",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
