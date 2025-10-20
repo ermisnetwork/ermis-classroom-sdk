@@ -1,0 +1,29 @@
+{
+  "private": true,
+  "name": "@ermisnetwork/ermis-classroom",
+  "version": "0.0.0",
+  "license": "MIT",
+  "scripts": {
+    "build": "turbo run build",
+    "build:sdk": "turbo run build --filter=@ermisnetwork/ermis-classroom-sdk...",
+    "build:example": "turbo run build --filter=@ermisnetwork/ermis-classroom-example-vite...",
+    "dev": "turbo run dev",
+    "dev:sdk": "turbo run dev --filter=@ermisnetwork/ermis-classroom-sdk...",
+    "dev:example": "turbo run dev --filter=@ermisnetwork/ermis-classroom-example-vite...",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:write": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "clean": "turbo run clean && rm -rf node_modules .turbo"
+  },
+  "devDependencies": {
+    "prettier": "^3.2.5",
+    "turbo": "^2.1.1",
+    "typescript": "^5.8.2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@9.15.9"
+}
+
