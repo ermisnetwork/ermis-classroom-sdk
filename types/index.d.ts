@@ -280,7 +280,9 @@ export declare class Room extends EventEmitter {
   join(userId: string): Promise<JoinResult>;
   leave(): Promise<void>;
   createSubRoom(config: SubRoomConfig): Promise<SubRoom>;
-  getSubRooms(): Promise<SubRoom[]>;
+  joinSubRoom(subRoomId: string): Promise<void>;
+  leaveSubRoom(subRoomId: string): Promise<void>;
+  closeSubRoom(): Promise<void>;
   addParticipant(memberData: any, userId: string): Participant;
   removeParticipant(userId: string): Participant | null;
   getParticipant(userId: string): Participant | null;
@@ -301,29 +303,17 @@ export declare class Room extends EventEmitter {
 }
 
 // SubRoom class
-export declare class SubRoom extends Room {
-  parentRoom: Room;
-  maxParticipants: number;
-  duration: number | null;
-  startTime: number | null;
-  autoReturn: boolean;
-  isTemporary: boolean;
+export declare class SubRoom extends EventEmitter {
+  id: string;
+  name: string;
+  type: string;
+  isActive: boolean;
+  participants: Map<string, Participant>;
 
   constructor(config: any);
 
-  joinFromMain(userId: string): Promise<JoinResult>;
-  returnToMainRoom(): Promise<Room>;
-  switchToSubRoom(targetSubRoom: SubRoom): Promise<JoinResult>;
-  inviteParticipant(userId: string): Promise<any>;
-  assignParticipant(userId: string): Promise<any>;
-  broadcastMessage(message: string, type?: string): Promise<any>;
-  getRemainingTime(): number | null;
-  extendDuration(additionalMinutes: number): void;
-  setMaxParticipants(limit: number): void;
-  isFull(): boolean;
-  isEmpty(): boolean;
-  hasExpired(): boolean;
-  getStats(): any;
+  addParticipant(memberData: any, userId: string): Participant;
+  getInfo(): RoomInfo;
 }
 
 // API Client

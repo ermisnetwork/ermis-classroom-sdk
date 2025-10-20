@@ -135,18 +135,19 @@ class ApiClient {
   /**
    * Join sub room
    */
-  async joinSubRoom({ parent_room_id, sub_room_id, appName = "Ermis-Meeting" }) {
+  async joinSubRoom({ appName = "Ermis-Meeting" , parent_room_id, sub_room_id, room_code}) {
     return await this.apiCall("/rooms/join", "POST", {
       app_name: appName,
       parent_room_id,
-      sub_room_id
+      sub_room_id,
+      room_code,
     });
   }
 
   /**
-   * Leave breakout room and return to main room
+   * Leave sub room and return to main room
    */
-  async leaveBreakoutRoom({ parent_room_id, sub_room_id }) {
+  async leaveSubRoom({ parent_room_id, sub_room_id }) {
     return await this.apiCall("/rooms/breakout/leave", "POST", {
       parent_room_id,
       sub_room_id
@@ -154,10 +155,10 @@ class ApiClient {
   }
 
   /**
-   * Get sub rooms of a parent room
+   * Close all sub rooms of a parent room
    */
-  async getSubRooms(parentRoomId) {
-    return await this.apiCall(`/rooms/${parentRoomId}/sub-rooms`);
+  async closeSubRoom(parentRoomId) {
+    return this.apiCall(`/rooms/${parentRoomId}/breakout/close`, "PUT");
   }
 
   /**
