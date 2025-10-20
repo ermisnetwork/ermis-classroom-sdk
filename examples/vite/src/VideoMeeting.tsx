@@ -111,7 +111,7 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
 
   // Listen for sub room creation events
   useEffect(() => {
-    if (currentRoom && currentRoom.subRooms.size > 0) {
+    if (currentRoom && currentRoom.ownerId === userId && currentRoom.subRooms.size > 0) {
       setHasActiveSubRooms(true);
     }
   }, [currentRoom]);

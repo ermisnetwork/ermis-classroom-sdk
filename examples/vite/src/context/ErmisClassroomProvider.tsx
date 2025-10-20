@@ -270,7 +270,7 @@ export const ErmisClassroomProvider = ({
       // }, new Map()));
 
       setCurrentRoom(data.room);
-      setParticipants(data.room.participants);
+      setParticipants(data.room.currentSubRoom?.participants || new Map());
     });
 
     on("subRoomLeft", (data: any) => {

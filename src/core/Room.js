@@ -762,7 +762,7 @@ class Room extends EventEmitter {
       this._setupSubRoom({ room, participants });
       
       this.emit("subRoomJoined", {
-        room: this.currentSubRoom,
+        room: this,
       });
     }
 
