@@ -343,7 +343,8 @@ interface SubRoomPopupProps {
   onClose: () => void;
   participants: any[];
   currentRoom: any;
-  client: any;
+  createSubRoom: any;
+  setHasActiveSubRooms?: (hasActive: boolean) => void;
 }
 
 const SubRoomPopup: React.FC<SubRoomPopupProps> = ({
@@ -351,7 +352,8 @@ const SubRoomPopup: React.FC<SubRoomPopupProps> = ({
   onClose,
   participants,
   currentRoom,
-  client,
+  createSubRoom,
+  setHasActiveSubRooms,
 }) => {
   const [step, setStep] = useState<1 | 2>(1);
   const [roomCount, setRoomCount] = useState(3);
@@ -421,7 +423,7 @@ const SubRoomPopup: React.FC<SubRoomPopupProps> = ({
 
   // Step 2 handlers: Create and open all breakout rooms
   const handleOpenAllRooms = async () => {
-    if (!breakoutRooms.length || !client || !currentRoom) {
+    if (!breakoutRooms.length || !currentRoom) {
       console.error("Cannot create rooms: Missing required data");
       alert("❌ Không thể tạo phòng: Thiếu dữ liệu cần thiết");
       return;
@@ -454,7 +456,7 @@ const SubRoomPopup: React.FC<SubRoomPopupProps> = ({
         rooms: formattedRooms,
       });
 
-      const result = await client.createSubRoom({
+      const result = await createSubRoom({
         main_room_id: currentRoom.id,
         rooms: formattedRooms,
       });
@@ -463,6 +465,7 @@ const SubRoomPopup: React.FC<SubRoomPopupProps> = ({
       alert(`🎉 Tạo breakout rooms thành công!`);
 
       onClose();
+      setHasActiveSubRooms && setHasActiveSubRooms(true);
     } catch (error: any) {
       console.error("❌ Failed to create breakout rooms:", error);
       const errorMessage = error?.message || "Unknown error occurred";

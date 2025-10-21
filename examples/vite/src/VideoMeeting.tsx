@@ -12,6 +12,7 @@ import {
   MdStopScreenShare,
   MdSettings,
   MdGroups,
+  MdClose,
 } from "react-icons/md";
 import {
   ActionButton,
@@ -73,6 +74,8 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
 
   // SubRoom states
   const [showSubRoomPopup, setShowSubRoomPopup] = useState(false);
+  const [hasActiveSubRooms, setHasActiveSubRooms] = useState(false);
+  const [isClosingSubRooms, setIsClosingSubRooms] = useState(false);
 
   const {
     participants,
@@ -100,9 +103,15 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
     client,
     screenShareStreams,
     isScreenSharing,
-    toggleScreenShare
+    toggleScreenShare,
 
+    createSubRoom,
+    closeSubRoom,
   } = useErmisMeeting();
+
+  // console.log('---participants--', participants);
+  console.log('---currentRoom--', currentRoom);
+
 
   useEffect(() => {
     if (videoRef?.current) {
@@ -121,6 +130,13 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
       localVideoRef.current.srcObject = localStream;
     }
   }, [localVideoRef, localStream, inRoom]);
+
+  // Listen for sub room creation events
+  useEffect(() => {
+    if (currentRoom && currentRoom.ownerId === userId && currentRoom.subRooms.size > 0) {
+      setHasActiveSubRooms(true);
+    }
+  }, [currentRoom]);
 
   // Close pin menu when clicking outside
   useEffect(() => {
@@ -367,6 +383,21 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
       alert("Failed to join room");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Handle close sub rooms
+  const handleCloseSubRooms = async () => {
+    try {
+      setIsClosingSubRooms(true);
+      await closeSubRoom();
+      setHasActiveSubRooms(false);
+      alert("✅ Sub rooms đã được đóng thành công!");
+    } catch (error) {
+      console.error("Failed to close sub rooms:", error);
+      alert("❌ Lỗi khi đóng sub rooms. Vui lòng thử lại.");
+    } finally {
+      setIsClosingSubRooms(false);
     }
   };
 
@@ -1001,12 +1032,39 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
 
             {/* SubRoom button - only show for hosts */}
             {currentRoom?.localParticipant?.role === "owner" && (
-              <ControlButton
-                onClick={() => setShowSubRoomPopup(true)}
-                title="Create Breakout Rooms"
-              >
-                <MdGroups size={20} />
-              </ControlButton>
+              <>
+                <ControlButton
+                  onClick={() => setShowSubRoomPopup(true)}
+                  title="Create Breakout Rooms"
+                >
+                  <MdGroups size={20} />
+                </ControlButton>
+
+                {/* Close Sub Rooms button - only show when there are active sub rooms */}
+                {hasActiveSubRooms && (
+                  <ControlButton
+                    variant="leave"
+                    onClick={handleCloseSubRooms}
+                    disabled={isClosingSubRooms}
+                    title="Close All Sub Rooms"
+                  >
+                    {isClosingSubRooms ? (
+                      <div
+                        style={{
+                          width: "16px",
+                          height: "16px",
+                          border: "2px solid transparent",
+                          borderTop: "2px solid white",
+                          borderRadius: "50%",
+                          animation: "spin 1s linear infinite",
+                        }}
+                      />
+                    ) : (
+                      <MdClose size={20} />
+                    )}
+                  </ControlButton>
+                )}
+              </>
             )}
 
             <ControlButton
@@ -1114,7 +1172,8 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
         onClose={() => setShowSubRoomPopup(false)}
         participants={Array.from(participants.values())}
         currentRoom={currentRoom}
-        client={client}
+        createSubRoom={createSubRoom}
+        setHasActiveSubRooms={setHasActiveSubRooms}
       />
     </Container>
   );

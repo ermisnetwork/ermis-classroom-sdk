@@ -26,6 +26,7 @@ class Subscriber extends EventEmitter {
       config.audioWorkletUrl || "/workers/audio-worklet1.js";
     this.mstgPolyfillUrl =
       config.mstgPolyfillUrl || "/polyfills/MSTG_polyfill.js";
+    this.subcribeUrl = config.subcribeUrl;
 
     // Screen share flag
     this.isScreenSharing = config.isScreenSharing || false;
@@ -220,43 +221,68 @@ class Subscriber extends EventEmitter {
    */
   async _initWorker(channelPort) {
     try {
-      this.worker = new Worker(`${this.mediaWorkerUrl}?t=${Date.now()}`, {
+      this.worker = new Worker(`workers/media-worker-wtp.js?t=${Date.now()}`, {
         type: "module",
-      });
+      });      
 
-      this.worker.onmessage = (e) => this._handleWorkerMessage(e);
-      this.worker.onerror = (error) => {
-        this.emit("error", {
-          subscriber: this,
-          error: new Error(`Media Worker error: ${error.message}`),
-          action: "workerError",
-        });
+      this.worker.onmessage = (e) => {
+        this._handleWorkerMessage(e);
       };
-
-      const workerHost = this.isScreenSharing
-        ? this.screenShareWorker
-        : this.userMediaWorker;
-
-      console.log("🔍 Subscriber init - isScreenSharing:", this.isScreenSharing);
-      console.log("🔍 Subscriber init - screenShareWorker:", this.screenShareWorker);
-      console.log("🔍 Subscriber init - userMediaWorker:", this.userMediaWorker);
-      console.log("🔍 Subscriber init - workerHost selected:", workerHost);
-
-      const mediaUrl = `wss://${workerHost}/meeting/${this.roomId}/${this.streamId}`;
-      console.log("try to init worker with url:", mediaUrl);
-
+      this.worker.onerror = (error) => {
+        // this._status(`Media Worker error: ${error.message}`, true);
+      };
       this.worker.postMessage(
         {
           type: "init",
-          data: { mediaUrl },
+          data: {
+            subscriberId: this.subscriberId,
+          },
           port: channelPort,
-          quality: "360p", // default quality
           isShare: this.isScreenSharing,
         },
         [channelPort]
       );
+
+      const webTpUrl = `${this.subcribeUrl}`;
+      console.log(
+        "trying to connect to webtransport to subscribe :",
+        webTpUrl
+      );
+      const wt = new WebTransport(webTpUrl);
+      await wt.ready;
+
+      // video 360p
+      const stream360p = await wt.createBidirectionalStream();
+      this.worker.postMessage(
+        {
+          type: "attachStream",
+          channelName: "cam_360p",
+          readable: stream360p.readable,
+          writable: stream360p.writable,
+        },
+        [stream360p.readable, stream360p.writable]
+      );
+
+      console.log("360p stream attached, preparing mic 48k stream");
+
+      // audio
+      const streamAudio = await wt.createBidirectionalStream();
+      console.log("mic 48k stream created, attaching to worker");
+      this.worker.postMessage(
+        {
+          type: "attachStream",
+          channelName: "mic_48k",
+          readable: streamAudio.readable,
+          writable: streamAudio.writable,
+        },
+        [streamAudio.readable, streamAudio.writable]
+      );
     } catch (error) {
-      throw new Error(`Worker initialization failed: ${error.message}`);
+      // this._status(
+      //   `worker initialization failed: ${error.message}`,
+      //   true
+      // );
+      throw error;
     }
   }
 

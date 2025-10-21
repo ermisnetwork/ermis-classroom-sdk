@@ -307,18 +307,28 @@ export const ErmisClassroomProvider = ({
     });
 
     // SubRoom event handlers
-    on("subRoomsCreated", (data: any) => {
-      console.log("Sub rooms created:", data);
+    on("subRoomCreated", (data: any) => {
+      console.log("-----Sub room created:----", data);
+      setCurrentRoom(data.room);
+      setParticipants(data.room.participants);
       // You might want to update some state here if needed
     });
 
     on("subRoomJoined", (data: any) => {
       console.log("✅ subroom (legacy):", data);
-      setCurrentRoom(data.subRoom.room);
-      setParticipants(data.subRoom.participants.reduce((map: any, p: Participant) => {
-        map.set(p.userId, p);
-        return map;
-      }, new Map()));
+      // setCurrentRoom(data.subRoom.room);
+      // setParticipants(data.participants.reduce((map: any, p: Participant) => {
+      //   map.set(p.userId, p);
+      //   return map;
+      // }, new Map()));
+
+      setCurrentRoom(data.room);
+      setParticipants(data.room.currentSubRoom?.participants || new Map());
+    });
+
+    on("subRoomLeft", (data: any) => {
+      setCurrentRoom(data.room);
+      setParticipants(data.room.participants);
     });
 
     on(events.ERROR, (data: any) => {
@@ -662,20 +672,6 @@ export const ErmisClassroomProvider = ({
     }
   }, [currentRoom]);
 
-  const getSubRooms = useCallback(async () => {
-    if (!currentRoom) {
-      throw new Error("Current room not available");
-    }
-
-    try {
-      const subRooms = await currentRoom.getSubRooms();
-      return subRooms;
-    } catch (error) {
-      console.error("Failed to get sub rooms:", error);
-      throw error;
-    }
-  }, [currentRoom]);
-
   const joinSubRoom = useCallback(async (subRoomId: string) => {
     const client = clientRef.current;
     if (!client || !currentRoom) {
@@ -683,13 +679,25 @@ export const ErmisClassroomProvider = ({
     }
 
     try {
-      const result = await client.apiClient.joinBreakoutRoom({
-        parent_room_id: currentRoom.id,
-        sub_room_id: subRoomId,
-      });
+      const result = await currentRoom.joinSubRoom(subRoomId);
       return result;
     } catch (error) {
       console.error("Failed to join sub room:", error);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  const closeSubRoom = useCallback(async () => {
+    const client = clientRef.current;
+    if (!client || !currentRoom) {
+      throw new Error("Client or current room not available");
+    }
+
+    try {
+      const result = await currentRoom.closeSubRoom();
+      return result;
+    } catch (error) {
+      console.error("Failed to close sub room:", error);
       throw error;
     }
   }, [currentRoom]);
@@ -701,10 +709,7 @@ export const ErmisClassroomProvider = ({
     }
 
     try {
-      const result = await client.apiClient.leaveBreakoutRoom({
-        parent_room_id: currentRoom.id,
-        sub_room_id: subRoomId,
-      });
+      const result = await currentRoom.leaveSubRoom(subRoomId);
       return result;
     } catch (error) {
       console.error("Failed to leave sub room:", error);
@@ -757,15 +762,14 @@ export const ErmisClassroomProvider = ({
       getPreviewStream,
       stopPreviewStream,
       replaceMediaStream,
-      // SubRoom methods
       createSubRoom,
-      getSubRooms,
       joinSubRoom,
       leaveSubRoom,
       // Screen share
       screenShareStreams,
       isScreenSharing,
       toggleScreenShare,
+      closeSubRoom,
     }),
     [
       participants,
@@ -796,12 +800,11 @@ export const ErmisClassroomProvider = ({
       getPreviewStream,
       stopPreviewStream,
       replaceMediaStream,
-      // SubRoom methods
       createSubRoom,
-      getSubRooms,
       joinSubRoom,
       leaveSubRoom,
       toggleScreenShare,
+      closeSubRoom,
     ]
   );
 

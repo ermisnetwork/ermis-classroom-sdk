@@ -1,5 +1,6 @@
 import EventEmitter from "../events/EventEmitter.js";
 import Participant from "./Participant.js";
+import SubRoom from "./SubRoom.js";
 
 import Publisher from "../media/Publisher.js";
 import Subscriber from "../media/Subscriber.js";
@@ -16,10 +17,10 @@ class Room extends EventEmitter {
     this.id = config.id;
     this.name = config.name;
     this.code = config.code;
-    this.type = config.type || "main"; // 'main', 'breakout'
-    this.parentRoomId = config.parentRoomId || null;
+    this.type = config.type || "main"; // 'main', 'sub'
     this.ownerId = config.ownerId;
     this.isActive = false;
+    this.localUserId = null;
 
     // Configuration
     this.apiClient = config.apiClient;
@@ -31,6 +32,7 @@ class Room extends EventEmitter {
 
     // Sub rooms (for main rooms only)
     this.subRooms = new Map(); // subRoomId -> Room
+    this.currentSubRoom = null;
 
     // Media management
     this.audioMixer = null;
@@ -63,6 +65,7 @@ class Room extends EventEmitter {
       this.id = joinResponse.room_id;
       this.membershipId = joinResponse.id;
       this.streamId = joinResponse.stream_id;
+      this.localUserId = userId;
 
       // Get room details and members
       const roomDetails = await this.apiClient.getRoomById(joinResponse.room_id);
@@ -73,6 +76,13 @@ class Room extends EventEmitter {
 
       // Setup participants
       await this._setupParticipants(roomDetails.participants, userId);
+
+      // Setup sub rooms if they exist
+      if (roomDetails.sub_rooms.length) {
+        for (const subRoomData of roomDetails.sub_rooms) {
+          this._setupSubRoom(subRoomData);
+        }
+      }
 
       // Setup media connections with optional custom stream
       await this._setupMediaConnections(mediaStream);
@@ -136,9 +146,29 @@ class Room extends EventEmitter {
       const subRoomsData = await this.apiClient.createSubRoom({
         main_room_id: this.id,
         rooms: config.rooms,
+      });      
+
+      // Filter participants - keep only members NOT assigned to sub rooms
+      const assignedUserIds = new Set();
+      subRoomsData.rooms.forEach(subRoom => {
+        this._setupSubRoom(subRoom);
+        if (subRoom.participants.length) {
+          subRoom.participants.forEach(p => {
+            assignedUserIds.add(p.user_id || p.userId);
+          });
+        }
       });
 
-      this.emit("subRoomsCreated", { room: this, subRoomsData, assignments: config.rooms });
+      // Remove assigned participants from current room
+      for (const [userId, participant] of this.participants) {
+        if (assignedUserIds.has(userId) && !participant.isLocal) {
+          this.removeParticipant(userId);
+        }
+      }      
+
+      this.emit("subRoomCreated", { 
+        room: this
+      });
 
       return subRoomsData;
     } catch (error) {
@@ -295,19 +325,20 @@ class Room extends EventEmitter {
   }
 
   /**
-   * Join a breakout room
+   * Join a sub room
    */
-  async joinBreakoutRoom(subRoomId) {
+  async joinSubRoom(subRoomId) {
     try {
-      this.emit("joiningBreakoutRoom", { room: this, subRoomId });
+      this.emit("joiningSubRoom", { room: this, subRoomId });
 
       // Join via API
-      const joinResponse = await this.apiClient.joinBreakoutRoom({
+      const joinResponse = await this.apiClient.joinSubRoom({
         parent_room_id: this.id,
         sub_room_id: subRoomId,
+        room_code: this.code,
       });
 
-      this.emit("joinedBreakoutRoom", {
+      this.emit("joinedSubRoom", {
         room: this,
         subRoomId,
         response: joinResponse,
@@ -315,25 +346,25 @@ class Room extends EventEmitter {
 
       return joinResponse;
     } catch (error) {
-      this.emit("error", { room: this, error, action: "joinBreakoutRoom" });
+      this.emit("error", { room: this, error, action: "joinSubRoom" });
       throw error;
     }
   }
 
   /**
-   * Leave breakout room and return to main room
+   * Leave sub room and return to main room
    */
-  async leaveBreakoutRoom(subRoomId) {
+  async leaveSubRoom(subRoomId) {
     try {
-      this.emit("leavingBreakoutRoom", { room: this, subRoomId });
+      this.emit("leavingSubRoom", { room: this, subRoomId });
 
       // Leave via API
-      const leaveResponse = await this.apiClient.leaveBreakoutRoom({
+      const leaveResponse = await this.apiClient.leaveSubRoom({
         parent_room_id: this.id,
         sub_room_id: subRoomId,
       });
 
-      this.emit("leftBreakoutRoom", {
+      this.emit("leftSubRoom", {
         room: this,
         subRoomId,
         response: leaveResponse,
@@ -341,7 +372,33 @@ class Room extends EventEmitter {
 
       return leaveResponse;
     } catch (error) {
-      this.emit("error", { room: this, error, action: "leaveBreakoutRoom" });
+      this.emit("error", { room: this, error, action: "leaveSubRoom" });
+      throw error;
+    }
+  }
+
+  /**
+   * Close all sub rooms - main room only
+   */
+  async closeSubRoom() {
+    if (this.type !== "main") {
+      throw new Error("Only main rooms can close sub rooms");
+    }
+
+    try {
+      this.emit("closingSubRoom", { room: this });
+
+      // Close all sub rooms via API
+      const closeResponse = await this.apiClient.closeSubRoom(this.id);
+
+      this.emit("closedSubRoom", {
+        room: this,
+        response: closeResponse,
+      });
+
+      return closeResponse;
+    } catch (error) {
+      this.emit("error", { room: this, error, action: "closeSubRoom" });
       throw error;
     }
   }
@@ -668,7 +725,6 @@ class Room extends EventEmitter {
       name: this.name,
       code: this.code,
       type: this.type,
-      parentRoomId: this.parentRoomId,
       ownerId: this.ownerId,
       isActive: this.isActive,
       participantCount: this.participants.size,
@@ -726,8 +782,8 @@ class Room extends EventEmitter {
 
     // Video rendering handled by app through stream events
 
-    const publishUrl = `${this.mediaConfig.webtpUrl}/${this.id}/${this.streamId}`;
-    console.log("trying to connect to", publishUrl);
+    const publishUrl = `${this.mediaConfig.webtpUrl}/publish/${this.id}/${this.streamId}`;
+    console.log("trying to connect webtransport to", publishUrl);
 
     const publisher = new Publisher({
       publishUrl,
@@ -778,6 +834,7 @@ class Room extends EventEmitter {
    */
   async _setupRemoteSubscriber(participant) {
     const subscriber = new Subscriber({
+      subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
       streamId: participant.streamId,
       roomId: this.id,
       host: this.mediaConfig.host,
@@ -972,23 +1029,21 @@ class Room extends EventEmitter {
       }
     }
 
-    if (event.type === "join_sub_room") {
-      console.log("------------Received join_sub_room event------------", event);
-      let participants = [];
-      for (const participantData of event.participants) { 
-        const participant = this.participants.get(participantData.user_id);
-        if (participant) {
-          participants.push(participant.getInfo());
-        }
-      }
+    if (event.type === "join_sub_room") {      
+      const {room, participants} = event;
 
-      const subRoom = {
-        room: event.room,
-        participants,
-      };
+      this._setupSubRoom({ room, participants });
+      
       this.emit("subRoomJoined", {
-        subRoom,
-        parentRoom: this,
+        room: this,
+      });
+    }
+
+    if (event.type === "leave_sub_room") { 
+      this.currentSubRoom = null;
+
+      this.emit("subRoomLeft", {
+        room: this,
       });
     }
 
@@ -1359,6 +1414,35 @@ class Room extends EventEmitter {
         participant.subscriber.removeAllListeners("remoteStreamReady");
         participant.subscriber.removeAllListeners("streamRemoved");
       }
+    }
+  }
+
+  /**
+   * Setup sub rooms from API data
+   */
+  _setupSubRoom(subRoomData) {
+
+    const subRoom = new SubRoom({
+      id: subRoomData.room.id,
+      name: subRoomData.room.room_name,
+      type: subRoomData.room.room_type,
+      parentRoomId: this.id,
+      apiClient: this.apiClient,
+      isActive: subRoomData.room.is_active,
+    });
+
+    // Setup sub room participants if they exist
+    if (subRoomData.participants.length) {
+      for (const participantData of subRoomData.participants) {
+        subRoom.addParticipant(participantData, this.localUserId);
+      }
+    }
+
+    // Add to sub rooms map
+    this.subRooms.set(subRoom.id, subRoom);
+
+    if (subRoomData.participants.some(p => p.user_id === this.localUserId)) {
+      this.currentSubRoom = subRoom;
     }
   }
 

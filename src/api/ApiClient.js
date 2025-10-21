@@ -135,70 +135,23 @@ class ApiClient {
   /**
    * Join sub room
    */
-  async joinSubRoom({ parent_room_id, sub_room_id, appName = "Ermis-Meeting" }) {
+  async joinSubRoom({ appName = "Ermis-Meeting" , parent_room_id, sub_room_id, room_code}) {
     return await this.apiCall("/rooms/join", "POST", {
       app_name: appName,
       parent_room_id,
-      sub_room_id
+      sub_room_id,
+      room_code,
     });
   }
 
   /**
-   * Leave breakout room and return to main room
+   * Leave sub room and return to main room
    */
-  async leaveBreakoutRoom({ parent_room_id, sub_room_id }) {
+  async leaveSubRoom({ parent_room_id, sub_room_id }) {
     return await this.apiCall("/rooms/breakout/leave", "POST", {
       parent_room_id,
       sub_room_id
     });
-  }
-
-  /**
-   * Create breakout rooms
-   */
-  async createBreakoutRoom(mainRoomId, rooms) {
-    if (!mainRoomId || !Array.isArray(rooms) || rooms.length === 0) {
-      throw new Error('Breakout Room creation data is invalid.');
-    }
-
-    const normalizedRooms = Array.isArray(rooms) ? rooms : [rooms];
-
-    const formattedRooms = normalizedRooms.map(r => {
-      const room_name = r.room_name || r.name || "Unnamed Room";
-      let participants = [];
-      if (Array.isArray(r.participants)) {
-        participants = r.participants.map(p => ({
-          stream_id: p.streamId || p.stream_id,
-          user_id: p.userId || p.user_id,
-        }));
-      } else if (r.participants instanceof Map) {
-        participants = Array.from(r.participants.values()).map(p => ({
-          stream_id: p.streamId || p.stream_id,
-          user_id: p.userId || p.user_id,
-        }));
-      }
-      return { room_name, participants };
-    })
-
-    const body = { main_room_id: mainRoomId, rooms: formattedRooms };
-
-    console.log("📦 [ApiClient] Sending breakout request:", body);
-
-    return await this.apiCall("/rooms/breakout", "POST", body);
-
-  }
-
-  /**
-   * Join breakout room
-   */
-  async joinBreakoutRoom({subRoomId = null, parentRoomId = null}) {
-    const body = {
-      parent_room_id: parentRoomId || null,
-      sub_room_id: subRoomId || null,
-    }
-    console.log("📡 [ApiClient] joinBreakoutRoom body:", body);
-
-    return this.apiCall("/rooms/join", "POST", body);
   }
 
   /**
