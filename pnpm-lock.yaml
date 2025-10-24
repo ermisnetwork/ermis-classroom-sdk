@@ -23,9 +23,9 @@ importers:
       '@ermisnetwork/ermis-classroom-patch-files':
         specifier: workspace:*
         version: link:../../packages/patch-files
-      '@ermisnetwork/ermis-classroom-sdk':
+      '@ermisnetwork/vcr-sdk':
         specifier: workspace:*
-        version: link:../../packages/sdk
+        version: link:../../packages/vcr-sdk
       react:
         specifier: ^19.1.1
         version: 19.2.0
@@ -97,7 +97,7 @@ importers:
         specifier: ^6.4.0
         version: 6.4.0(@types/node@24.8.1)(jiti@2.6.1)(lightningcss@1.30.1)
 
-  packages/sdk:
+  packages/vcr-sdk:
     devDependencies:
       tsup:
         specifier: ^8.0.0

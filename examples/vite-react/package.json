@@ -11,7 +11,7 @@
     "clean": "rm -rf dist .turbo node_modules"
   },
   "dependencies": {
-    "@ermisnetwork/ermis-classroom-sdk": "workspace:*",
+    "@ermisnetwork/vcr-sdk": "workspace:*",
     "@ermisnetwork/ermis-classroom-patch-files": "workspace:*",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

@@ -5,10 +5,10 @@
   "license": "MIT",
   "scripts": {
     "build": "turbo run build",
-    "build:sdk": "turbo run build --filter=@ermisnetwork/ermis-classroom-sdk...",
+    "build:sdk": "turbo run build --filter=@ermisnetwork/vcr-sdk...",
     "build:example-react": "turbo run build --filter=@ermisnetwork/ermis-classroom-example-vite-react...",
     "dev": "turbo run dev",
-    "dev:sdk": "turbo run dev --filter=@ermisnetwork/ermis-classroom-sdk...",
+    "dev:sdk": "turbo run dev --filter=@ermisnetwork/vcr-sdk...",
     "dev:example-react": "turbo run dev --filter=@ermisnetwork/ermis-classroom-example-vite-react...",
     "lint": "turbo run lint",
     "test": "turbo run test",
