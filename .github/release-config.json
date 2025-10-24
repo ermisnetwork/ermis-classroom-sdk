@@ -1,0 +1,27 @@
+{
+  "packages": {
+    "vcr-sdk": {
+      "enabled": true,
+      "autoRelease": true,
+      "buildCommand": "pnpm build:sdk",
+      "testCommand": "cd packages/vcr-sdk && pnpm test",
+      "publishToGitHub": true,
+      "publishToNPM": false
+    },
+    "patch-files": {
+      "enabled": false,
+      "autoRelease": false,
+      "buildCommand": "cd packages/patch-files && pnpm build",
+      "testCommand": "cd packages/patch-files && pnpm test",
+      "publishToGitHub": false,
+      "publishToNPM": false
+    }
+  },
+  "defaults": {
+    "autoRelease": true,
+    "publishToGitHub": true,
+    "publishToNPM": false,
+    "requireTests": false
+  }
+}
+
