@@ -5,8 +5,8 @@ on:
     branches:
       - main
     paths:
-      - 'packages/vcr-sdk/**'
-      - '!packages/vcr-sdk/**.md'
+      - 'packages/**'
+      - '!packages/**.md'
 
 permissions:
   contents: write
