@@ -255,7 +255,7 @@ export interface RegistrationSettingsDto {
 export interface CreateEventDto {
   title: string;
   description?: string;
-  templateId: string;
+  templateId?: string;
   startTime: string;
   endTime: string;
   settings?: EventSettingsDto;
