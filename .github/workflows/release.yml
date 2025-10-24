@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/vcr-sdk/**'
+      - '!packages/vcr-sdk/**.md'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://npm.pkg.github.com'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version
+        id: version
+        run: |
+          cd packages/vcr-sdk
+          OLD_VERSION=$(node -p "require('./package.json').version")
+          npm version patch --no-git-tag-version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "old=$OLD_VERSION" >> $GITHUB_OUTPUT
+          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Commit version
+        run: |
+          git add packages/vcr-sdk/package.json
+          git commit -m "chore: bump vcr-sdk to ${{ steps.version.outputs.new }} [skip ci]"
+          git push
+
+      - name: Build
+        run: pnpm build:sdk
+
+      - name: Create archive
+        run: |
+          cd packages/vcr-sdk/dist
+          tar -czf ../../../vcr-sdk-${{ steps.version.outputs.new }}.tar.gz .
+
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.version.outputs.new }}
+          release_name: v${{ steps.version.outputs.new }}
+          body: |
+            ## VCR SDK v${{ steps.version.outputs.new }}
+            
+            ### Installation
+            ```bash
+            pnpm add @ermisnetwork/vcr-sdk@${{ steps.version.outputs.new }}
+            ```
+
+      - name: Publish to GitHub Packages
+        run: |
+          cd packages/vcr-sdk
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
