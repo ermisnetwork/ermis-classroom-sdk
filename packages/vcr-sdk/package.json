@@ -1,6 +1,6 @@
 {
   "name": "@ermisnetwork/vcr-sdk",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "TypeScript SDK for Virtual Classroom API with full type support and API key authentication",
   "license": "MIT",
   "type": "module",
@@ -55,4 +55,3 @@
     "access": "public"
   }
 }
-
