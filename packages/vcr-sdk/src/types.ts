@@ -257,13 +257,13 @@ export interface CreateEventDto {
   description?: string;
   templateId?: string;
   startTime: string;
-  endTime: string;
+  endTime?: string;
   settings?: EventSettingsDto;
   registrationSettings?: RegistrationSettingsDto;
   isPublic?: boolean;
   location?: string;
   tags?: string[];
-  maxScore: number;
+  maxScore?: number;
 }
 
 export interface UpdateEventDto {

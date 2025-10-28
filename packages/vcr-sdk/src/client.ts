@@ -66,7 +66,7 @@ export class VCRClient {
     const fetchOptions: RequestInit = {
       method,
       headers: requestHeaders,
-      signal: AbortSignal.timeout(this.config.timeout!),
+      signal: AbortSignal.timeout(this.config.timeout ?? 30000),
     };
 
     if (body && method !== 'GET') {
