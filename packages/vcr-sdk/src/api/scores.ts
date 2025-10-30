@@ -86,14 +86,14 @@ export class ScoresAPI {
    * Get scores by event
    */
   async getByEvent(eventId: string, params?: PaginationParams): Promise<PaginatedResponse<ScoreResponseDto>> {
-    return this.client.get<PaginatedResponse<ScoreResponseDto>>(`/scores/event/${eventId}`, params);
+    return this.list({ ...params, eventId });
   }
 
   /**
    * Get scores by participant
    */
   async getByParticipant(participantId: string, params?: PaginationParams): Promise<PaginatedResponse<ScoreResponseDto>> {
-    return this.client.get<PaginatedResponse<ScoreResponseDto>>(`/scores/participant/${participantId}`, params);
+    return this.list({ ...params, participantId });
   }
 }
 

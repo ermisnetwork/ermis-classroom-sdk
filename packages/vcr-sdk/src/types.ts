@@ -26,6 +26,8 @@ export type RegistrantRole = 'admin' | 'staff' | 'teacher' | 'student' | 'parent
 
 export type RegistrantStatus = 'active' | 'cancelled';
 
+export type RegistrantType = 'user' | 'external';
+
 export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 
 export type ScoreGrade = 'A' | 'B' | 'C' | 'D' | 'F';
@@ -148,30 +150,14 @@ export interface AuthResponseDto {
 // API Key Types
 // ============================================================================
 
-export interface ApiKeyPermissionsDto {
-  events: string[];
-  actions: string[];
-}
-
-export interface ApiKeyRateLimitDto {
-  requestsPerMinute: number;
-  requestsPerHour: number;
-}
-
 export interface CreateApiKeyDto {
   name: string;
-  permissions: ApiKeyPermissionsDto;
-  allowedOrigins?: string[];
   expiresAt?: string;
-  rateLimit?: ApiKeyRateLimitDto;
 }
 
 export interface UpdateApiKeyDto {
   name?: string;
-  permissions?: ApiKeyPermissionsDto;
-  allowedOrigins?: string[];
   expiresAt?: string;
-  rateLimit?: ApiKeyRateLimitDto;
   isActive?: boolean;
 }
 
@@ -179,13 +165,9 @@ export interface ApiKeyResponseDto {
   id: string;
   name: string;
   keyId: string;
-  permissions: ApiKeyPermissionsDto;
-  allowedOrigins?: string[];
   expiresAt?: string;
-  rateLimit?: ApiKeyRateLimitDto;
   isActive: boolean;
   lastUsedAt?: string;
-  usage?: object;
   createdAt: string;
   updatedAt: string;
 }
@@ -193,10 +175,6 @@ export interface ApiKeyResponseDto {
 export interface CreateApiKeyResponseDto {
   apiKey: ApiKeyResponseDto;
   plainSecret: string;
-}
-
-export interface ListApiKeysParams extends PaginationParams {
-  isActive?: boolean;
 }
 
 // ============================================================================
@@ -258,7 +236,7 @@ export interface CreateEventDto {
   templateId?: string;
   startTime: string;
   endTime: string;
-  settings?: EventSettingsDto;
+  settings: EventSettingsDto;
   registrationSettings?: RegistrationSettingsDto;
   isPublic?: boolean;
   location?: string;
@@ -284,7 +262,7 @@ export interface EventResponseDto {
   _id: string;
   title: string;
   description?: string;
-  templateId: string;
+  templateId?: string;
   startTime: string;
   endTime: string;
   organizerId: string;
@@ -339,8 +317,24 @@ export interface MockRegistrantsDto {
   role?: RegistrantRole;
 }
 
+export interface RegistrantResponseDto {
+  _id: string;
+  eventId: string;
+  firstName: string;
+  lastName: string;
+  email?: string;
+  authId: string;
+  role: RegistrantRole;
+  type: RegistrantType;
+  status: RegistrantStatus;
+  joinCode: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ListRegistrantsParams extends PaginationParams {
   status?: RegistrantStatus;
+  type?: RegistrantType;
   role?: RegistrantRole;
 }
 
@@ -407,6 +401,24 @@ export interface EventMaterialResponseDto {
 // ============================================================================
 
 export interface EventSubmissionResponseDto {
+  id: string;
+  eventId: string;
+  title: string;
+  description?: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  submitterName: string;
+  submitterRole: string;
+  submittedAt: string;
+  fileUrl?: string;
+}
+
+// ============================================================================
+// Event Whiteboard Types
+// ============================================================================
+
+export interface EventWhiteboardResponseDto {
   id: string;
   eventId: string;
   title: string;

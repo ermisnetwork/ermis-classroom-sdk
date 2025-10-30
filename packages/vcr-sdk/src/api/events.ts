@@ -12,6 +12,7 @@ import type {
   ApiResponse,
   CreateRegistrantDto,
   UpdateRegistrantDto,
+  RegistrantResponseDto,
   JoinWithCodeDto,
   MockRegistrantsDto,
   ListRegistrantsParams,
@@ -82,29 +83,29 @@ export class EventsAPI {
   /**
    * Create event registrant
    */
-  async createRegistrant(eventId: string, data: CreateRegistrantDto): Promise<any> {
-    return this.client.post(`/events/${eventId}/registrants`, data);
+  async createRegistrant(eventId: string, data: CreateRegistrantDto): Promise<ApiResponse<RegistrantResponseDto>> {
+    return this.client.post<ApiResponse<RegistrantResponseDto>>(`/events/${eventId}/registrants`, data);
   }
 
   /**
    * Get list of registrants
    */
-  async getRegistrants(eventId: string, params?: ListRegistrantsParams): Promise<PaginatedResponse<any>> {
-    return this.client.get<PaginatedResponse<any>>(`/events/${eventId}/registrants`, params);
+  async getRegistrants(eventId: string, params?: ListRegistrantsParams): Promise<PaginatedResponse<RegistrantResponseDto>> {
+    return this.client.get<PaginatedResponse<RegistrantResponseDto>>(`/events/${eventId}/registrants`, params);
   }
 
   /**
    * Get registrant by ID
    */
-  async getRegistrant(eventId: string, registrantId: string): Promise<any> {
-    return this.client.get(`/events/${eventId}/registrants/${registrantId}`);
+  async getRegistrant(eventId: string, registrantId: string): Promise<ApiResponse<RegistrantResponseDto>> {
+    return this.client.get<ApiResponse<RegistrantResponseDto>>(`/events/${eventId}/registrants/${registrantId}`);
   }
 
   /**
    * Update registrant
    */
-  async updateRegistrant(eventId: string, registrantId: string, data: UpdateRegistrantDto): Promise<any> {
-    return this.client.patch(`/events/${eventId}/registrants/${registrantId}`, data);
+  async updateRegistrant(eventId: string, registrantId: string, data: UpdateRegistrantDto): Promise<ApiResponse<RegistrantResponseDto>> {
+    return this.client.patch<ApiResponse<RegistrantResponseDto>>(`/events/${eventId}/registrants/${registrantId}`, data);
   }
 
   /**
@@ -119,20 +120,6 @@ export class EventsAPI {
    */
   async createMockRegistrants(eventId: string, data: MockRegistrantsDto): Promise<any> {
     return this.client.post(`/events/${eventId}/registrants/mock`, data);
-  }
-
-  /**
-   * Approve registrant
-   */
-  async approveRegistrant(eventId: string, registrantId: string): Promise<any> {
-    return this.client.post(`/events/${eventId}/registrants/${registrantId}/approve`);
-  }
-
-  /**
-   * Reject registrant
-   */
-  async rejectRegistrant(eventId: string, registrantId: string): Promise<any> {
-    return this.client.post(`/events/${eventId}/registrants/${registrantId}/reject`);
   }
 
   // ============================================================================

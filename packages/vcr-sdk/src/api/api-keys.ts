@@ -8,7 +8,6 @@ import type {
   UpdateApiKeyDto,
   ApiKeyResponseDto,
   CreateApiKeyResponseDto,
-  ListApiKeysParams,
 } from '../types';
 
 export class ApiKeysAPI {
@@ -22,10 +21,10 @@ export class ApiKeysAPI {
   }
 
   /**
-   * List all API keys with pagination
+   * List all API keys
    */
-  async list(params?: ListApiKeysParams): Promise<ApiKeyResponseDto[]> {
-    return this.client.get<ApiKeyResponseDto[]>('/api-keys', params);
+  async list(): Promise<ApiKeyResponseDto[]> {
+    return this.client.get<ApiKeyResponseDto[]>('/api-keys');
   }
 
   /**
@@ -54,13 +53,6 @@ export class ApiKeysAPI {
    */
   async regenerateSecret(id: string): Promise<CreateApiKeyResponseDto> {
     return this.client.post<CreateApiKeyResponseDto>(`/api-keys/${id}/regenerate`);
-  }
-
-  /**
-   * Get API key usage statistics
-   */
-  async getUsageStats(id: string): Promise<any> {
-    return this.client.get(`/api-keys/${id}/usage`);
   }
 }
 
