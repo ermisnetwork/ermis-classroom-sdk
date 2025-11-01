@@ -13,11 +13,8 @@ class ErmisClient extends EventEmitter {
     // Configuration
     this.config = {
       host: config.host || "daibo.ermis.network:9993",
-      apiUrl:
-        config.apiUrl ||
-        `https://${config.host || "daibo.ermis.network:9993"}/meeting`,
-      webtpUrl:
-        config.webtpUrl || "https://daibo.ermis.network:9993/meeting/wt",
+      apiUrl: config.apiUrl || `https://${config.host || "daibo.ermis.network:9993"}/meeting`,
+      webtpUrl: config.webtpUrl || "https://daibo.ermis.network:9993/meeting/wt",
       reconnectAttempts: config.reconnectAttempts || 3,
       reconnectDelay: config.reconnectDelay || 2000,
       debug: config.debug || false,
@@ -44,6 +41,7 @@ class ErmisClient extends EventEmitter {
       webtpUrl: this.config.webtpUrl,
       userMediaWorker: config.userMediaWorker || "sfu-adaptive-trung.ermis-network.workers.dev",
       screenShareWorker: config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev",
+
       defaultVideoConfig: {
         width: 1280,
         height: 720,
@@ -54,6 +52,12 @@ class ErmisClient extends EventEmitter {
         sampleRate: 48000,
         channels: 2,
       },
+
+      // !for testing, in production we should detect based on browser webtransport support, fallback to webrtc. value: "webtransport", "webrtc"
+      publishProtocol: config.publishProtocol || "webtransport",
+      subscribeProtocol: config.subscribeProtocol || "webtransport",
+      hostNode: config.hostNode || "daibo.ermis.network",
+      apiHost: config.apiHost || "daibo.ermis.network",
     };
 
     this._setupEventHandlers();
@@ -108,8 +112,8 @@ class ErmisClient extends EventEmitter {
   }
 
   /**
- * Set authentication directly without calling API
- */
+   * Set authentication directly without calling API
+   */
   manualAuthenticate(userId, token) {
     if (!userId || !token) {
       throw new Error("userId and token are required");
@@ -176,10 +180,7 @@ class ErmisClient extends EventEmitter {
     try {
       this.emit("creatingRoom", { config });
 
-      const roomData = await this.apiClient.createRoom(
-        config.name,
-        config.type
-      );
+      const roomData = await this.apiClient.createRoom(config.name, config.type);
 
       const room = new Room({
         id: roomData.id,
@@ -209,37 +210,40 @@ class ErmisClient extends EventEmitter {
     }
   }
 
-  /** 
+  /**
    * Create breakout rooms
-  */
+   */
   async createBreakoutRooms(config) {
     if (!this.state.currentRoom) {
       throw new Error("Must be in a main room to create breakout rooms");
     }
 
-    if (this.state.currentRoom.type !== 'main') {
+    if (this.state.currentRoom.type !== "main") {
       throw new Error("Can only create breakout rooms from main rooms");
     }
 
     try {
-      this.emit('creatingBreakoutRooms', {
+      this.emit("creatingBreakoutRooms", {
         config,
-        parentRoom: this.state.currentRoom
+        parentRoom: this.state.currentRoom,
       });
 
       const breakoutRooms = await this.state.currentRoom.createBreakoutRoom(config);
 
       for (const room of breakoutRooms) {
         this.state.currentRoom.subRooms.set(room.id, room);
-        this._setupRoomEvents(room)
+        this._setupRoomEvents(room);
       }
 
-      this.emit('breakoutRoomsCreated', {
+      this.emit("breakoutRoomsCreated", {
         breakoutRooms,
-        parentRoom: this.state.currentRoom
+        parentRoom: this.state.currentRoom,
       });
 
-      this._debug("Breakout rooms created:", breakoutRooms.map(room => room.getInfo()));
+      this._debug(
+        "Breakout rooms created:",
+        breakoutRooms.map((room) => room.getInfo())
+      );
       return breakoutRooms;
     } catch (error) {
       this.emit("error", { error, action: "createBreakoutRooms" });
@@ -255,13 +259,13 @@ class ErmisClient extends EventEmitter {
       throw new Error("Must be in a main room to join breakout rooms");
     }
 
-    if (this.state.currentRoom.type !== 'main') {
+    if (this.state.currentRoom.type !== "main") {
       throw new Error("Can only join breakout rooms from main rooms");
     }
 
     try {
-      this.emit('joiningBreakoutRoom', {
-        parentRoom: this.state.currentRoom
+      this.emit("joiningBreakoutRoom", {
+        parentRoom: this.state.currentRoom,
       });
       const result = await this.state.currentRoom.joinBreakoutRoom();
 
@@ -270,9 +274,9 @@ class ErmisClient extends EventEmitter {
         this.state.rooms.set(result.room.id, result.room);
       }
 
-      this.emit('breakoutRoomJoined', {
+      this.emit("breakoutRoomJoined", {
         breakoutRoom: result?.room,
-        result
+        result,
       });
       return result;
     } catch (error) {
@@ -296,9 +300,7 @@ class ErmisClient extends EventEmitter {
       }
 
       // Try to find existing room instance first
-      let room = Array.from(this.state.rooms.values()).find(
-        (r) => r.code === roomCode
-      );
+      let room = Array.from(this.state.rooms.values()).find((r) => r.code === roomCode);
 
       if (!room) {
         // Create new room instance
@@ -359,10 +361,7 @@ class ErmisClient extends EventEmitter {
     this._ensureAuthenticated();
 
     try {
-      const response = await this.apiClient.listRooms(
-        options.page || 1,
-        options.perPage || 20
-      );
+      const response = await this.apiClient.listRooms(options.page || 1, options.perPage || 20);
 
       this.emit("roomsLoaded", { rooms: response.data || [] });
 
@@ -503,9 +502,7 @@ class ErmisClient extends EventEmitter {
 
       // Find target sub room
       const subRooms = await parentRoom.getSubRooms();
-      const targetSubRoom = subRooms.find(
-        (sr) => sr.code === targetSubRoomCode
-      );
+      const targetSubRoom = subRooms.find((sr) => sr.code === targetSubRoomCode);
 
       if (!targetSubRoom) {
         throw new Error(`Sub room with code ${targetSubRoomCode} not found`);
@@ -714,10 +711,7 @@ class ErmisClient extends EventEmitter {
 
     eventsToForward.forEach((event) => {
       room.on(event, (data) => {
-        this.emit(
-          event,
-          data
-        );
+        this.emit(event, data);
       });
     });
   }
@@ -748,13 +742,9 @@ class ErmisClient extends EventEmitter {
     while (attempts < this.config.reconnectAttempts) {
       try {
         attempts++;
-        this._debug(
-          `Reconnection attempt ${attempts}/${this.config.reconnectAttempts}`
-        );
+        this._debug(`Reconnection attempt ${attempts}/${this.config.reconnectAttempts}`);
 
-        await new Promise((resolve) =>
-          setTimeout(resolve, this.config.reconnectDelay)
-        );
+        await new Promise((resolve) => setTimeout(resolve, this.config.reconnectDelay));
 
         if (this.state.user) {
           await this.authenticate(this.state.user.id);

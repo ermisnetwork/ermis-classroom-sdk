@@ -44,13 +44,32 @@ import {
 import { useErmisMeeting } from "./context";
 import SubRoomPopup from "./SubRoomPopup";
 import type { ScreenShareData } from "./context/ErmisClassroomProvider.tsx";
+import type { AnyCnameRecord } from "node:dns";
 
 interface VideoMeetingProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
+  selectedNode: string;
+  setSelectedNode: (node: string) => void;
+  publishProtocol: string;
+  setPublishProtocol: (protocol: string) => void;
+  subscribeProtocol: string;
+  setSubscribeProtocol: (protocol: string) => void;
+  apiHost: string;
+  setApiHost: (host: string) => void;
 }
 
 // Main Component
-export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
+export default function VideoMeeting({
+  videoRef,
+  selectedNode,
+  setSelectedNode,
+  publishProtocol,
+  setPublishProtocol,
+  subscribeProtocol,
+  setSubscribeProtocol,
+  apiHost,
+  setApiHost,
+}: VideoMeetingProps) {
   const [userId, setUserId] = useState("khoaphan7795@gmail.com");
   const [roomCode, setRoomCode] = useState("5fb9-azht-t8d5");
   const [isConnected, setIsConnected] = useState(false);
@@ -83,6 +102,7 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
     localStream,
     previewStream,
     authenticate,
+    isAuthenticated,
     joinRoom,
     videoEnabled,
     micEnabled,
@@ -205,6 +225,7 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
   const handleJoinRoom = async () => {
     try {
       setIsLoading(true);
+      console.log("[VideoMeeting] Starting join room process...");
 
       let streamToUse = previewStream;
 
@@ -226,11 +247,13 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
         streamToUse = await navigator.mediaDevices.getUserMedia(constraints);
       }
 
+      console.log("[VideoMeeting] Calling joinRoom with:", { roomCode, hasStream: !!streamToUse });
       await joinRoom(roomCode, streamToUse);
       setShowPreview(false);
-    } catch (error) {
+      console.log("[VideoMeeting] Successfully joined room");
+    } catch (error: any) {
       console.error("Failed to join room:", error);
-      alert("Failed to join room");
+      alert(`Failed to join room: ${error.message}`)
     } finally {
       setIsLoading(false);
     }
@@ -782,6 +805,70 @@ export default function VideoMeeting({ videoRef }: VideoMeetingProps) {
                 placeholder="Enter room code"
                 onKeyPress={(e) => e.key === "Enter" && handleJoinRoom()}
               />
+
+              <div style={{ display: "flex", gap: "15px", marginTop: "15px" }}>
+                <DeviceGroup style={{ flex: 1 }}>
+                  <DeviceLabel>Api Host Select</DeviceLabel>
+                  <DeviceSelect
+                    value={apiHost}
+                    onChange={(e) => setApiHost(e.target.value)}
+                  >
+                    <option value="daibo.ermis.network:9934">daibo.ermis.network:9934</option>
+                    <option value="admin.bandia.vn:9996">admin.bandia.vn:9996</option>
+                    <option value="admin.bandia.vn:9998">admin.bandia.vn:9998</option>
+                  </DeviceSelect>
+                </DeviceGroup>
+                <DeviceGroup style={{ flex: 1 }}>
+                  <DeviceLabel>Node Select</DeviceLabel>
+                  <DeviceSelect
+                    value={selectedNode}
+                    onChange={(e) => setSelectedNode(e.target.value)}
+                    disabled={inRoom}
+                  >
+                    <option value="admin.bandia.vn:9995">admin.bandia.vn:9995</option>
+                    <option value="admin.bandia.vn:9996">admin.bandia.vn:9996</option>
+                    <option value="admin.bandia.vn:9998">admin.bandia.vn:9998</option>
+                  </DeviceSelect>
+                </DeviceGroup>
+
+                <DeviceGroup style={{ flex: 1 }}>
+                  <DeviceLabel>Publish Protocol</DeviceLabel>
+                  <DeviceSelect
+                    value={publishProtocol}
+                    onChange={(e) => setPublishProtocol(e.target.value)}
+                    disabled={inRoom}
+                  >
+                    <option value="webrtc">webrtc</option>
+                    <option value="webtransport">webtransport</option>
+                  </DeviceSelect>
+                </DeviceGroup>
+                <DeviceGroup style={{ flex: 1 }}>
+                  <DeviceLabel>Subscribe Protocol</DeviceLabel>
+                  <DeviceSelect
+                    value={subscribeProtocol}
+                    onChange={(e) => setSubscribeProtocol(e.target.value)}
+                  >
+                    <option value="websocket">websocket</option>
+                    <option value="webtransport">webtransport</option>
+                  </DeviceSelect>
+                </DeviceGroup>
+              </div>
+
+              <div style={{
+                marginTop: "10px",
+                padding: "8px",
+                background: inRoom ? "#fff3cd" : "#f5f5f5",
+                borderRadius: "4px",
+                fontSize: "12px",
+                color: inRoom ? "#856404" : "#666"
+              }}>
+                Current Config: {selectedNode} | Publish Protocol: {publishProtocol} | Subscribe Protocol: {subscribeProtocol}
+                <br />
+                Auth Status: {isAuthenticated ? "✅ Authenticated" : "❌ Not Authenticated"} | User: {userId || "None"}
+                {inRoom && <div style={{ marginTop: "4px", fontWeight: "bold" }}>
+                  ⚠️ Config cannot be changed while in room. Leave room first to change settings.
+                </div>}
+              </div>
             </>
           )}
 

@@ -13,6 +13,12 @@ interface ErmisClassroomConfig {
   apiUrl?: string;
   reconnectAttempts?: number;
   reconnectDelay?: number;
+  // for testing only
+  publishProtocol?: string
+  subscribeProtocol?: string
+  hostNode?: string
+  apiHost?: string
+
 }
 
 interface ErmisClassroomProviderProps {
@@ -40,6 +46,10 @@ export const ErmisClassroomProvider = ({
       apiUrl: config.apiUrl,
       reconnectAttempts: config.reconnectAttempts,
       reconnectDelay: config.reconnectDelay,
+      publishProtocol: config.publishProtocol,
+      subscribeProtocol: config.subscribeProtocol,
+      hostNode: config.hostNode,
+      apiHost: config.apiHost,
     }),
     [
       config.host,
@@ -48,12 +58,17 @@ export const ErmisClassroomProvider = ({
       config.apiUrl,
       config.reconnectAttempts,
       config.reconnectDelay,
+      config.publishProtocol,
+      config.subscribeProtocol,
+      config.hostNode,
+      config.apiHost,
     ]
   );
   const cfgKey = useMemo(() => JSON.stringify(cfg), [cfg]);
 
   const [roomCode, setRoomCode] = useState<string>();
   const [userId, setUserId] = useState<string>();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [participants, setParticipants] = useState<Map<string, Participant>>(
     new Map()
   );
@@ -341,9 +356,21 @@ export const ErmisClassroomProvider = ({
   useEffect(() => {
     if (clientRef.current) {
       if (typeof clientRef.current.updateConfig === "function") {
-        clientRef.current.updateConfig(cfg);
+        try {
+          clientRef.current.updateConfig(cfg);
+          console.log("Updated client config without recreating:", cfg);
+          return;
+        } catch (e) {
+          console.warn("updateConfig failed, will recreate client:", e);
+        }
+      }
+
+      // Only recreate client if in room state would be preserved
+      if (inRoom) {
+        console.warn("Cannot recreate client while in room - config change ignored");
         return;
       }
+
       try {
         unsubRef.current.forEach((fn) => fn());
       } catch { }
@@ -360,6 +387,15 @@ export const ErmisClassroomProvider = ({
     const off = setupEventListeners(client);
     unsubRef.current = off;
 
+    // Re-authenticate if user was previously authenticated
+    if (isAuthenticated && userId) {
+      console.log("Re-authenticating user after client recreation:", userId);
+      client.authenticate(userId).catch((e: any) => {
+        console.error("Re-authentication failed:", e);
+        setIsAuthenticated(false);
+      });
+    }
+
     return () => {
       try {
         unsubRef.current.forEach((fn) => fn());
@@ -370,7 +406,7 @@ export const ErmisClassroomProvider = ({
       } catch { }
       clientRef.current = null;
     };
-  }, [cfgKey, setupEventListeners]);
+  }, [cfgKey, setupEventListeners, inRoom, isAuthenticated, userId]);
 
   useEffect(() => {
     const initDeviceManager = async () => {
@@ -433,32 +469,44 @@ export const ErmisClassroomProvider = ({
     if (!client) throw new Error("Client not initialized");
     setUserId(userIdToAuth);
     await client.authenticate(userIdToAuth);
+    setIsAuthenticated(true);
+    console.log("[Provider] User authenticated successfully:", userIdToAuth);
   }, []);
 
   const joinRoom = useCallback(
     async (code: string, customStream?: MediaStream) => {
       const client = clientRef.current;
       if (!client) throw new Error("Client not initialized");
-      const result = await client.joinRoom(code, customStream);
-      setCurrentRoom(result.room);
-      setRoomCode(code);
-      setInRoom(true);
 
-      setParticipants((prev) => {
-        const map = new Map(prev);
-        result.participants.forEach((p: Participant) => {
-          map.set(p.userId, p);
-          if (p.isLocal) {
-            setMicEnabled(p.isAudioEnabled);
-            setVideoEnabled(p.isVideoEnabled);
-            setHandRaised((p as any).isHandRaised || false);
-          }
+      try {
+        const result = await client.joinRoom(code, customStream);
+        setCurrentRoom(result.room);
+        setRoomCode(code);
+        setInRoom(true);
+
+        setParticipants((prev) => {
+          const map = new Map(prev);
+          result.participants.forEach((p: Participant) => {
+            map.set(p.userId, p);
+            if (p.isLocal) {
+              setMicEnabled(p.isAudioEnabled);
+              setVideoEnabled(p.isVideoEnabled);
+              setHandRaised((p as any).isHandRaised || false);
+            }
+          });
+          return map;
         });
-        return map;
-      });
 
-      if (previewStream) {
-        setPreviewStream(null);
+        if (previewStream) {
+          setPreviewStream(null);
+        }
+      } catch (error: any) {
+        // If authentication error, reset auth state
+        if (error.message?.includes("authenticated")) {
+          console.warn("Authentication required, resetting auth state");
+          setIsAuthenticated(false);
+        }
+        throw error;
       }
     },
     [previewStream]
@@ -744,6 +792,7 @@ export const ErmisClassroomProvider = ({
       handRaised,
       pinType,
       authenticate,
+      isAuthenticated,
       joinRoom,
       currentRoom,
       inRoom,

@@ -59,7 +59,7 @@ class Participant extends EventEmitter {
     if (!this.isLocal || !this.publisher) return;
 
     try {
-      await this.publisher.toggleMic();
+      await this.publisher.toggleAudio();
       this.isAudioEnabled = !this.isAudioEnabled;
       this.emit("audioToggled", {
         participant: this,
@@ -81,7 +81,7 @@ class Participant extends EventEmitter {
     if (!this.isLocal || !this.publisher) return;
 
     try {
-      await this.publisher.toggleCamera();
+      await this.publisher.toggleVideo();
       this.isVideoEnabled = !this.isVideoEnabled;
       this.emit("videoToggled", {
         participant: this,
@@ -150,7 +150,6 @@ class Participant extends EventEmitter {
         enabled: this.isHandRaised,
       });
       console.log("toggleRaiseHand", this.isHandRaised);
-
     } catch (error) {
       console.log("toggleRaiseHand error", error);
 

@@ -1,16 +1,15 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
-export const __wbg_wasmencoder_free: (a: number, b: number) => void;
-export const wasmencoder_new: (a: number, b: number, c: number, d: number) => number;
-export const wasmencoder_encode: (a: number, b: number) => any;
-export const wasmencoder_get_k: (a: number) => number;
-export const wasmencoder_get_block_size: (a: number) => number;
-export const __wbg_wasmdecoder_free: (a: number, b: number) => void;
-export const wasmdecoder_new: (a: number, b: number) => number;
-export const wasmdecoder_add_symbol: (a: number, b: number, c: number, d: number) => number;
-export const wasmdecoder_is_decoded: (a: number) => number;
-export const wasmdecoder_get_decoded: (a: number) => any;
-export const __wbindgen_export_0: WebAssembly.Table;
+export const start: () => void;
+export const add: (a: number, b: number) => number;
+export const __wbg_aacwasmdecoder_free: (a: number, b: number) => void;
+export const createAacDecoder: (a: number, b: number) => [number, number, number];
+export const aacwasmdecoder_decode: (a: number, b: number, c: number, d: bigint, e: bigint) => [number, number, number, number];
+export const test: () => void;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
 export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_export_3: WebAssembly.Table;
+export const __externref_table_dealloc: (a: number) => void;
 export const __wbindgen_start: () => void;

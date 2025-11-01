@@ -146,14 +146,14 @@ class Room extends EventEmitter {
       const subRoomsData = await this.apiClient.createSubRoom({
         main_room_id: this.id,
         rooms: config.rooms,
-      });      
+      });
 
       // Filter participants - keep only members NOT assigned to sub rooms
       const assignedUserIds = new Set();
-      subRoomsData.rooms.forEach(subRoom => {
+      subRoomsData.rooms.forEach((subRoom) => {
         this._setupSubRoom(subRoom);
         if (subRoom.participants.length) {
-          subRoom.participants.forEach(p => {
+          subRoom.participants.forEach((p) => {
             assignedUserIds.add(p.user_id || p.userId);
           });
         }
@@ -164,10 +164,10 @@ class Room extends EventEmitter {
         if (assignedUserIds.has(userId) && !participant.isLocal) {
           this.removeParticipant(userId);
         }
-      }      
+      }
 
-      this.emit("subRoomCreated", { 
-        room: this
+      this.emit("subRoomCreated", {
+        room: this,
       });
 
       return subRoomsData;
@@ -182,18 +182,15 @@ class Room extends EventEmitter {
    */
   async createBreakoutRoom(config) {
     if (this.type !== "main") {
-      throw new Error('Only main rooms can create breakout rooms');
+      throw new Error("Only main rooms can create breakout rooms");
     }
 
     try {
-      this.emit('creatingBreakoutRoom', { room: this, config });
+      this.emit("creatingBreakoutRoom", { room: this, config });
 
-      const roomsData = config.rooms.map(roomConfig => {
-        const formattedParticipants = (roomConfig.participants || []).map(p => {
-          const participantObj =
-            this.participants instanceof Map
-              ? this.participants.get(p.userId)
-              : p;
+      const roomsData = config.rooms.map((roomConfig) => {
+        const formattedParticipants = (roomConfig.participants || []).map((p) => {
+          const participantObj = this.participants instanceof Map ? this.participants.get(p.userId) : p;
 
           if (!participantObj) {
             throw new Error(`Participant ${p.userId} not found in main room`);
@@ -224,17 +221,17 @@ class Room extends EventEmitter {
           ownerId: roomData.user_id,
           apiClient: this.apiClient,
           mediaConfig: this.mediaConfig,
-        })
+        });
         subRoom.participants = roomData.participants || [];
         this.subRooms.set(subRoom.id, subRoom);
-        createdRooms.push(subRoom)
+        createdRooms.push(subRoom);
 
-        this.emit('subRoomCreated', { room: this, subRoom });
+        this.emit("subRoomCreated", { room: this, subRoom });
       }
 
       return createdRooms;
     } catch (err) {
-      this.emit('error', { room: this, err, action: 'createBreakoutRooms' });
+      this.emit("error", { room: this, err, action: "createBreakoutRooms" });
       throw err;
     }
   }
@@ -259,7 +256,7 @@ class Room extends EventEmitter {
 
       for (const sub of this.subRooms.values()) {
         const participants = sub.participants || [];
-        const match = participants.find(p => p.user_id === localUserId);
+        const match = participants.find((p) => p.user_id === localUserId);
         if (match) {
           targetSubRoom = sub;
           break;
@@ -292,7 +289,6 @@ class Room extends EventEmitter {
 
       console.log(`✅ User ${localUserId} joined breakout room: ${roomCode}`);
       return response;
-
     } catch (error) {
       this.emit("error", {
         error,
@@ -778,7 +774,7 @@ class Room extends EventEmitter {
     const transportInfo = logTransportInfo();
     const useWebRTC = transportInfo.recommendedTransport.useWebRTC;
 
-    console.log(`🚀 Setting up publisher with ${useWebRTC ? 'WebRTC' : 'WebTransport'}`);
+    console.log(`🚀 Setting up publisher with ${useWebRTC ? "WebRTC" : "WebTransport"}`);
 
     // Video rendering handled by app through stream events
 
@@ -787,17 +783,14 @@ class Room extends EventEmitter {
 
     const publisher = new Publisher({
       publishUrl,
-      streamType: "camera",
+      publishType: "camera",
       streamId: this.streamId,
       userId: this.localParticipant.userId, // Pass userId for screen share tile mapping
       mediaStream: mediaStream,
-      width: 1280,
-      height: 720,
-      framerate: 30,
-      bitrate: 1_500_000,
       roomId: this.id,
-      // Auto-detect: use WebRTC for Safari, WebTransport for others
-      useWebRTC: useWebRTC,
+      webRtcHost: this.mediaConfig.hostNode,
+      // !for testing, in production we should detect based on browser webtransport support, fallback to webrtc. value: "webtransport", "webrtc"
+      protocol: this.mediaConfig.publishProtocol,
       onStatusUpdate: (msg, isError) => {
         this.localParticipant.setConnectionStatus(isError ? "failed" : "connected");
       },
@@ -837,12 +830,10 @@ class Room extends EventEmitter {
       subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
       streamId: participant.streamId,
       roomId: this.id,
-      host: this.mediaConfig.host,
+      host: this.mediaConfig.hostNode,
       streamOutputEnabled: true,
-      // DO for adaptive camera url
-      userMediaWorker: "sfu-adaptive-trung.ermis-network.workers.dev",
-      // DO for screen share url
-      screenShareWorker: "sfu-screen-share.ermis-network.workers.dev",
+      protocol: this.mediaConfig.subscribeProtocol,
+
       onStatus: (msg, isError) => {
         participant.setConnectionStatus(isError ? "failed" : "connected");
       },
@@ -875,11 +866,7 @@ class Room extends EventEmitter {
     participant.setSubscriber(subscriber);
 
     if (participant.isScreenSharing) {
-      await this.handleRemoteScreenShare(
-        participant.userId,
-        participant.streamId,
-        true
-      );
+      await this.handleRemoteScreenShare(participant.userId, participant.streamId, true);
     }
   }
 
@@ -901,7 +888,13 @@ class Room extends EventEmitter {
       });
 
       // Start screen share through publisher first
-      await this.localParticipant.publisher.startShareScreen(screenStream);
+      // await this.localParticipant.publisher.startShareScreen(screenStream);
+      // todo: change logic screenshare, init new publisher with share screen type
+      this.localParticipant.publisher = new Publisher({
+        // ...this.localParticipant.publisher,
+        publishType: "screenshare",
+        mediaStream: screenStream,
+      });
 
       this.localParticipant.isScreenSharing = true;
 
@@ -909,7 +902,7 @@ class Room extends EventEmitter {
       this.emit("screenShareStarted", {
         room: this,
         stream: screenStream,
-        participant: this.localParticipant.getInfo()
+        participant: this.localParticipant.getInfo(),
       });
       return screenStream;
     } catch (error) {
@@ -1029,17 +1022,17 @@ class Room extends EventEmitter {
       }
     }
 
-    if (event.type === "join_sub_room") {      
-      const {room, participants} = event;
+    if (event.type === "join_sub_room") {
+      const { room, participants } = event;
 
       this._setupSubRoom({ room, participants });
-      
+
       this.emit("subRoomJoined", {
         room: this,
       });
     }
 
-    if (event.type === "leave_sub_room") { 
+    if (event.type === "leave_sub_room") {
       this.currentSubRoom = null;
 
       this.emit("subRoomLeft", {
@@ -1250,22 +1243,14 @@ class Room extends EventEmitter {
     if (event.type === "start_share_screen") {
       const participant = this.participants.get(event.participant.user_id);
       if (participant && participant.userId !== this.localParticipant?.userId) {
-        await this.handleRemoteScreenShare(
-          participant.userId,
-          event.participant.stream_id,
-          true
-        );
+        await this.handleRemoteScreenShare(participant.userId, event.participant.stream_id, true);
       }
     }
 
     if (event.type === "stop_share_screen") {
       const participant = this.participants.get(event.participant.user_id);
       if (participant && participant.userId !== this.localParticipant?.userId) {
-        await this.handleRemoteScreenShare(
-          participant.userId,
-          event.participant.stream_id,
-          false
-        );
+        await this.handleRemoteScreenShare(participant.userId, event.participant.stream_id, false);
       }
     }
   }
@@ -1421,7 +1406,6 @@ class Room extends EventEmitter {
    * Setup sub rooms from API data
    */
   _setupSubRoom(subRoomData) {
-
     const subRoom = new SubRoom({
       id: subRoomData.room.id,
       name: subRoomData.room.room_name,
@@ -1441,7 +1425,7 @@ class Room extends EventEmitter {
     // Add to sub rooms map
     this.subRooms.set(subRoom.id, subRoom);
 
-    if (subRoomData.participants.some(p => p.user_id === this.localUserId)) {
+    if (subRoomData.participants.some((p) => p.user_id === this.localUserId)) {
       this.currentSubRoom = subRoom;
     }
   }

@@ -56,11 +56,7 @@ const createVideoInit = (quality) => ({
 
 function logStats() {
   setInterval(() => {
-    console.log(
-      "Buffer stats:",
-      videoFrameBuffer.length,
-      audioFrameBuffer.length
-    );
+    console.log("Buffer stats:", videoFrameBuffer.length, audioFrameBuffer.length);
   }, 5000);
 }
 
@@ -224,10 +220,7 @@ self.onmessage = async function (e) {
 
     case "toggleAudio":
       audioEnabled = !audioEnabled;
-      console.log(
-        "Media Worker: Toggling audio. Now audioEnabled =",
-        audioEnabled
-      );
+      console.log("Media Worker: Toggling audio. Now audioEnabled =", audioEnabled);
       self.postMessage({ type: "audio-toggled", audioEnabled });
       break;
 
@@ -345,10 +338,7 @@ function handleMediaWsMessage(event) {
   if (typeof event.data === "string") {
     const dataJson = JSON.parse(event.data);
     if (dataJson.type === "TotalViewerCount") {
-      console.log(
-        "[Media worker]: TotalViewerCount received from websocket:",
-        dataJson.total_viewers
-      );
+      console.log("[Media worker]: TotalViewerCount received from websocket:", dataJson.total_viewers);
       self.postMessage({
         type: "TotalViewerCount",
         count: dataJson.total_viewers,
@@ -356,16 +346,11 @@ function handleMediaWsMessage(event) {
       return;
     }
 
-    if (
-      dataJson.type === "DecoderConfigs" &&
-      (!videoCodecReceived || !audioCodecReceived)
-    ) {
+    if (dataJson.type === "DecoderConfigs" && (!videoCodecReceived || !audioCodecReceived)) {
       if (isScreenSharing) {
         screenShareConfig = dataJson.videoConfig;
         videoFrameRate = screenShareConfig.frameRate;
-        screenShareConfig.description = base64ToUint8Array(
-          screenShareConfig.description
-        );
+        screenShareConfig.description = base64ToUint8Array(screenShareConfig.description);
         videoDecoderForScreenShare.configure(screenShareConfig);
         currentVideoDecoder = videoDecoderForScreenShare;
         currentQuality = "screen";
@@ -375,21 +360,15 @@ function handleMediaWsMessage(event) {
 
         videoFrameRate = video360pConfig.frameRate;
 
-        video360pConfig.description = base64ToUint8Array(
-          video360pConfig.description
-        );
-        video720pConfig.description = base64ToUint8Array(
-          video720pConfig.description
-        );
+        video360pConfig.description = base64ToUint8Array(video360pConfig.description);
+        video720pConfig.description = base64ToUint8Array(video720pConfig.description);
         videoDecoderFor360p.configure(video360pConfig);
         videoDecoderFor720p.configure(video720pConfig);
       }
 
       audioConfig = dataJson.audioConfig;
       audioFrameRate = audioConfig.sampleRate / 1024;
-      const audioConfigDescription = base64ToUint8Array(
-        audioConfig.description
-      );
+      const audioConfigDescription = base64ToUint8Array(audioConfig.description);
 
       audioDecoder.configure(audioConfig);
 
@@ -535,9 +514,7 @@ function handleMediaWsMessage(event) {
 
       if (keyFrameReceived) {
         if (videoDecoderForScreenShare.state === "closed") {
-          videoDecoderForScreenShare = new VideoDecoder(
-            createVideoInit("screen")
-          );
+          videoDecoderForScreenShare = new VideoDecoder(createVideoInit("screen"));
           videoDecoderForScreenShare.configure(screenShareConfig);
         }
         const encodedChunk = new EncodedVideoChunk({
@@ -571,7 +548,7 @@ function resetWebsocket() {
   if (mediaWebsocket && mediaWebsocket.readyState !== WebSocket.CLOSED) {
     try {
       mediaWebsocket.close();
-    } catch (e) { }
+    } catch (e) {}
     mediaWebsocket = null;
   }
 
@@ -613,26 +590,26 @@ function stop() {
   if (mediaWebsocket) {
     try {
       mediaWebsocket.close();
-    } catch (e) { }
+    } catch (e) {}
     mediaWebsocket = null;
   }
 
   if (videoDecoderFor360p) {
     try {
       videoDecoderFor360p.close();
-    } catch (e) { }
+    } catch (e) {}
     videoDecoderFor360p = null;
   }
   if (videoDecoderFor720p) {
     try {
       videoDecoderFor720p.close();
-    } catch (e) { }
+    } catch (e) {}
     videoDecoderFor720p = null;
   }
   if (audioDecoder) {
     try {
       audioDecoder.close();
-    } catch (e) { }
+    } catch (e) {}
     audioDecoder = null;
   }
 
