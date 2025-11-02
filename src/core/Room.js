@@ -3,7 +3,7 @@ import Participant from "./Participant.js";
 import SubRoom from "./SubRoom.js";
 
 import Publisher from "../media/Publisher.js";
-import Subscriber from "../media/Subscriber.js";
+import Subscriber from "../media/SubscriberDev.js";
 import AudioMixer from "../media/AudioMixer.js";
 import { determineTransport, logTransportInfo } from "../utils/browserDetection.js";
 

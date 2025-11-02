@@ -1,4 +1,5 @@
 import EventEmitter from "../events/EventEmitter.js";
+import { getDataChannelId, SUBSCRIBE_TYPE } from "../constant/publisherConstants.js";
 
 /**
  * Enhanced Subscriber class for receiving media streams
@@ -11,21 +12,23 @@ class Subscriber extends EventEmitter {
     // Configuration
     this.streamId = config.streamId || "";
     this.roomId = config.roomId || "";
-    this.host = config.host || "stream-gate.bandia.vn";
-    this.userMediaWorker =
-      config.userMediaWorker ||
-      "sfu-adaptive-bitrate.ermis-network.workers.dev";
-    this.screenShareWorker =
-      config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev";
-    this.videoElement = config.videoElement;
+    this.host = config.host || "admin.bandia.vn:9995";
+    this.userMediaWorker = config.userMediaWorker || "sfu-adaptive-trung.ermis-network.workers.dev";
+    this.screenShareWorker = config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev";
     this.isOwnStream = config.isOwnStream || false;
+    this.protocol = config.protocol || "websocket"; // 'websocket', 'webtransport', 'webrtc'
 
     // Media configuration
-    this.mediaWorkerUrl = config.mediaWorkerUrl || "workers/media-worker-ab.js";
-    this.audioWorkletUrl =
-      config.audioWorkletUrl || "workers/audio-worklet1.js";
-    this.mstgPolyfillUrl =
-      config.mstgPolyfillUrl || "polyfills/MSTG_polyfill.js";
+    this.mediaWorkerUrl = config.mediaWorkerUrl || "/workers/media-worker-dev.js";
+    this.audioWorkletUrl = config.audioWorkletUrl || "/workers/audio-worklet1.js";
+    this.mstgPolyfillUrl = config.mstgPolyfillUrl || "/polyfills/MSTG_polyfill.js";
+    this.subcribeUrl = config.subcribeUrl;
+
+    // Screen share flag
+    this.isScreenSharing = config.isScreenSharing || false;
+
+    // Stream output flag
+    this.streamOutputEnabled = config.streamOutputEnabled !== false;
 
     // State
     this.isStarted = false;
@@ -44,9 +47,6 @@ class Subscriber extends EventEmitter {
 
     // Audio mixer reference (will be set externally)
     this.audioMixer = null;
-
-    // Screen share flag
-    this.isScreenSharing = config.isScreenSharing || false;
   }
 
   /**
@@ -101,13 +101,17 @@ class Subscriber extends EventEmitter {
         this.worker = null;
       }
 
+      // Emit stream removal event for app integration
+      if (this.mediaStream) {
+        this.emit("streamRemoved", {
+          streamId: this.streamId,
+          subscriberId: this.subscriberId,
+          roomId: this.roomId,
+        });
+      }
+
       // Close video components
       this._cleanupVideoSystem();
-
-      // Clear video element
-      if (this.videoElement) {
-        this.videoElement.srcObject = null;
-      }
 
       // Clear references
       this.audioWorkletNode = null;
@@ -172,13 +176,40 @@ class Subscriber extends EventEmitter {
    * Load MediaStreamTrackGenerator polyfill if needed
    */
   async _loadPolyfill() {
-    if (!window.MediaStreamTrackGenerator) {
-      try {
-        await import(this.mstgPolyfillUrl);
-      } catch (error) {
-        console.warn("Failed to load MSTG polyfill:", error);
-      }
+    // Skip if browser already supports it
+    if (window.MediaStreamTrackGenerator) {
+      console.log("✅ Browser already supports MediaStreamTrackGenerator");
+      return;
     }
+
+    // Determine the polyfill URL (absolute)
+    const url = this.mstgPolyfillUrl || `${location.origin}/polyfills/MSTG_polyfill.js`;
+    console.log("⚙️ Loading MSTG polyfill from:", url);
+
+    // Prevent loading twice
+    if (document.querySelector(`script[src="${url}"]`)) {
+      console.log("ℹ️ MSTG polyfill already loaded");
+      return;
+    }
+
+    // Dynamically load the script
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = url;
+      script.async = true;
+
+      script.onload = () => {
+        console.log("✅ MSTG polyfill loaded successfully");
+        resolve();
+      };
+
+      script.onerror = (err) => {
+        console.error("❌ Failed to load MSTG polyfill:", err);
+        reject(err);
+      };
+
+      document.head.appendChild(script);
+    });
   }
 
   /**
@@ -186,9 +217,17 @@ class Subscriber extends EventEmitter {
    */
   async _initWorker(channelPort) {
     try {
-      this.worker = new Worker(`${this.mediaWorkerUrl}?t=${Date.now()}`, {
+      this.worker = new Worker(this.mediaWorkerUrl, {
         type: "module",
       });
+      console.warn(
+        "Media worker created for subscriber:",
+        this.subscriberId,
+        "media worker url:",
+        this.mediaWorkerUrl,
+        "with worker:",
+        this.worker
+      );
 
       this.worker.onmessage = (e) => this._handleWorkerMessage(e);
       this.worker.onerror = (error) => {
@@ -199,26 +238,159 @@ class Subscriber extends EventEmitter {
         });
       };
 
-      const workerHost = this.isScreenSharing
-        ? this.screenShareWorker
-        : this.userMediaWorker;
-
-      const mediaUrl = `wss://${workerHost}/meeting/${this.roomId}/${this.streamId}`;
-      console.log("try to init worker with url:", mediaUrl);
-
+      console.warn("Initializing worker for subscriber:", this.subscriberId, "protocol:", this.protocol);
       this.worker.postMessage(
         {
           type: "init",
-          data: { mediaUrl },
+          data: {
+            subscriberId: this.subscriberId,
+            subscribeType: SUBSCRIBE_TYPE.CAMERA,
+          },
           port: channelPort,
-          quality: "360p", // default quality
-          isShare: this.isScreenSharing,
         },
         [channelPort]
       );
+
+      if (this.protocol === "webtransport") {
+        const webTpUrl = `https://${this.host}/meeting/wt/subscribe/${this.roomId}/${this.streamId}`;
+        console.log("trying to connect to webtransport to subscribe :", webTpUrl);
+        const wt = new WebTransport(webTpUrl);
+        await wt.ready;
+
+        // video 360p
+        // const stream720p = await wt.createBidirectionalStream();
+        // this.worker.postMessage(
+        //   {
+        //     type: "attachStream",
+        //     channelName: "video_720p",
+        //     readable: stream720p.readable,
+        //     writable: stream720p.writable,
+        //   },
+        //   [stream720p.readable, stream720p.writable]
+        // );
+
+        // console.log("720p stream attached, preparing mic 48k stream");
+        const mediaStream = await wt.createBidirectionalStream();
+        this.worker.postMessage(
+          {
+            type: "attachStream",
+            channelName: "media",
+            readable: mediaStream.readable,
+            writable: mediaStream.writable,
+          },
+          [mediaStream.readable, mediaStream.writable]
+        );
+
+        // console.log("media stream attached, preparing mic 48k stream");
+
+        // // audio
+        // const streamAudio = await wt.createBidirectionalStream();
+        // console.log("mic 48k stream created, attaching to worker");
+        // this.worker.postMessage(
+        //   {
+        //     type: "attachStream",
+        //     channelName: "mic_48k",
+        //     readable: streamAudio.readable,
+        //     writable: streamAudio.writable,
+        //   },
+        //   [streamAudio.readable, streamAudio.writable]
+        // );
+      } else if (this.protocol === "webrtc") {
+        console.log("Using WebRTC for media transport");
+        try {
+          this.webRtc = new RTCPeerConnection();
+          const streamAudioChannel = await this.createWrtcDataChannel("mic_48k", this.webRtc);
+          console.log("Audio data channel created, id:", streamAudioChannel.id);
+          const stream360pChannel = await this.createWrtcDataChannel("cam_360p", this.webRtc);
+          console.log("360p data channel created, id:", stream360pChannel.id);
+          const stream720pChannel = await this.createWrtcDataChannel("cam_720p", this.webRtc);
+          console.log("cam_720p data channel created, id:", stream720pChannel.id);
+
+          this.worker.postMessage(
+            {
+              type: "attachDataChannel",
+              channelName: "mic_48k",
+              dataChannel: streamAudioChannel,
+            },
+            [streamAudioChannel]
+          );
+          // this.worker.postMessage(
+          //   {
+          //     type: "attachDataChannel",
+          //     channelName: "cam_360p",
+          //     dataChannel: stream360pChannel,
+          //   },
+          //   [stream360pChannel]
+          // );
+
+          this.worker.postMessage(
+            {
+              type: "attachDataChannel",
+              channelName: "cam_720p",
+              dataChannel: stream720pChannel,
+            },
+            [stream720pChannel]
+          );
+
+          // Create and send offer
+          const offer = await this.webRtc.createOffer();
+
+          await this.webRtc.setLocalDescription(offer);
+
+          console.log("[WebRTC subscriber] Created offer, sending to server... offer:", offer);
+
+          const response = await fetch(
+            `https://${this.host}/meeting/sdp/answer`,
+            // `https://admin.bandia.vn:9995/meeting/sdp/answer`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                offer,
+                room_id: this.roomId,
+                stream_id: this.streamId,
+                action: "subscribe",
+              }),
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(`Server responded with ${response.status}`);
+          }
+
+          const answer = await response.json();
+          await this.webRtc.setRemoteDescription(answer);
+
+          console.log("[WebRTC] Data channels attached to worker");
+        } catch (error) {
+          console.error("[WebRTC] Setup error:", error);
+          self.postMessage({
+            type: "error",
+            message: `WebRTC setup failed: ${error.message}`,
+          });
+        }
+      } else if (this.protocol === "websocket") {
+        this.worker.postMessage({
+          type: "attachWebSocket",
+          wsUrl: `wss://${this.host}/meeting/${this.roomId}/${this.streamId}`,
+        });
+      }
     } catch (error) {
-      throw new Error(`Worker initialization failed: ${error.message}`);
+      // this._status(`worker initialization failed: ${error.message}`, true);
+      throw error;
     }
+  }
+
+  async createWrtcDataChannel(channelName, webRtcConnection) {
+    const id = getDataChannelId(channelName);
+
+    const dataChannel = webRtcConnection.createDataChannel(channelName, {
+      ordered: false,
+      id,
+      negotiated: true,
+    });
+
+    return dataChannel;
   }
 
   switchBitrate(quality) {
@@ -247,10 +419,6 @@ class Subscriber extends EventEmitter {
 
       // Audio mixer should be set externally before starting
       if (this.audioMixer) {
-        console.warn(
-          "Adding subscriber to audio mixer in new subscriber:",
-          this.subscriberId
-        );
         this.audioWorkletNode = await this.audioMixer.addSubscriber(
           this.subscriberId,
           this.audioWorkletUrl,
@@ -288,9 +456,7 @@ class Subscriber extends EventEmitter {
           kind: "video",
         });
       } else {
-        throw new Error(
-          "MediaStreamTrackGenerator not supported in this browser"
-        );
+        throw new Error("MediaStreamTrackGenerator not supported in this browser");
       }
 
       this.videoWriter = this.videoGenerator.writable;
@@ -298,11 +464,21 @@ class Subscriber extends EventEmitter {
       // Create MediaStream with video track only
       this.mediaStream = new MediaStream([this.videoGenerator]);
 
-      // Set video element source
-      if (this.videoElement) {
-        this.videoElement.srcObject = this.mediaStream;
-      }
+      console.log("🎥 Video system initialized, emitting remoteStreamReady:", {
+        streamId: this.streamId,
+        subscriberId: this.subscriberId,
+        isScreenSharing: this.isScreenSharing,
+        hasStream: !!this.mediaStream,
+      });
 
+      // Emit remote stream ready event for app integration
+      this.emit("remoteStreamReady", {
+        stream: this.mediaStream,
+        streamId: this.streamId,
+        subscriberId: this.subscriberId,
+        roomId: this.roomId,
+        isOwnStream: this.isOwnStream,
+      });
       this.emit("videoInitialized", { subscriber: this });
     } catch (error) {
       throw new Error(`Video system initialization failed: ${error.message}`);

@@ -19,7 +19,7 @@ class Subscriber extends EventEmitter {
     this.protocol = config.protocol || "websocket"; // 'websocket', 'webtransport', 'webrtc'
 
     // Media configuration
-    this.mediaWorkerUrl = config.mediaWorkerUrl || "/workers/media-worker-ws.js";
+    this.mediaWorkerUrl = config.mediaWorkerUrl || "/workers/media-worker-dev.js";
     this.audioWorkletUrl = config.audioWorkletUrl || "/workers/audio-worklet1.js";
     this.mstgPolyfillUrl = config.mstgPolyfillUrl || "/polyfills/MSTG_polyfill.js";
     this.subcribeUrl = config.subcribeUrl;
@@ -258,30 +258,30 @@ class Subscriber extends EventEmitter {
         await wt.ready;
 
         // video 360p
-        const stream720p = await wt.createBidirectionalStream();
-        this.worker.postMessage(
-          {
-            type: "attachStream",
-            channelName: "cam_720p",
-            readable: stream720p.readable,
-            writable: stream720p.writable,
-          },
-          [stream720p.readable, stream720p.writable]
-        );
-
-        console.log("720p stream attached, preparing mic 48k stream");
-        // const stream360p = await wt.createBidirectionalStream();
+        // const stream720p = await wt.createBidirectionalStream();
         // this.worker.postMessage(
         //   {
         //     type: "attachStream",
-        //     channelName: "cam_360p",
-        //     readable: stream360p.readable,
-        //     writable: stream360p.writable,
+        //     channelName: "video_720p",
+        //     readable: stream720p.readable,
+        //     writable: stream720p.writable,
         //   },
-        //   [stream360p.readable, stream360p.writable]
+        //   [stream720p.readable, stream720p.writable]
         // );
 
-        // console.log("360p stream attached, preparing mic 48k stream");
+        // console.log("720p stream attached, preparing mic 48k stream");
+        const stream360p = await wt.createBidirectionalStream();
+        this.worker.postMessage(
+          {
+            type: "attachStream",
+            channelName: "video_360p",
+            readable: stream360p.readable,
+            writable: stream360p.writable,
+          },
+          [stream360p.readable, stream360p.writable]
+        );
+
+        console.log("360p stream attached, preparing mic 48k stream");
 
         // audio
         const streamAudio = await wt.createBidirectionalStream();
@@ -419,7 +419,6 @@ class Subscriber extends EventEmitter {
 
       // Audio mixer should be set externally before starting
       if (this.audioMixer) {
-        console.warn("Adding subscriber to audio mixer in new subscriber:", this.subscriberId);
         this.audioWorkletNode = await this.audioMixer.addSubscriber(
           this.subscriberId,
           this.audioWorkletUrl,

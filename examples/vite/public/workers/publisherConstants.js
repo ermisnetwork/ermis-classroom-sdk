@@ -3,7 +3,7 @@ const SUBSCRIBE_TYPE = {
   SCREEN: "screen",
 };
 
-const CLIENT_REQUESTS = {
+const CLIENT_COMMANDS = {
   INIT_STREAM: "init_channel_stream",
   STOP_STREAM: "stop_stream",
   START_STREAM: "start_stream",
@@ -173,7 +173,7 @@ const SUB_STREAMS = {
 
 export {
   SUBSCRIBE_TYPE,
-  CLIENT_REQUESTS,
+  CLIENT_COMMANDS,
   FRAME_TYPE,
   getFrameType,
   getTransportPacketType,

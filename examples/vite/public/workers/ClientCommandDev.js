@@ -23,7 +23,7 @@ class CommandSender {
     }
   }
 
-  async _sendSubscriberCommand(channelName, type, data = null) {
+  async _sendSubscriberCommand(type, data = null) {
     const command = { type };
     if (data !== null) {
       command.data = data;
@@ -31,10 +31,11 @@ class CommandSender {
 
     const json = JSON.stringify(command);
     if (this.protocol === "webtransport") {
+      console.warn("[Client Command]Sending subscriber command via WebTransport:", "command:", command);
       const bytes = new TextEncoder().encode(json);
-      await this.sendData(channelName, bytes);
+      await this.sendData(bytes);
     } else {
-      await this.sendData(channelName, json);
+      await this.sendData(json);
     }
   }
 
@@ -71,9 +72,9 @@ class CommandSender {
   //                       },
   /*  Subscriber command methods  */
 
-  async initSubscribeChannelStream(channelName) {
-    await this._sendSubscriberCommand(channelName, "init_channel_stream", {
-      channel: channelName,
+  async initSubscribeChannelStream() {
+    await this._sendSubscriberCommand("init_channel_stream", {
+      channel: "media",
       stream_type: "camera",
       audio: true,
       video: true,
@@ -81,20 +82,20 @@ class CommandSender {
     });
   }
 
-  async startStream(channelName) {
-    await this._sendSubscriberCommand(channelName, CLIENT_COMMANDS.START_STREAM);
+  async startStream() {
+    await this._sendSubscriberCommand(CLIENT_COMMANDS.START_STREAM);
   }
 
-  async stopStream(channelName) {
-    await this._sendSubscriberCommand(channelName, CLIENT_COMMANDS.STOP_STREAM);
+  async stopStream() {
+    await this._sendSubscriberCommand(CLIENT_COMMANDS.STOP_STREAM);
   }
 
-  async pauseStream(channelName) {
-    await this._sendSubscriberCommand(channelName, CLIENT_COMMANDS.PAUSE_STREAM);
+  async pauseStream() {
+    await this._sendSubscriberCommand(CLIENT_COMMANDS.PAUSE_STREAM);
   }
 
-  async resumeStream(channelName) {
-    await this._sendSubscriberCommand(channelName, CLIENT_COMMANDS.RESUME_STREAM);
+  async resumeStream() {
+    await this._sendSubscriberCommand(CLIENT_COMMANDS.RESUME_STREAM);
   }
 }
 
