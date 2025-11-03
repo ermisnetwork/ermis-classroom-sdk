@@ -1,13 +1,13 @@
 import EventEmitter from "../events/EventEmitter.js";
 import {
-  CLIENT_COMMANDS,
   FRAME_TYPE,
   getFrameType,
   getTransportPacketType,
   CHANNEL_NAME,
   getDataChannelId,
   PUBLISH_TYPE,
-  SUB_STREAMS,
+  STREAM_TYPE,
+  getSubStreams,
 } from "../constant/publisherConstants.js";
 
 import CommandSender from "./ClientCommand.js";
@@ -27,7 +27,7 @@ class Publisher extends EventEmitter {
 
     // Configuration
     this.publishUrl = options.publishUrl;
-    this.publishType = options.type || "camera"; // 'camera' or 'screenshare'
+    this.publishType = options.publishType || STREAM_TYPE.CAMERA; // 'camera' or 'screenshare'
     this.streamId = options.streamId || "test_stream";
     this.roomId = options.roomId || "test_room";
     this.preConfiguredStream = options.mediaStream || null;
@@ -87,7 +87,7 @@ class Publisher extends EventEmitter {
     this.sequenceNumbers = {};
     this.dcMsgQueues = {};
     this.dcPacketSendTime = {};
-    this.subStreams = this.getSubStreams();
+    this.subStreams = getSubStreams(this.publishType);
 
     // command sender
     // this.commandSender = null;
@@ -112,7 +112,7 @@ class Publisher extends EventEmitter {
   }
 
   getDefaultConfig(type, options) {
-    if (type === "screenshare") {
+    if (type === STREAM_TYPE.SCREENSHARE) {
       return {
         codec: "avc1.640c34",
         width: options.width || 1920,
@@ -128,15 +128,6 @@ class Publisher extends EventEmitter {
         framerate: options.framerate || 30,
         bitrate: options.bitrate || 800_000,
       };
-    }
-  }
-
-  getSubStreams() {
-    if (this.publishType === "screenshare") {
-      return [SUB_STREAMS.AUDIO, SUB_STREAMS.VIDEO_720P, SUB_STREAMS.VIDEO_1080P];
-    } else {
-      // camera
-      return [SUB_STREAMS.MEETING_CONTROL, SUB_STREAMS.AUDIO, SUB_STREAMS.VIDEO_360P, SUB_STREAMS.VIDEO_720P];
     }
   }
 

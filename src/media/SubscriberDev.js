@@ -1,5 +1,5 @@
 import EventEmitter from "../events/EventEmitter.js";
-import { getDataChannelId, SUBSCRIBE_TYPE } from "../constant/publisherConstants.js";
+import { getDataChannelId, STREAM_TYPE } from "../constant/publisherConstants.js";
 
 /**
  * Enhanced Subscriber class for receiving media streams
@@ -17,6 +17,7 @@ class Subscriber extends EventEmitter {
     this.screenShareWorker = config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev";
     this.isOwnStream = config.isOwnStream || false;
     this.protocol = config.protocol || "websocket"; // 'websocket', 'webtransport', 'webrtc'
+    this.subscribeType = config.subscribeType || STREAM_TYPE.CAMERA; // 'camera' or 'screenshare'
 
     // Media configuration
     this.mediaWorkerUrl = config.mediaWorkerUrl || "/workers/media-worker-dev.js";
@@ -244,7 +245,7 @@ class Subscriber extends EventEmitter {
           type: "init",
           data: {
             subscriberId: this.subscriberId,
-            subscribeType: SUBSCRIBE_TYPE.CAMERA,
+            subscribeType: this.subscribeType,
           },
           port: channelPort,
         },
@@ -257,44 +258,21 @@ class Subscriber extends EventEmitter {
         const wt = new WebTransport(webTpUrl);
         await wt.ready;
 
-        // video 360p
-        // const stream720p = await wt.createBidirectionalStream();
-        // this.worker.postMessage(
-        //   {
-        //     type: "attachStream",
-        //     channelName: "video_720p",
-        //     readable: stream720p.readable,
-        //     writable: stream720p.writable,
-        //   },
-        //   [stream720p.readable, stream720p.writable]
-        // );
-
         // console.log("720p stream attached, preparing mic 48k stream");
         const mediaStream = await wt.createBidirectionalStream();
         this.worker.postMessage(
           {
             type: "attachStream",
-            channelName: "media",
             readable: mediaStream.readable,
             writable: mediaStream.writable,
           },
           [mediaStream.readable, mediaStream.writable]
         );
-
-        // console.log("media stream attached, preparing mic 48k stream");
-
-        // // audio
-        // const streamAudio = await wt.createBidirectionalStream();
-        // console.log("mic 48k stream created, attaching to worker");
-        // this.worker.postMessage(
-        //   {
-        //     type: "attachStream",
-        //     channelName: "mic_48k",
-        //     readable: streamAudio.readable,
-        //     writable: streamAudio.writable,
-        //   },
-        //   [streamAudio.readable, streamAudio.writable]
-        // );
+      } else if (this.protocol === "websocket") {
+        this.worker.postMessage({
+          type: "attachWebSocket",
+          wsUrl: `wss://${this.host}/meeting/${this.roomId}/${this.streamId}`,
+        });
       } else if (this.protocol === "webrtc") {
         console.log("Using WebRTC for media transport");
         try {
@@ -314,14 +292,6 @@ class Subscriber extends EventEmitter {
             },
             [streamAudioChannel]
           );
-          // this.worker.postMessage(
-          //   {
-          //     type: "attachDataChannel",
-          //     channelName: "cam_360p",
-          //     dataChannel: stream360pChannel,
-          //   },
-          //   [stream360pChannel]
-          // );
 
           this.worker.postMessage(
             {
@@ -339,20 +309,16 @@ class Subscriber extends EventEmitter {
 
           console.log("[WebRTC subscriber] Created offer, sending to server... offer:", offer);
 
-          const response = await fetch(
-            `https://${this.host}/meeting/sdp/answer`,
-            // `https://admin.bandia.vn:9995/meeting/sdp/answer`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                offer,
-                room_id: this.roomId,
-                stream_id: this.streamId,
-                action: "subscribe",
-              }),
-            }
-          );
+          const response = await fetch(`https://${this.host}/meeting/sdp/answer`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              offer,
+              room_id: this.roomId,
+              stream_id: this.streamId,
+              action: "subscribe",
+            }),
+          });
 
           if (!response.ok) {
             throw new Error(`Server responded with ${response.status}`);
@@ -369,11 +335,6 @@ class Subscriber extends EventEmitter {
             message: `WebRTC setup failed: ${error.message}`,
           });
         }
-      } else if (this.protocol === "websocket") {
-        this.worker.postMessage({
-          type: "attachWebSocket",
-          wsUrl: `wss://${this.host}/meeting/${this.roomId}/${this.streamId}`,
-        });
       }
     } catch (error) {
       // this._status(`worker initialization failed: ${error.message}`, true);

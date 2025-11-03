@@ -1,6 +1,6 @@
-const SUBSCRIBE_TYPE = {
+const STREAM_TYPE = {
   CAMERA: "camera",
-  SCREEN: "screen",
+  SCREENSHARE: "screen_share",
 };
 
 const CLIENT_COMMANDS = {
@@ -172,7 +172,7 @@ const SUB_STREAMS = {
 };
 
 export {
-  SUBSCRIBE_TYPE,
+  STREAM_TYPE,
   CLIENT_COMMANDS,
   FRAME_TYPE,
   getFrameType,

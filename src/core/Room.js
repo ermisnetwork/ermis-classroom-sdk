@@ -7,6 +7,17 @@ import Subscriber from "../media/SubscriberDev.js";
 import AudioMixer from "../media/AudioMixer.js";
 import { determineTransport, logTransportInfo } from "../utils/browserDetection.js";
 
+import {
+  FRAME_TYPE,
+  getFrameType,
+  getTransportPacketType,
+  CHANNEL_NAME,
+  getDataChannelId,
+  PUBLISH_TYPE,
+  STREAM_TYPE,
+  getSubStreams,
+} from "../constant/publisherConstants.js";
+
 /**
  * Represents a meeting room
  */
@@ -783,7 +794,7 @@ class Room extends EventEmitter {
 
     const publisher = new Publisher({
       publishUrl,
-      publishType: "camera",
+      publishType: STREAM_TYPE.CAMERA,
       streamId: this.streamId,
       userId: this.localParticipant.userId, // Pass userId for screen share tile mapping
       mediaStream: mediaStream,
@@ -833,6 +844,7 @@ class Room extends EventEmitter {
       host: this.mediaConfig.hostNode,
       streamOutputEnabled: true,
       protocol: this.mediaConfig.subscribeProtocol,
+      subscribeType: STREAM_TYPE.CAMERA,
 
       onStatus: (msg, isError) => {
         participant.setConnectionStatus(isError ? "failed" : "connected");
@@ -853,14 +865,6 @@ class Room extends EventEmitter {
         roomId: this.id,
       });
     });
-
-    // subscriber.on("streamRemoved", (data) => {
-    //   this.emit("streamRemoved", {
-    //     ...data,
-    //     participant: participant.getInfo(),
-    //     roomId: this.id
-    //   });
-    // });
 
     await subscriber.start();
     participant.setSubscriber(subscriber);
@@ -892,7 +896,7 @@ class Room extends EventEmitter {
       // todo: change logic screenshare, init new publisher with share screen type
       this.localParticipant.publisher = new Publisher({
         // ...this.localParticipant.publisher,
-        publishType: "screenshare",
+        publishType: STREAM_TYPE.SCREENSHARE,
         mediaStream: screenStream,
       });
 

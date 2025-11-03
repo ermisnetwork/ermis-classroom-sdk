@@ -35,6 +35,7 @@ class CommandSender {
       const bytes = new TextEncoder().encode(json);
       await this.sendData(bytes);
     } else {
+      console.warn("[Client Command]Sending subscriber command via WebSocket:", "command:", command);
       await this.sendData(json);
     }
   }
@@ -63,19 +64,9 @@ class CommandSender {
     await this._sendPublisherCommand(channelName, "media_config", config);
   }
 
-  // SubscriberCommand::InitChannelStream {
-  //                           channel,
-  //                           stream_type,
-  //                           audio,
-  //                           video,
-  //                           quality,
-  //                       },
-  /*  Subscriber command methods  */
-
-  async initSubscribeChannelStream() {
+  async initSubscribeChannelStream(subscriberType) {
     await this._sendSubscriberCommand("init_channel_stream", {
-      channel: "media",
-      stream_type: "camera",
+      stream_type: subscriberType,
       audio: true,
       video: true,
       quality: CHANNEL_NAME.VIDEO_720P,

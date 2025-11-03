@@ -1,6 +1,6 @@
-const SUBSCRIBE_TYPE = {
+const STREAM_TYPE = {
   CAMERA: "camera",
-  SCREEN: "screen",
+  SCREENSHARE: "screen_share",
 };
 
 const CLIENT_COMMANDS = {
@@ -20,9 +20,12 @@ const FRAME_TYPE = {
   CAM_360P_DELTA: 1,
   CAM_720P_KEY: 2,
   CAM_720P_DELTA: 3,
-  CAM_1080P_KEY: 4,
-  CAM_1080P_DELTA: 5,
-  AUDIO: 6,
+  MIC_AUDIO: 6,
+  SS_720P_KEY: 4,
+  SS_720P_DELTA: 5,
+  SS_1080P_KEY: 7,
+  SS_1080P_DELTA: 8,
+  SS_AUDIO: 9,
   CONFIG: 0xfd,
   EVENT: 0xfe,
   PING: 0xff,
@@ -48,8 +51,10 @@ function getFrameType(channelName, chunkType) {
       return chunkType === "key" ? FRAME_TYPE.CAM_360P_KEY : FRAME_TYPE.CAM_360P_DELTA;
     case CHANNEL_NAME.VIDEO_720P:
       return chunkType === "key" ? FRAME_TYPE.CAM_720P_KEY : FRAME_TYPE.CAM_720P_DELTA;
-    case CHANNEL_NAME.VIDEO_1080P:
-      return chunkType === "key" ? FRAME_TYPE.CAM_1080P_KEY : FRAME_TYPE.CAM_1080P_DELTA;
+    case CHANNEL_NAME.SCREEN_SHARE_720P:
+      return chunkType === "key" ? FRAME_TYPE.SS_720P_KEY : FRAME_TYPE.SS_720P_DELTA;
+    case CHANNEL_NAME.SCREEN_SHARE_1080P:
+      return chunkType === "key" ? FRAME_TYPE.SS_1080P_KEY : FRAME_TYPE.SS_1080P_DELTA;
     default:
       return FRAME_TYPE.CAM_720P_KEY;
   }
@@ -76,10 +81,12 @@ function getTransportPacketType(frameType) {
  */
 const CHANNEL_NAME = {
   MEETING_CONTROL: "meeting_control",
-  AUDIO: "mic_48k",
+  MIC_AUDIO: "mic_48k",
   VIDEO_360P: "video_360p",
   VIDEO_720P: "video_720p",
-  VIDEO_1080P: "video_1080p",
+  SCREEN_SHARE_720P: "screen_share_720p",
+  SCREEN_SHARE_1080P: "screen_share_1080p",
+  SCREEN_SHARE_AUDIO: "screen_share_audio",
 };
 
 /**
@@ -89,15 +96,14 @@ function getDataChannelId(channelName, type = "camera") {
   const mapping = {
     camera: {
       [CHANNEL_NAME.MEETING_CONTROL]: 0,
-      [CHANNEL_NAME.AUDIO]: 1,
+      [CHANNEL_NAME.MIC_AUDIO]: 1,
       [CHANNEL_NAME.VIDEO_360P]: 2,
       [CHANNEL_NAME.VIDEO_720P]: 3,
-      [CHANNEL_NAME.VIDEO_1080P]: 4,
     },
     screenShare: {
-      [CHANNEL_NAME.AUDIO]: 0,
-      [CHANNEL_NAME.VIDEO_720P]: 1,
-      [CHANNEL_NAME.VIDEO_1080P]: 2,
+      [CHANNEL_NAME.SCREEN_SHARE_AUDIO]: 0,
+      [CHANNEL_NAME.SCREEN_SHARE_720P]: 1,
+      [CHANNEL_NAME.SCREEN_SHARE_1080P]: 2,
     },
   };
 
@@ -109,41 +115,14 @@ const PUBLISH_TYPE = {
   SCREEN: "publish_screen",
 };
 
-[
-  {
-    name: "meeting_control",
-    channelName: CHANNEL_NAME.MEETING_CONTROL,
-  },
-  {
-    name: "audio",
-    channelName: CHANNEL_NAME.AUDIO,
-  },
-  {
-    name: "video_360p",
-    width: 640,
-    height: 360,
-    bitrate: 400_000,
-    framerate: 30,
-    channelName: CHANNEL_NAME.VIDEO_360P,
-  },
-  {
-    name: "video_720p",
-    width: 1280,
-    height: 720,
-    bitrate: 800_000,
-    framerate: 30,
-    channelName: CHANNEL_NAME.VIDEO_720P,
-  },
-];
-
 const SUB_STREAMS = {
   MEETING_CONTROL: {
     name: "meeting_control",
     channelName: CHANNEL_NAME.MEETING_CONTROL,
   },
-  AUDIO: {
-    name: "audio",
-    channelName: CHANNEL_NAME.AUDIO,
+  MIC_AUDIO: {
+    name: "mic_audio",
+    channelName: CHANNEL_NAME.MIC_AUDIO,
   },
   VIDEO_360P: {
     name: "video_360p",
@@ -161,18 +140,40 @@ const SUB_STREAMS = {
     framerate: 30,
     channelName: CHANNEL_NAME.VIDEO_720P,
   },
-  VIDEO_1080P: {
-    name: "video_1080p",
+  SCREEN_SHARE_AUDIO: {
+    name: "screen_share_audio",
+    channelName: CHANNEL_NAME.SCREEN_SHARE_AUDIO,
+  },
+  SCREEN_SHARE_720P: {
+    name: "screen_share_720p",
+    width: 1280,
+    height: 720,
+    bitrate: 1_000_000,
+    framerate: 15,
+    channelName: CHANNEL_NAME.SCREEN_SHARE_720P,
+  },
+  SCREEN_SHARE_1080P: {
+    name: "screen_share_1080p",
     width: 1920,
     height: 1080,
     bitrate: 1_500_000,
-    framerate: 30,
-    channelName: CHANNEL_NAME.VIDEO_1080P,
+    framerate: 15,
+    channelName: CHANNEL_NAME.SCREEN_SHARE_1080P,
   },
 };
 
+function getSubStreams(publisherType) {
+  if (publisherType === STREAM_TYPE.SCREENSHARE) {
+    return [SUB_STREAMS.SCREEN_SHARE_AUDIO, SUB_STREAMS.SCREEN_SHARE_720P, SUB_STREAMS.SCREEN_SHARE_1080P];
+  } else if (publisherType === STREAM_TYPE.CAMERA) {
+    return [SUB_STREAMS.MIC_AUDIO, SUB_STREAMS.VIDEO_360P, SUB_STREAMS.VIDEO_720P];
+  } else {
+    return new Error("Invalid publisher type");
+  }
+}
+
 export {
-  SUBSCRIBE_TYPE,
+  STREAM_TYPE,
   CLIENT_COMMANDS,
   FRAME_TYPE,
   getFrameType,
@@ -181,4 +182,5 @@ export {
   getDataChannelId,
   PUBLISH_TYPE,
   SUB_STREAMS,
+  getSubStreams,
 };

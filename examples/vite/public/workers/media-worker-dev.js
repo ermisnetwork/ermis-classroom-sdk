@@ -1,12 +1,12 @@
 import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
-import { CHANNEL_NAME, SUBSCRIBE_TYPE } from "./publisherConstants.js";
+import { CHANNEL_NAME, STREAM_TYPE } from "./publisherConstants.js";
 // import { CHANNEL_NAME, SUBSCRIBE_TYPE } from new URL("./publisherConstants.js", import.meta.url);
 
 import CommandSender from "./ClientCommandDev.js";
 
-let subscribeType = SUBSCRIBE_TYPE.CAMERA;
+let subscribeType = STREAM_TYPE.CAMERA;
 
 let currentVideoChannel = CHANNEL_NAME.VIDEO_360P;
 
@@ -107,7 +107,7 @@ self.onmessage = async function (e) {
       await initializeDecoders();
       console.log("received worker port", port);
       if (port instanceof MessagePort) workletPort = port;
-      subscribeType = incomingSubscribeType || SUBSCRIBE_TYPE.CAMERA;
+      subscribeType = incomingSubscribeType || STREAM_TYPE.CAMERA;
       break;
 
     case "attachWebSocket":
@@ -174,7 +174,7 @@ function attachWebSocket(wsUrl) {
   ws.onopen = () => {
     console.log(`[WebSocket] Connected!`);
 
-    commandSender.initSubscribeChannelStream();
+    commandSender.initSubscribeChannelStream(subscribeType);
 
     commandSender.startStream();
     console.log(`[WebSocket] Sent subscribe message!`);
@@ -189,16 +189,18 @@ function attachWebSocket(wsUrl) {
   };
 
   ws.onmessage = (event) => {
-    processIncomingMessage(channelName, event.data);
+    processIncomingMessage(event.data);
   };
 }
 
 /// Send data over websocket, dont need to add length prefix
-async function sendOverWebSocket(channelName, data) {
+async function sendOverWebSocket(data) {
   if (!webSocketConnection || webSocketConnection.readyState !== WebSocket.OPEN) {
-    console.error(`WebSocket ${channelName} not found`);
+    console.error(`WebSocket not found`);
     return;
   }
+
+  console.warn(`[WebSocket] Sending data ${data}`);
   await webSocketConnection.send(data);
 }
 
@@ -303,53 +305,6 @@ function parseWebRTCPacket(packet) {
   };
 }
 
-// function handleStreamConfig(channelName, cfg) {
-//   const desc = base64ToUint8Array(cfg.description);
-
-//   if (channelName.startsWith("video_")) {
-//     const videoConfig = {
-//       codec: cfg.codec,
-//       codedWidth: cfg.codedWidth,
-//       codedHeight: cfg.codedHeight,
-//       frameRate: cfg.frameRate,
-//       description: desc,
-//     };
-
-//     videoConfigs.set(channelName, videoConfig);
-
-//     configureVideoDecoders(channelName);
-//   } else if (channelName.startsWith("mic_")) {
-//     audioConfig = {
-//       codec: cfg.codec,
-//       sampleRate: cfg.sampleRate,
-//       numberOfChannels: cfg.numberOfChannels,
-//       description: desc,
-//     };
-
-//     if (audioDecoder) audioDecoder.configure(audioConfig);
-
-//     try {
-//       // const dataView = new DataView(desc.buffer);
-//       // const timestamp = dataView.getUint32(0, false);
-//       // const data = desc.slice(5);
-
-//       // for debugging
-//       const dataView = new DataView(desc.buffer);
-//       const timestamp = dataView.getUint32(4, false);
-//       const data = desc.slice(9);
-
-//       const chunk = new EncodedAudioChunk({
-//         timestamp: timestamp * 1000,
-//         type: "key",
-//         data,
-//       });
-//       audioDecoder.decode(chunk);
-//     } catch (error) {
-//       console.log("Error decoding first audio frame:", error);
-//     }
-//   }
-// }
-
 function handleStreamConfigs(json) {
   if (json.type !== "DecoderConfigs") return;
 
@@ -436,7 +391,7 @@ async function attachWebTransportStream(readable, writable) {
   webTPStreamReader = readable.getReader();
   webTPStreamWriter = writable.getWriter();
 
-  commandSender.initSubscribeChannelStream();
+  commandSender.initSubscribeChannelStream(subscribeType);
 
   console.log(`Attached WebTransport stream`);
 
@@ -509,11 +464,12 @@ async function processIncomingMessage(message) {
     handleBinaryPacket(message.buffer);
   }
 }
-let videoCounterTest = 0;
-setInterval(() => {
-  console.log("Receive frame rate:", videoCounterTest / 5);
-  videoCounterTest = 0;
-}, 5000);
+
+// let videoCounterTest = 0;
+// setInterval(() => {
+//   console.log("Receive frame rate:", videoCounterTest / 5);
+//   videoCounterTest = 0;
+// }, 5000);
 
 function handleBinaryPacket(dataBuffer) {
   // const dataView = new DataView(dataBuffer);
@@ -556,7 +512,7 @@ function handleBinaryPacket(dataBuffer) {
     // if (last_720p_frame_sequence === sequenceNumber) {
     //   return;
     // }
-    videoCounterTest++;
+    // videoCounterTest++;
     // last_720p_frame_sequence = sequenceNumber;
     // console.log(
     //   `Received video frame - Seq: ${sequenceNumber}, size: ${data.byteLength} bytes`
@@ -627,13 +583,13 @@ function handleBinaryPacket(dataBuffer) {
 async function initializeDecoders() {
   console.log("Initializing camera decoders for subscribe type:", subscribeType);
   switch (subscribeType) {
-    case SUBSCRIBE_TYPE.CAMERA:
+    case STREAM_TYPE.CAMERA:
       mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P)));
       mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
       mediaDecoders.set(CHANNEL_NAME.AUDIO, new OpusAudioDecoder(audioInit));
       break;
 
-    case SUBSCRIBE_TYPE.SCREEN:
+    case STREAM_TYPE.SCREEN:
       mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
       mediaDecoders.set(CHANNEL_NAME.VIDEO_1080P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P)));
       mediaDecoders.set(CHANNEL_NAME.AUDIO, new OpusAudioDecoder(audioInit));
