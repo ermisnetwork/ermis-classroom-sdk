@@ -483,6 +483,10 @@ function handleBinaryPacket(dataBuffer) {
   const data = dataBuffer.slice(9);
 
   if (frameType === 0 || frameType === 1) {
+    console.log(
+      `Received 360p video frame, seq: ${sequenceNumber}, timestamp: ${timestamp}, frameType: ${frameType}, data length: ${data.byteLength}`
+    );
+    return;
     let videoDecoder360p;
     const type = frameType === 0 ? "key" : "delta";
 
@@ -508,15 +512,6 @@ function handleBinaryPacket(dataBuffer) {
     }
     return;
   } else if (frameType === 2 || frameType === 3) {
-    // stats.record(sequenceNumber);
-    // if (last_720p_frame_sequence === sequenceNumber) {
-    //   return;
-    // }
-    // videoCounterTest++;
-    // last_720p_frame_sequence = sequenceNumber;
-    // console.log(
-    //   `Received video frame - Seq: ${sequenceNumber}, size: ${data.byteLength} bytes`
-    // );
     const type = frameType === 2 ? "key" : "delta";
     if (type === "key") {
       keyFrameReceived = true;
@@ -540,7 +535,7 @@ function handleBinaryPacket(dataBuffer) {
     return;
   } else if (frameType === 4 || frameType === 5) {
     let videoDecoder1080;
-    const type = frameType === 0 ? "key" : "delta";
+    const type = frameType === 4 ? "key" : "delta";
 
     if (type === "key") {
       keyFrameReceived = true;

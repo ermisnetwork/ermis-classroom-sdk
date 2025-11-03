@@ -108,8 +108,8 @@ class Publisher extends EventEmitter {
     // Initialize sequence tracking
     this.initializeSequenceTracking();
 
-    this.videoSentCountTest = 0;
-    this.intervalforStats();
+    // this.videoSentCountTest = 0;
+    // this.intervalforStats();
   }
 
   getDefaultConfig(type, options) {
@@ -141,13 +141,13 @@ class Publisher extends EventEmitter {
     });
   }
 
-  intervalforStats() {
-    setInterval(() => {
-      const fps = this.videoSentCountTest / 5;
-      console.log(`[${this.publishType}] Sending frame rate:`, fps);
-      this.videoSentCountTest = 0;
-    }, 5000);
-  }
+  // intervalforStats() {
+  //   setInterval(() => {
+  //     const fps = this.videoSentCountTest / 5;
+  //     console.log(`[${this.publishType}] Sending frame rate:`, fps);
+  //     this.videoSentCountTest = 0;
+  //   }, 5000);
+  // }
 
   async init() {
     await this.loadAllDependencies();
@@ -1124,7 +1124,7 @@ class Publisher extends EventEmitter {
       dataChannel.bufferedAmountLowThreshold = bufferAmounts.HIGH;
     } else if (channelName.includes("720p")) {
       dataChannel.bufferedAmountLowThreshold = bufferAmounts.MEDIUM;
-    } else if (channelName.includes("360p") || channelName === CHANNEL_NAME.AUDIO) {
+    } else if (channelName.includes("360p") || channelName === CHANNEL_NAME.MIC_AUDIO) {
       dataChannel.bufferedAmountLowThreshold = bufferAmounts.LOW;
     } else {
       dataChannel.bufferedAmountLowThreshold = bufferAmounts.MEDIUM;
@@ -1169,10 +1169,10 @@ class Publisher extends EventEmitter {
     const dataChannel = this.publishStreams.get(channelName)?.dataChannel;
 
     // Track video frames for stats
-    const videoChannels = this.subStreams.filter((s) => s.width).map((s) => s.channelName);
-    if (videoChannels.includes(channelName)) {
-      this.videoSentCountTest++;
-    }
+    // const videoChannels = this.subStreams.filter((s) => s.width).map((s) => s.channelName);
+    // if (videoChannels.includes(channelName)) {
+    //   this.videoSentCountTest++;
+    // }
 
     const dataChannelReady = this.publishStreams.get(channelName)?.dataChannelReady;
     if (!dataChannelReady || !dataChannel || dataChannel.readyState !== "open") {
@@ -1184,7 +1184,7 @@ class Publisher extends EventEmitter {
       const view = new DataView(packet.buffer);
       const sequenceNumber = view.getUint32(0, false);
 
-      const needFecEncode = frameType !== FRAME_TYPE.EVENT && frameType !== FRAME_TYPE.AUDIO;
+      const needFecEncode = frameType !== FRAME_TYPE.EVENT && frameType !== FRAME_TYPE.MIC_AUDIO;
       // const needFecEncode = frameType === FRAME_TYPE.VIDEO || frameType == FRAME_TYPE.CONFIG;
 
       const packetType = getTransportPacketType(frameType);
@@ -1375,7 +1375,7 @@ class Publisher extends EventEmitter {
 
     this.currentAudioStream = new MediaStream([audioTrack]);
     const audioRecorder = await this.initAudioRecorder(this.currentAudioStream, audioRecorderOptions);
-    audioRecorder.ondataavailable = (typedArray) => this.handleAudioChunk(typedArray, CHANNEL_NAME.AUDIO);
+    audioRecorder.ondataavailable = (typedArray) => this.handleAudioChunk(typedArray, CHANNEL_NAME.MIC_AUDIO);
 
     await audioRecorder.start({
       timeSlice: audioRecorderOptions.timeSlice,
@@ -1438,7 +1438,7 @@ class Publisher extends EventEmitter {
           const description = this.createPacketWithHeader(
             dataArray,
             performance.now() * 1000,
-            FRAME_TYPE.AUDIO,
+            FRAME_TYPE.MIC_AUDIO,
             channelName
           );
 
@@ -1465,9 +1465,9 @@ class Publisher extends EventEmitter {
 
         const timestamp = this.audioBaseTime + Math.floor((this.audioSamplesSent * 1000000) / this.kSampleRate);
         if (streamData.configSent) {
-          const packet = this.createPacketWithHeader(dataArray, timestamp, FRAME_TYPE.AUDIO, channelName);
+          const packet = this.createPacketWithHeader(dataArray, timestamp, FRAME_TYPE.MIC_AUDIO, channelName);
           if (this.protocol === "webrtc") {
-            this.sendOverDataChannel(channelName, packet, FRAME_TYPE.AUDIO);
+            this.sendOverDataChannel(channelName, packet, FRAME_TYPE.MIC_AUDIO);
           } else {
             this.sendOverStream(channelName, packet);
           }
@@ -1504,7 +1504,6 @@ class Publisher extends EventEmitter {
             description: vConfigBase64,
           },
         };
-        console.log(`[Stream Config] Sending ${mediaType} config for ${channelName}`, configPacket);
       } else if (mediaType === "audio") {
         const aConfigBase64 = this.uint8ArrayToBase64(new Uint8Array(config.description));
 
@@ -1520,6 +1519,7 @@ class Publisher extends EventEmitter {
           },
         };
       }
+      console.log(`[Stream Config] Sending ${mediaType} config for ${channelName}`, configPacket);
 
       this.commandSender.sendMediaConfig(channelName, JSON.stringify(configPacket));
       // const wrapper = { type: "media_config", data: JSON.stringify(configPacket) };
