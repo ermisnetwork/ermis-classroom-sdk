@@ -1,4 +1,4 @@
-import { FRAME_TYPE, CHANNEL_NAME, CLIENT_COMMANDS } from "./publisherConstants.js";
+import { FRAME_TYPE, CHANNEL_NAME, CLIENT_COMMANDS } from "../constant/publisherConstants.js";
 
 class CommandSender {
   constructor(config) {

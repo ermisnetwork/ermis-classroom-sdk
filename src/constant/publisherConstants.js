@@ -166,11 +166,46 @@ function getSubStreams(publisherType) {
   if (publisherType === STREAM_TYPE.SCREENSHARE) {
     return [SUB_STREAMS.SCREEN_SHARE_AUDIO, SUB_STREAMS.SCREEN_SHARE_720P, SUB_STREAMS.SCREEN_SHARE_1080P];
   } else if (publisherType === STREAM_TYPE.CAMERA) {
-    return [SUB_STREAMS.MIC_AUDIO, SUB_STREAMS.VIDEO_360P, SUB_STREAMS.VIDEO_720P];
+    return [SUB_STREAMS.MIC_AUDIO, SUB_STREAMS.VIDEO_360P, SUB_STREAMS.VIDEO_720P, SUB_STREAMS.MEETING_CONTROL];
   } else {
     return new Error("Invalid publisher type");
   }
 }
+
+const MEETING_EVENTS = {
+  // --- Tham gia / Rời phòng ---
+  USER_JOINED: "join", // Khi người dùng vào phòng
+  USER_LEFT: "leave", // Khi người dùng rời phòng
+
+  // --- Mic & Camera ---
+  MIC_ON: "mic_on", // Khi bật mic
+  MIC_OFF: "mic_off", // Khi tắt mic
+  CAMERA_ON: "camera_on", // Khi bật camera
+  CAMERA_OFF: "camera_off", // Khi tắt camera
+  TOGGLE_AUDIO: "toggle_audio", // Trường hợp gom bật/tắt mic thành một event (backend hợp nhất)
+  TOGGLE_VIDEO: "toggle_video", // Trường hợp gom bật/tắt camera thành một event (backend hợp nhất)
+
+  // --- Tương tác người dùng ---
+  RAISE_HAND: "raise_hand", // Khi giơ tay
+  LOWER_HAND: "lower_hand", // Khi hạ tay
+  PIN_FOR_EVERYONE: "pin_for_everyone", // Khi ghim người nào đó cho tất cả
+  UNPIN_FOR_EVERYONE: "unpin_for_everyone", // Khi bỏ ghim cho tất cả
+
+  // --- Chia sẻ màn hình ---
+  REQUEST_SHARE_SCREEN: "request_share_screen", // Khi người dùng yêu cầu chia sẻ màn hình
+  START_SCREEN_SHARE: "start_share_screen", // Khi bắt đầu chia sẻ màn hình
+  STOP_SCREEN_SHARE: "stop_share_screen", // Khi dừng chia sẻ màn hình
+
+  // --- Breakout room ---
+  BREAKOUT_ROOM: "break_out_room", // Khi tạo breakout room
+  CLOSE_BREAKOUT_ROOM: "close_breakout_room", // Khi đóng breakout room
+  JOIN_SUB_ROOM: "join_sub_room", // Khi người dùng vào breakout room con
+  LEAVE_SUB_ROOM: "leave_sub_room", // Khi người dùng rời breakout room con
+
+  // --- Phòng điều khiển / quản trị (tuỳ chọn mở rộng) ---
+  SYSTEM_MESSAGE: "system_message", // Thông báo hệ thống / admin gửi
+  MEETING_ENDED: "meeting_ended", // Khi host kết thúc phòng
+};
 
 export {
   STREAM_TYPE,
@@ -183,4 +218,5 @@ export {
   PUBLISH_TYPE,
   SUB_STREAMS,
   getSubStreams,
+  MEETING_EVENTS,
 };

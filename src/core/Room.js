@@ -16,6 +16,7 @@ import {
   PUBLISH_TYPE,
   STREAM_TYPE,
   getSubStreams,
+  MEETING_EVENTS,
 } from "../constant/publisherConstants.js";
 
 /**
@@ -884,7 +885,7 @@ class Room extends EventEmitter {
 
     try {
       this.emit("screenShareStarting", { room: this });
-
+      this.localParticipant.publisher.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE);
       // Get display media
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: { width: 1920, height: 1080 },
@@ -894,13 +895,21 @@ class Room extends EventEmitter {
       // Start screen share through publisher first
       // await this.localParticipant.publisher.startShareScreen(screenStream);
       // todo: change logic screenshare, init new publisher with share screen type
-      this.localParticipant.publisher = new Publisher({
-        // ...this.localParticipant.publisher,
+      const publishUrl = `${this.mediaConfig.webtpUrl}/publish/${this.id}/${this.streamId}`;
+      const screenSharePublisher = new Publisher({
+        publishUrl,
         publishType: STREAM_TYPE.SCREENSHARE,
+        streamId: this.streamId,
+        userId: this.localParticipant.userId, // Pass userId for screen share tile mapping
         mediaStream: screenStream,
+        roomId: this.id,
+        webRtcHost: this.mediaConfig.hostNode,
+        // !for testing, in production we should detect based on browser webtransport support, fallback to webrtc. value: "webtransport", "webrtc"
+        protocol: this.mediaConfig.publishProtocol,
       });
 
       this.localParticipant.isScreenSharing = true;
+      this.localParticipant.setScreenSharePublisher(screenSharePublisher);
 
       // Emit with original stream for UI (both can share the same stream)
       this.emit("screenShareStarted", {
@@ -919,14 +928,14 @@ class Room extends EventEmitter {
    * Stop screen sharing for local participant
    */
   async stopScreenShare() {
-    if (!this.localParticipant || !this.localParticipant.publisher) {
-      throw new Error("Local participant or publisher not available");
+    if (!this.localParticipant || !this.localParticipant.screenSharePublisher) {
+      throw new Error("Local participant or screen share publisher not available");
     }
 
     try {
       this.emit("screenShareStopping", { room: this });
 
-      await this.localParticipant.publisher.stopShareScreen();
+      await this.localParticipant.screenSharePublisher.stopShareScreen();
 
       this.localParticipant.isScreenSharing = false;
       this.emit("screenShareStopped", { room: this });

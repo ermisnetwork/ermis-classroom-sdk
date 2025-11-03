@@ -24,6 +24,7 @@ class Participant extends EventEmitter {
     // Media components
     this.publisher = null;
     this.subscriber = null;
+    this.screenSharePublisher = null;
 
     // Screen share state
     this.isScreenSharing = config.isScreenSharing || false;
@@ -192,6 +193,16 @@ class Participant extends EventEmitter {
    */
   setPublisher(publisher) {
     this.publisher = publisher;
+    if (publisher) {
+      this.setConnectionStatus("connected");
+    }
+  }
+
+  /**
+   * Set screen share publisher instance
+   */
+  setScreenSharePublisher(publisher) {
+    this.screenSharePublisher = publisher;
     if (publisher) {
       this.setConnectionStatus("connected");
     }
