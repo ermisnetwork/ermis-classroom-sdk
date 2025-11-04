@@ -101,10 +101,11 @@ function getDataChannelId(channelName) {
       return 2;
     case CHANNEL_NAME.VIDEO_720P:
       return 3;
+    /// screen share with separate rtc connection, start from id 0
     case CHANNEL_NAME.SCREEN_SHARE_720P:
-      return 4;
+      return 0;
     case CHANNEL_NAME.SCREEN_SHARE_AUDIO:
-      return 5;
+      return 1;
     default:
       return 7;
   }
@@ -139,14 +140,6 @@ const SUB_STREAMS = {
     name: "screen_share_audio",
     channelName: CHANNEL_NAME.SCREEN_SHARE_AUDIO,
   },
-  // SCREEN_SHARE_720P: {
-  //   name: "screen_share_720p",
-  //   width: 1280,
-  //   height: 720,
-  //   bitrate: 1_000_000,
-  //   framerate: 15,
-  //   channelName: CHANNEL_NAME.SCREEN_SHARE_720P,
-  // },
   SCREEN_SHARE_720P: {
     name: "screen_share_720p",
     width: 1280,

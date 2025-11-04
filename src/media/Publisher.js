@@ -118,6 +118,8 @@ class Publisher extends EventEmitter {
     this.screenAudioProcessor = null;
     this.isScreenSharing = false;
     this.screenVideoEncoder = null;
+
+    this.screenShareWebrtc = null;
   }
 
   getDefaultConfig(type, options) {
@@ -1040,21 +1042,24 @@ class Publisher extends EventEmitter {
     this.onStatusUpdate("Publisher state sent to server");
   }
 
-  async setupWebRTCConnection() {
+  async setupWebRTCConnection(action = STREAM_TYPE.CAMERA) {
+    const substreams = action === STREAM_TYPE.SCREEN_SHARE ? this.screenSubChannels : this.userMediaSubChannels;
     try {
-      this.webRtc = new RTCPeerConnection();
+      const webRtc = new RTCPeerConnection();
 
-      console.warn("Creating WebRTC data channels for substream: ", this.userMediaSubChannels);
+      if (action === STREAM_TYPE.SCREEN_SHARE) {
+        this.screenShareWebrtc = webRtc;
+      } else {
+        this.webRtc = webRtc;
+      }
 
-      for (const subStream of this.userMediaSubChannels) {
+      for (const subStream of substreams) {
         await this.createDataChannel(subStream.channelName);
       }
 
-      const offer = await this.webRtc.createOffer();
-      await this.webRtc.setLocalDescription(offer);
+      const offer = await webRtc.createOffer();
+      await webRtc.setLocalDescription(offer);
       console.log("WebRTC offer created and set as local description:", offer);
-
-      const action = STREAM_TYPE.CAMERA;
       const response = await fetch(`https://${this.webRtcHost}/meeting/sdp/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1072,7 +1077,7 @@ class Publisher extends EventEmitter {
       }
 
       const answer = await response.json();
-      await this.webRtc.setRemoteDescription(answer);
+      await webRtc.setRemoteDescription(answer);
 
       this.isChannelOpen = true;
     } catch (error) {
@@ -1083,12 +1088,22 @@ class Publisher extends EventEmitter {
   async createDataChannel(channelName) {
     const id = getDataChannelId(channelName);
 
+    let webRtc;
+    if (
+      channelName === CHANNEL_NAME.SCREEN_SHARE_720P ||
+      channelName === CHANNEL_NAME.SCREEN_SHARE_1080P ||
+      channelName === CHANNEL_NAME.SCREEN_SHARE_AUDIO
+    ) {
+      webRtc = this.screenShareWebrtc;
+    } else {
+      webRtc = this.webRtc;
+    }
     // Set ordered delivery for control channel
     let ordered = false;
     if (channelName === CHANNEL_NAME.MEETING_CONTROL) {
       ordered = true;
     }
-    const dataChannel = this.webRtc.createDataChannel(channelName, {
+    const dataChannel = webRtc.createDataChannel(channelName, {
       ordered,
       id,
       negotiated: true,
@@ -1114,13 +1129,6 @@ class Publisher extends EventEmitter {
 
     dataChannel.onbufferedamountlow = () => {
       const queue = this.getQueue(channelName);
-
-      // console.log(
-      //   `Bufferedamountlow for ${channelName}, bufferedAmount:`,
-      //   dataChannel.bufferedAmount,
-      //   "queue length:",
-      //   queue.length
-      // );
 
       while (queue.length > 0 && dataChannel.bufferedAmount <= dataChannel.bufferedAmountLowThreshold) {
         const packet = queue.shift();
@@ -1699,6 +1707,8 @@ class Publisher extends EventEmitter {
       }
       this.isScreenSharing = true;
 
+      // create WebRTC connection for screen share
+
       // Initialize screen share channels
       // this.initializeScreenShareStreams();
 
@@ -1709,10 +1719,11 @@ class Publisher extends EventEmitter {
           await this.createBidirectionalStream(CHANNEL_NAME.SCREEN_SHARE_AUDIO);
         }
       } else if (this.protocol === "webrtc") {
-        await this.createDataChannel(CHANNEL_NAME.SCREEN_SHARE_720P, STREAM_TYPE.SCREEN_SHARE);
-        if (hasAudio) {
-          await this.createDataChannel(CHANNEL_NAME.SCREEN_SHARE_AUDIO, STREAM_TYPE.SCREEN_SHARE);
-        }
+        await this.setupWebRTCConnection(STREAM_TYPE.SCREEN_SHARE);
+        // await this.createDataChannel(CHANNEL_NAME.SCREEN_SHARE_720P, STREAM_TYPE.SCREEN_SHARE);
+        // if (hasAudio) {
+        // await this.createDataChannel(CHANNEL_NAME.SCREEN_SHARE_AUDIO, STREAM_TYPE.SCREEN_SHARE);
+        // }
       }
 
       // Start video encoding
