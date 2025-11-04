@@ -842,8 +842,8 @@ class Room extends EventEmitter {
       subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
       streamId: participant.streamId,
       roomId: this.id,
-      host: this.mediaConfig.hostNode,
       streamOutputEnabled: true,
+      host: this.mediaConfig.hostNode,
       protocol: this.mediaConfig.subscribeProtocol,
       subscribeType: STREAM_TYPE.CAMERA,
 
@@ -879,13 +879,14 @@ class Room extends EventEmitter {
    * Start screen sharing for local participant
    */
   async startScreenShare() {
+    console.log("[Room]: Starting screen share from Room...");
     if (!this.localParticipant || !this.localParticipant.publisher) {
       throw new Error("Local participant or publisher not available");
     }
 
     try {
       this.emit("screenShareStarting", { room: this });
-      this.localParticipant.publisher.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE);
+      // this.localParticipant.publisher.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE);
       // Get display media
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: { width: 1920, height: 1080 },
@@ -893,23 +894,25 @@ class Room extends EventEmitter {
       });
 
       // Start screen share through publisher first
-      // await this.localParticipant.publisher.startShareScreen(screenStream);
+      await this.localParticipant.publisher.startShareScreen(screenStream);
       // todo: change logic screenshare, init new publisher with share screen type
-      const publishUrl = `${this.mediaConfig.webtpUrl}/publish/${this.id}/${this.streamId}`;
-      const screenSharePublisher = new Publisher({
-        publishUrl,
-        publishType: STREAM_TYPE.SCREENSHARE,
-        streamId: this.streamId,
-        userId: this.localParticipant.userId, // Pass userId for screen share tile mapping
-        mediaStream: screenStream,
-        roomId: this.id,
-        webRtcHost: this.mediaConfig.hostNode,
-        // !for testing, in production we should detect based on browser webtransport support, fallback to webrtc. value: "webtransport", "webrtc"
-        protocol: this.mediaConfig.publishProtocol,
-      });
+      // const publishUrl = `${this.mediaConfig.webtpUrl}/publish/${this.id}/${this.streamId}`;
+      // const screenSharePublisher = new Publisher({
+      //   publishUrl,
+      //   publishType: STREAM_TYPE.SCREENSHARE,
+      //   streamId: this.streamId,
+      //   userId: this.localParticipant.userId, // Pass userId for screen share tile mapping
+      //   mediaStream: screenStream,
+      //   roomId: this.id,
+      //   webRtcHost: this.mediaConfig.hostNode,
+      //   // !for testing, in production we should detect based on browser webtransport support, fallback to webrtc. value: "webtransport", "webrtc"
+      //   protocol: this.mediaConfig.publishProtocol,
+      // });
+
+      // await screenSharePublisher.startPublishing();
 
       this.localParticipant.isScreenSharing = true;
-      this.localParticipant.setScreenSharePublisher(screenSharePublisher);
+      // this.localParticipant.setScreenSharePublisher(screenSharePublisher);
 
       // Emit with original stream for UI (both can share the same stream)
       this.emit("screenShareStarted", {
@@ -955,13 +958,16 @@ class Room extends EventEmitter {
     if (isStarting) {
       // Create subscriber for screen share
       const screenSubscriber = new Subscriber({
-        streamId: screenStreamId,
+        subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
+        streamId: participant.streamId,
         roomId: this.id,
-        host: this.mediaConfig.host,
-        isScreenSharing: true,
         streamOutputEnabled: true,
+        host: this.mediaConfig.hostNode,
+        protocol: this.mediaConfig.subscribeProtocol,
+        subscribeType: STREAM_TYPE.SCREENSHARE,
+
         onStatus: (msg, isError) => {
-          console.log(`Screen share status: ${msg}`);
+          participant.setConnectionStatus(isError ? "failed" : "connected");
         },
         audioWorkletUrl: "/workers/audio-worklet1.js",
         mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",

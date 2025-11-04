@@ -13,6 +13,17 @@ const CLIENT_COMMANDS = {
 };
 
 /**
+ * Transport packet type constants
+ */
+const TRANSPORT_PACKET_TYPE = {
+  VIDEO: 0x00,
+  AUDIO: 0x01,
+  CONFIG: 0xfd,
+  EVENT: 0xfe,
+  PUBLISHER_COMMAND: 0xff,
+};
+
+/**
  * Frame type constants
  */
 const FRAME_TYPE = {
@@ -30,18 +41,6 @@ const FRAME_TYPE = {
   EVENT: 0xfe,
   PING: 0xff,
 };
-
-/**
- * Transport packet type constants
- */
-const TRANSPORT_PACKET_TYPE = {
-  VIDEO: 0x00,
-  AUDIO: 0x01,
-  CONFIG: 0xfd,
-  EVENT: 0xfe,
-  PUBLISHER_COMMAND: 0xff,
-};
-
 /**
  * Helper function to get frame type based on channel name and chunk type
  */
@@ -101,19 +100,14 @@ function getDataChannelId(channelName, type = "camera") {
       [CHANNEL_NAME.VIDEO_720P]: 3,
     },
     screenShare: {
-      [CHANNEL_NAME.SCREEN_SHARE_AUDIO]: 0,
-      [CHANNEL_NAME.SCREEN_SHARE_720P]: 1,
-      [CHANNEL_NAME.SCREEN_SHARE_1080P]: 2,
+      [CHANNEL_NAME.SCREEN_SHARE_720P]: 5,
+      [CHANNEL_NAME.SCREEN_SHARE_AUDIO]: 6,
+      // [CHANNEL_NAME.SCREEN_SHARE_1080P]: 2,
     },
   };
 
   return mapping[type]?.[channelName] ?? 5;
 }
-
-const PUBLISH_TYPE = {
-  CAMERA: "publish_camera",
-  SCREEN: "publish_screen",
-};
 
 const SUB_STREAMS = {
   MEETING_CONTROL: {
@@ -162,13 +156,14 @@ const SUB_STREAMS = {
   },
 };
 
-function getSubStreams(publisherType) {
-  if (publisherType === STREAM_TYPE.SCREENSHARE) {
-    return [SUB_STREAMS.SCREEN_SHARE_AUDIO, SUB_STREAMS.SCREEN_SHARE_720P, SUB_STREAMS.SCREEN_SHARE_1080P];
-  } else if (publisherType === STREAM_TYPE.CAMERA) {
+function getSubStreams(streamType) {
+  console.log("Getting sub streams for type:", streamType);
+  if (streamType === STREAM_TYPE.SCREENSHARE) {
+    return [SUB_STREAMS.SCREEN_SHARE_AUDIO, SUB_STREAMS.SCREEN_SHARE_720P]; //, SUB_STREAMS.SCREEN_SHARE_1080P];
+  } else if (streamType === STREAM_TYPE.CAMERA) {
     return [SUB_STREAMS.MIC_AUDIO, SUB_STREAMS.VIDEO_360P, SUB_STREAMS.VIDEO_720P, SUB_STREAMS.MEETING_CONTROL];
   } else {
-    return new Error("Invalid publisher type");
+    return new Error("Invalid publisher type, cannot get sub streams for type:", streamType);
   }
 }
 
@@ -215,7 +210,6 @@ export {
   getTransportPacketType,
   CHANNEL_NAME,
   getDataChannelId,
-  PUBLISH_TYPE,
   SUB_STREAMS,
   getSubStreams,
   MEETING_EVENTS,

@@ -44,7 +44,6 @@ import {
 import { useErmisMeeting } from "./context";
 import SubRoomPopup from "./SubRoomPopup";
 import type { ScreenShareData } from "./context/ErmisClassroomProvider.tsx";
-import type { AnyCnameRecord } from "node:dns";
 
 interface VideoMeetingProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;

@@ -243,10 +243,8 @@ class Subscriber extends EventEmitter {
       this.worker.postMessage(
         {
           type: "init",
-          data: {
-            subscriberId: this.subscriberId,
-            subscribeType: this.subscribeType,
-          },
+          subscriberId: this.subscriberId,
+          subscribeType: this.subscribeType,
           port: channelPort,
         },
         [channelPort]

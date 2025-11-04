@@ -1,4 +1,4 @@
-import { FRAME_TYPE, CHANNEL_NAME, CLIENT_COMMANDS } from "./publisherConstants.js";
+import { FRAME_TYPE, CHANNEL_NAME, CLIENT_COMMANDS, STREAM_TYPE } from "./publisherConstants.js";
 
 class CommandSender {
   constructor(config) {
@@ -65,11 +65,19 @@ class CommandSender {
   }
 
   async initSubscribeChannelStream(subscriberType) {
+    const initQuality =
+      subscriberType === STREAM_TYPE.SCREENSHARE ? CHANNEL_NAME.SCREEN_SHARE_720P : CHANNEL_NAME.VIDEO_720P;
+    console.log(
+      "[Client Command]Initializing subscribe channel stream with type:",
+      subscriberType,
+      "and quality:",
+      initQuality
+    );
     await this._sendSubscriberCommand("init_channel_stream", {
       stream_type: subscriberType,
       audio: true,
       video: true,
-      quality: CHANNEL_NAME.VIDEO_720P,
+      quality: initQuality,
     });
   }
 

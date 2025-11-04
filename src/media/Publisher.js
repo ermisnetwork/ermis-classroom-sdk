@@ -5,7 +5,6 @@ import {
   getTransportPacketType,
   CHANNEL_NAME,
   getDataChannelId,
-  PUBLISH_TYPE,
   STREAM_TYPE,
   getSubStreams,
   MEETING_EVENTS,
@@ -46,7 +45,7 @@ class Publisher extends EventEmitter {
 
     // State variables
     this.stream = null;
-    this.audioProcessor = null;
+    this.micAudioProcessor = null;
     this.videoProcessor = null;
     this.videoReader = null;
     this.webTransport = null;
@@ -88,7 +87,8 @@ class Publisher extends EventEmitter {
     this.sequenceNumbers = {};
     this.dcMsgQueues = {};
     this.dcPacketSendTime = {};
-    this.subStreams = getSubStreams(this.publishType);
+    this.userMediaSubChannels = getSubStreams(STREAM_TYPE.CAMERA);
+    this.screenSubChannels = getSubStreams(STREAM_TYPE.SCREENSHARE);
 
     // command sender
     // this.commandSender = null;
@@ -110,6 +110,14 @@ class Publisher extends EventEmitter {
 
     // this.videoSentCountTest = 0;
     // this.intervalforStats();
+
+    // screen share state
+    this.screenStream = null;
+    this.screenVideoProcessor = null;
+    this.screenVideoReader = null;
+    this.screenAudioProcessor = null;
+    this.isScreenSharing = false;
+    this.screenVideoEncoder = null;
   }
 
   getDefaultConfig(type, options) {
@@ -133,21 +141,13 @@ class Publisher extends EventEmitter {
   }
 
   initializeSequenceTracking() {
-    this.subStreams.forEach((stream) => {
+    this.userMediaSubChannels.forEach((stream) => {
       const key = stream.channelName;
       this.sequenceNumbers[key] = 0;
       this.dcMsgQueues[key] = [];
       this.dcPacketSendTime[key] = performance.now();
     });
   }
-
-  // intervalforStats() {
-  //   setInterval(() => {
-  //     const fps = this.videoSentCountTest / 5;
-  //     console.log(`[${this.publishType}] Sending frame rate:`, fps);
-  //     this.videoSentCountTest = 0;
-  //   }, 5000);
-  // }
 
   async init() {
     await this.loadAllDependencies();
@@ -156,7 +156,7 @@ class Publisher extends EventEmitter {
   }
 
   initializeQueues() {
-    this.subStreams.forEach((stream) => {
+    this.userMediaSubChannels.forEach((stream) => {
       if (!stream.channelName.startsWith(CHANNEL_NAME.MEETING_CONTROL)) {
         this.dcMsgQueues[stream.channelName] = [];
       }
@@ -165,7 +165,7 @@ class Publisher extends EventEmitter {
     this.gopTracking = {};
     this.needKeyFrame = {};
 
-    this.subStreams.forEach((stream) => {
+    this.userMediaSubChannels.forEach((stream) => {
       if (stream.width) {
         // video streams
         this.gopTracking[stream.channelName] = {
@@ -242,7 +242,7 @@ class Publisher extends EventEmitter {
     try {
       const videoOnlyStream = await this.getMediaStream();
       this.isPublishing = true;
-      await this.startStreaming();
+      await this.startUserMediaStreaming();
 
       this.onStreamStart();
       this.onStatusUpdate(`Publishing started successfully (${this.publishType})`);
@@ -587,7 +587,7 @@ class Publisher extends EventEmitter {
 
       if (hasAudio) {
         console.log("[Publisher] Starting audio streaming with new stream...");
-        this.audioProcessor = await this.startAudioStreaming();
+        this.micAudioProcessor = await this.startAudioStreaming(this.stream);
       }
 
       if (oldStream) {
@@ -651,15 +651,15 @@ class Publisher extends EventEmitter {
   }
 
   async stopAudioProcessing() {
-    if (this.audioProcessor) {
+    if (this.micAudioProcessor) {
       try {
-        if (typeof this.audioProcessor.stop === "function") {
-          await this.audioProcessor.stop();
+        if (typeof this.micAudioProcessor.stop === "function") {
+          await this.micAudioProcessor.stop();
         }
       } catch (error) {
         console.warn("Error stopping audio processor:", error);
       }
-      this.audioProcessor = null;
+      this.micAudioProcessor = null;
     }
   }
 
@@ -875,10 +875,9 @@ class Publisher extends EventEmitter {
     return videoOnlyStream;
   }
 
-  initVideoEncoders() {
-    this.subStreams.forEach((subStream) => {
+  initVideoEncoders(subStreams) {
+    subStreams.forEach((subStream) => {
       if (subStream.width) {
-        // Video streams only
         const encoder = new VideoEncoder({
           output: (chunk, metadata) => this.handleVideoChunk(chunk, metadata, subStream.name, subStream.channelName),
           error: (e) => this.onStatusUpdate(`Encoder ${subStream.name} error: ${e.message}`, true),
@@ -916,7 +915,7 @@ class Publisher extends EventEmitter {
     await this.webTransport.ready;
     console.log("WebTransport connected to server");
 
-    for (const subStream of this.subStreams) {
+    for (const subStream of this.userMediaSubChannels) {
       await this.createBidirectionalStream(subStream.channelName);
     }
 
@@ -979,29 +978,47 @@ class Publisher extends EventEmitter {
     }
   }
 
-  setupEventStreamReader(reader) {
-    (async () => {
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) {
-            console.log("Event stream closed by server");
-            break;
-          }
-          if (value) {
-            const msg = new TextDecoder().decode(value);
-            try {
-              const event = JSON.parse(msg);
-              this.onServerEvent(event);
-            } catch (e) {
-              console.log("Non-JSON event message:", msg);
-            }
-          }
+  async setupEventStreamReader(reader) {
+    const delimitedReader = new LengthDelimitedReader(reader);
+    try {
+      while (true) {
+        const message = await delimitedReader.readMessage();
+        if (message === null) break;
+        const msg = new TextDecoder().decode(message);
+        try {
+          const event = JSON.parse(msg);
+          console.log("Received event:", event);
+          this.onServerEvent(event);
+        } catch (e) {
+          console.log("Non-JSON event message:", msg);
         }
-      } catch (err) {
-        console.error("Error reading from event stream:", err);
       }
-    })();
+    } catch (err) {
+      console.error(`[readStream] error:`, err);
+    }
+    // (async () => {
+    //   try {
+    //     while (true) {
+    //       const { value, done } = await reader.read();
+    //       if (done) {
+    //         console.log("Event stream closed by server");
+    //         break;
+    //       }
+    //       if (value) {
+    //         const msg = new TextDecoder().decode(value);
+
+    //         try {
+    //           const event = JSON.parse(msg);
+    //           this.onServerEvent(event);
+    //         } catch (e) {
+    //           console.log("Non-JSON event message:", msg);
+    //         }
+    //       }
+    //     }
+    //   } catch (err) {
+    //     console.error("Error reading from event stream:", err);
+    //   }
+    // })();
   }
 
   async sendOverEventStream(data) {
@@ -1043,17 +1060,6 @@ class Publisher extends EventEmitter {
 
     this.commandSender.sendPublisherState(CHANNEL_NAME.MEETING_CONTROL, stateEvent);
 
-    // const command = { type: CLIENT_COMMANDS.PUBLISHER_STATE, data: stateEvent };
-
-    // if (this.protocol === "webrtc") {
-    //   const dataJson = JSON.stringify(command);
-    //   const eventToSend = new TextEncoder().encode(dataJson);
-    //   console.warn("Sending publisher state over WebRTC data channel:", dataJson, "packet size:", eventToSend.length);
-    //   this.sendOverDataChannel(CHANNEL_NAME.MEETING_CONTROL, eventToSend, FRAME_TYPE.EVENT);
-    // } else {
-    //   await this.sendEvent(stateEvent);
-    // }
-
     this.onStatusUpdate("Publisher state sent to server");
   }
 
@@ -1061,9 +1067,9 @@ class Publisher extends EventEmitter {
     try {
       this.webRtc = new RTCPeerConnection();
 
-      console.warn("Creating WebRTC data channels for substream: ", this.subStreams);
+      console.warn("Creating WebRTC data channels for substream: ", this.userMediaSubChannels);
 
-      for (const subStream of this.subStreams) {
+      for (const subStream of this.userMediaSubChannels) {
         await this.createDataChannel(subStream.channelName);
       }
 
@@ -1071,7 +1077,7 @@ class Publisher extends EventEmitter {
       await this.webRtc.setLocalDescription(offer);
       console.log("WebRTC offer created and set as local description:", offer);
 
-      const action = this.publishType === "camera" ? PUBLISH_TYPE.CAMERA : PUBLISH_TYPE.SCREEN;
+      const action = STREAM_TYPE.CAMERA;
       const response = await fetch(`https://${this.webRtcHost}/meeting/sdp/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1167,12 +1173,6 @@ class Publisher extends EventEmitter {
 
   async sendOverDataChannel(channelName, packet, frameType) {
     const dataChannel = this.publishStreams.get(channelName)?.dataChannel;
-
-    // Track video frames for stats
-    // const videoChannels = this.subStreams.filter((s) => s.width).map((s) => s.channelName);
-    // if (videoChannels.includes(channelName)) {
-    //   this.videoSentCountTest++;
-    // }
 
     const dataChannelReady = this.publishStreams.get(channelName)?.dataChannelReady;
     if (!dataChannelReady || !dataChannel || dataChannel.readyState !== "open") {
@@ -1305,7 +1305,7 @@ class Publisher extends EventEmitter {
     return wrapper;
   }
 
-  async startStreaming() {
+  async startUserMediaStreaming() {
     if (this.hasVideo && this.stream?.getVideoTracks().length > 0) {
       await this.startVideoCapture();
     } else {
@@ -1313,7 +1313,7 @@ class Publisher extends EventEmitter {
     }
 
     if (this.hasAudio && this.stream?.getAudioTracks().length > 0) {
-      this.audioProcessor = await this.startAudioStreaming();
+      this.micAudioProcessor = await this.startAudioStreaming(this.stream);
     } else {
       console.log("Skipping audio streaming: no audio available");
     }
@@ -1331,7 +1331,7 @@ class Publisher extends EventEmitter {
       return;
     }
 
-    this.initVideoEncoders();
+    this.initVideoEncoders(this.userMediaSubChannels);
 
     this.videoEncoders.forEach((encoderObj) => {
       encoderObj.encoder.configure(encoderObj.config);
@@ -1354,13 +1354,13 @@ class Publisher extends EventEmitter {
     }
   }
 
-  async startAudioStreaming() {
-    if (!this.stream) {
+  async startAudioStreaming(stream, channelName = CHANNEL_NAME.MIC_AUDIO) {
+    if (!stream) {
       console.warn("No media stream available for audio");
       return null;
     }
 
-    const audioTrack = this.stream.getAudioTracks()[0];
+    const audioTrack = stream.getAudioTracks()[0];
     if (!audioTrack) {
       console.warn("No audio track found in stream");
       return null;
@@ -1373,9 +1373,12 @@ class Publisher extends EventEmitter {
       timeSlice: 100,
     };
 
-    this.currentAudioStream = new MediaStream([audioTrack]);
-    const audioRecorder = await this.initAudioRecorder(this.currentAudioStream, audioRecorderOptions);
-    audioRecorder.ondataavailable = (typedArray) => this.handleAudioChunk(typedArray, CHANNEL_NAME.MIC_AUDIO);
+    let newAudioStream = new MediaStream([audioTrack]);
+    if (channelName == CHANNEL_NAME.MIC_AUDIO) {
+      this.currentAudioStream = newAudioStream;
+    }
+    const audioRecorder = await this.initAudioRecorder(newAudioStream, audioRecorderOptions);
+    audioRecorder.ondataavailable = (typedArray) => this.handleAudioChunk(typedArray, channelName);
 
     await audioRecorder.start({
       timeSlice: audioRecorderOptions.timeSlice,
@@ -1449,7 +1452,6 @@ class Publisher extends EventEmitter {
             description: description,
           };
 
-          console.log(`[Audio Config] Preparing to send config for ${channelName}`, audioConfig);
           streamData.config = audioConfig;
           this.sendStreamConfig(channelName, audioConfig, "audio");
         }
@@ -1519,18 +1521,8 @@ class Publisher extends EventEmitter {
           },
         };
       }
-      console.log(`[Stream Config] Sending ${mediaType} config for ${channelName}`, configPacket);
 
       this.commandSender.sendMediaConfig(channelName, JSON.stringify(configPacket));
-      // const wrapper = { type: "media_config", data: JSON.stringify(configPacket) };
-      // console.log(`[Stream Config] Preparing to send config for ${channelName}`, wrapper);
-      // const packet = new TextEncoder().encode(JSON.stringify(wrapper));
-
-      // if (this.protocol === "webrtc") {
-      //   this.sendOverDataChannel(channelName, packet, FRAME_TYPE.CONFIG);
-      // } else {
-      //   await this.sendOverStream(channelName, packet);
-      // }
 
       streamData.configSent = true;
       streamData.config = config;
@@ -1609,9 +1601,9 @@ class Publisher extends EventEmitter {
       this.videoEncoders.clear();
 
       // Stop audio processor
-      if (this.audioProcessor && typeof this.audioProcessor.stop === "function") {
-        await this.audioProcessor.stop();
-        this.audioProcessor = null;
+      if (this.micAudioProcessor && typeof this.micAudioProcessor.stop === "function") {
+        await this.micAudioProcessor.stop();
+        this.micAudioProcessor = null;
       }
 
       // Close all streams
@@ -1667,6 +1659,9 @@ class Publisher extends EventEmitter {
 
       this.onStreamStop();
       this.onStatusUpdate("Publishing stopped");
+      if (this.isScreenSharing) {
+        await this.stopShareScreen();
+      }
     } catch (error) {
       this.onStatusUpdate(`Error stopping publishing: ${error.message}`, true);
       throw error;
@@ -1685,6 +1680,242 @@ class Publisher extends EventEmitter {
       activeStreams: Array.from(this.publishStreams.keys()),
     };
   }
+
+  ////////// ! Move screen share to separate class !//////////
+
+  async startShareScreen(screenMediaStream) {
+    console.log("Starting screen sharing with provided MediaStream:", screenMediaStream);
+    if (this.isScreenSharing) {
+      this.onStatusUpdate("Already sharing screen", true);
+      return;
+    }
+
+    if (!this.isChannelOpen) {
+      throw new Error("Connection not established. Start publishing first.");
+    }
+
+    if (!screenMediaStream || !(screenMediaStream instanceof MediaStream)) {
+      throw new Error("Invalid screen MediaStream provided");
+    }
+
+    this.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE);
+
+    try {
+      this.screenStream = screenMediaStream;
+
+      // Validate stream has tracks
+      const hasVideo = this.screenStream.getVideoTracks().length > 0;
+      const hasAudio = this.screenStream.getAudioTracks().length > 0;
+
+      if (!hasVideo) {
+        throw new Error("Screen stream must have at least a video track");
+      }
+
+      console.warn(`Screen share stream received - Video: ${hasVideo}, Audio: ${hasAudio}`);
+
+      // Handle screen share stop when user stops from browser UI
+      const videoTrack = this.screenStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          console.log("Screen share stopped by user");
+          this.stopShareScreen();
+        };
+      }
+
+      // Initialize screen share channels
+      // this.initializeScreenShareStreams();
+
+      // Create channels based on protocol
+      if (this.protocol === "webtransport") {
+        await this.createBidirectionalStream(CHANNEL_NAME.SCREEN_SHARE_720P);
+        if (hasAudio) {
+          await this.createBidirectionalStream(CHANNEL_NAME.SCREEN_SHARE_AUDIO);
+        }
+      } else if (this.protocol === "webrtc") {
+        await this.createDataChannel(CHANNEL_NAME.SCREEN_SHARE_720P);
+        if (hasAudio) {
+          await this.createDataChannel(CHANNEL_NAME.SCREEN_SHARE_AUDIO);
+        }
+      }
+
+      this.isScreenSharing = true;
+      // Start video encoding
+      await this.startScreenVideoCapture();
+
+      // Start audio if available
+      if (hasAudio) {
+        await this.startScreenAudioStreaming();
+      }
+
+      this.onStatusUpdate(`Screen sharing started (Video: ${hasVideo}, Audio: ${hasAudio})`);
+
+      // Send event to server
+      // await this.sendMeetingEvent("screenshare_on");
+
+      // Emit event for UI updates
+      this.emit("screenShareStarted", {
+        stream: this.screenStream,
+        hasVideo,
+        hasAudio,
+      });
+
+      return {
+        stream: this.screenStream,
+        hasVideo,
+        hasAudio,
+      };
+    } catch (error) {
+      this.onStatusUpdate(`Failed to start screen sharing: ${error.message}`, true);
+      throw error;
+    }
+  }
+
+  // 4. Add startScreenVideoCapture method
+  async startScreenVideoCapture() {
+    const videoTrack = this.screenStream.getVideoTracks()[0];
+    if (!videoTrack) return;
+
+    this.initVideoEncoders(this.screenSubChannels);
+
+    this.screenVideoEncoder = this.videoEncoders.get(CHANNEL_NAME.SCREEN_SHARE_720P);
+    const screenVideoEncoder = this.videoEncoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).encoder;
+    const screenEncoderConfig = this.videoEncoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).config;
+    screenVideoEncoder.configure(screenEncoderConfig);
+
+    // Create processor
+    this.screenVideoProcessor = new MediaStreamTrackProcessor(videoTrack);
+    this.screenVideoReader = this.screenVideoProcessor.readable.getReader();
+
+    // Start processing frames
+    (async () => {
+      let frameCounter = 0;
+      try {
+        while (this.isScreenSharing) {
+          const result = await this.screenVideoReader.read();
+          if (result.done) break;
+
+          const frame = result.value;
+          frameCounter++;
+          const keyFrame = frameCounter % 30 === 0;
+          if (screenVideoEncoder.encodeQueueSize <= 2) {
+            screenVideoEncoder.encode(frame, { keyFrame });
+          }
+          frame.close();
+        }
+      } catch (error) {
+        console.error("Screen video processing error:", error);
+      }
+    })();
+  }
+
+  // 5. Add startScreenAudioStreaming method
+  async startScreenAudioStreaming() {
+    const audioTrack = this.screenStream.getAudioTracks()[0];
+    if (!audioTrack) return;
+
+    const audioRecorderOptions = {
+      encoderApplication: 2051,
+      encoderComplexity: 0,
+      encoderFrameSize: 20,
+      timeSlice: 100,
+    };
+
+    const screenAudioStream = new MediaStream([audioTrack]);
+    this.screenAudioProcessor = await this.initAudioRecorder(screenAudioStream, audioRecorderOptions);
+
+    this.screenAudioProcessor.ondataavailable = (typedArray) =>
+      this.handleAudioChunk(typedArray, CHANNEL_NAME.SCREEN_SHARE_AUDIO);
+
+    await this.screenAudioProcessor.start({
+      timeSlice: audioRecorderOptions.timeSlice,
+    });
+  }
+
+  // 6. Add stopShareScreen method
+  async stopShareScreen() {
+    if (!this.isScreenSharing) return;
+
+    try {
+      this.isScreenSharing = false;
+
+      // Close encoder
+      if (this.screenVideoEncoder?.encoder && this.screenVideoEncoder.encoder.state !== "closed") {
+        await this.screenVideoEncoder.encoder.flush();
+        this.screenVideoEncoder.encoder.close();
+      }
+      this.screenVideoEncoder = null;
+
+      // Stop audio processor
+      if (this.screenAudioProcessor && typeof this.screenAudioProcessor.stop === "function") {
+        await this.screenAudioProcessor.stop();
+        this.screenAudioProcessor = null;
+      }
+
+      // Stop reader
+      if (this.screenVideoReader) {
+        await this.screenVideoReader.cancel();
+        this.screenVideoReader = null;
+      }
+
+      // Stop processor
+      this.screenVideoProcessor = null;
+
+      // Stop stream tracks
+      if (this.screenStream) {
+        this.screenStream.getTracks().forEach((track) => track.stop());
+        this.screenStream = null;
+      }
+
+      // Send event
+      await this.sendMeetingEvent("screenshare_off");
+
+      this.onStatusUpdate("Screen sharing stopped");
+    } catch (error) {
+      this.onStatusUpdate(`Error stopping screen share: ${error.message}`, true);
+      throw error;
+    }
+  }
 }
 
 export default Publisher;
+
+class LengthDelimitedReader {
+  constructor(reader) {
+    this.reader = reader;
+    this.buffer = new Uint8Array(0);
+  }
+
+  appendBuffer(newData) {
+    const combined = new Uint8Array(this.buffer.length + newData.length);
+    combined.set(this.buffer);
+    combined.set(newData, this.buffer.length);
+    this.buffer = combined;
+  }
+
+  async readMessage() {
+    while (true) {
+      if (this.buffer.length >= 4) {
+        const view = new DataView(this.buffer.buffer, this.buffer.byteOffset, 4);
+        const messageLength = view.getUint32(0, false);
+
+        const totalLength = 4 + messageLength;
+        if (this.buffer.length >= totalLength) {
+          const message = this.buffer.slice(4, totalLength);
+          this.buffer = this.buffer.slice(totalLength);
+
+          return message;
+        }
+      }
+
+      const { value, done } = await this.reader.read();
+      if (done) {
+        if (this.buffer.length > 0) {
+          throw new Error("Stream ended with incomplete message");
+        }
+        return null;
+      }
+
+      this.appendBuffer(value);
+    }
+  }
+}
