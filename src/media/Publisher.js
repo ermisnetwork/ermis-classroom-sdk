@@ -996,29 +996,6 @@ class Publisher extends EventEmitter {
     } catch (err) {
       console.error(`[readStream] error:`, err);
     }
-    // (async () => {
-    //   try {
-    //     while (true) {
-    //       const { value, done } = await reader.read();
-    //       if (done) {
-    //         console.log("Event stream closed by server");
-    //         break;
-    //       }
-    //       if (value) {
-    //         const msg = new TextDecoder().decode(value);
-
-    //         try {
-    //           const event = JSON.parse(msg);
-    //           this.onServerEvent(event);
-    //         } catch (e) {
-    //           console.log("Non-JSON event message:", msg);
-    //         }
-    //       }
-    //     }
-    //   } catch (err) {
-    //     console.error("Error reading from event stream:", err);
-    //   }
-    // })();
   }
 
   async sendOverEventStream(data) {
@@ -1104,14 +1081,13 @@ class Publisher extends EventEmitter {
   }
 
   async createDataChannel(channelName) {
-    const id = getDataChannelId(channelName, this.publishType);
+    const id = getDataChannelId(channelName);
 
     // Set ordered delivery for control channel
     let ordered = false;
     if (channelName === CHANNEL_NAME.MEETING_CONTROL) {
       ordered = true;
     }
-
     const dataChannel = this.webRtc.createDataChannel(channelName, {
       ordered,
       id,
@@ -1139,12 +1115,12 @@ class Publisher extends EventEmitter {
     dataChannel.onbufferedamountlow = () => {
       const queue = this.getQueue(channelName);
 
-      console.log(
-        `Bufferedamountlow for ${channelName}, bufferedAmount:`,
-        dataChannel.bufferedAmount,
-        "queue length:",
-        queue.length
-      );
+      // console.log(
+      //   `Bufferedamountlow for ${channelName}, bufferedAmount:`,
+      //   dataChannel.bufferedAmount,
+      //   "queue length:",
+      //   queue.length
+      // );
 
       while (queue.length > 0 && dataChannel.bufferedAmount <= dataChannel.bufferedAmountLowThreshold) {
         const packet = queue.shift();
@@ -1195,7 +1171,7 @@ class Publisher extends EventEmitter {
         const MIN_MTU = 100;
         const MIN_CHUNKS = 5;
         const MAX_REDUNDANCY = 10;
-        const MIN_REDUNDANCY = 2;
+        const MIN_REDUNDANCY = 1;
         const REDUNDANCY_RATIO = 0.1;
 
         let MTU = Math.ceil(packet.length / MIN_CHUNKS);
@@ -1721,6 +1697,7 @@ class Publisher extends EventEmitter {
           this.stopShareScreen();
         };
       }
+      this.isScreenSharing = true;
 
       // Initialize screen share channels
       // this.initializeScreenShareStreams();
@@ -1732,13 +1709,12 @@ class Publisher extends EventEmitter {
           await this.createBidirectionalStream(CHANNEL_NAME.SCREEN_SHARE_AUDIO);
         }
       } else if (this.protocol === "webrtc") {
-        await this.createDataChannel(CHANNEL_NAME.SCREEN_SHARE_720P);
+        await this.createDataChannel(CHANNEL_NAME.SCREEN_SHARE_720P, STREAM_TYPE.SCREEN_SHARE);
         if (hasAudio) {
-          await this.createDataChannel(CHANNEL_NAME.SCREEN_SHARE_AUDIO);
+          await this.createDataChannel(CHANNEL_NAME.SCREEN_SHARE_AUDIO, STREAM_TYPE.SCREEN_SHARE);
         }
       }
 
-      this.isScreenSharing = true;
       // Start video encoding
       await this.startScreenVideoCapture();
 

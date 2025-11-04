@@ -91,22 +91,23 @@ const CHANNEL_NAME = {
 /**
  * Helper function to get data channel ID from channel name
  */
-function getDataChannelId(channelName, type = "camera") {
-  const mapping = {
-    camera: {
-      [CHANNEL_NAME.MEETING_CONTROL]: 0,
-      [CHANNEL_NAME.MIC_AUDIO]: 1,
-      [CHANNEL_NAME.VIDEO_360P]: 2,
-      [CHANNEL_NAME.VIDEO_720P]: 3,
-    },
-    screenShare: {
-      [CHANNEL_NAME.SCREEN_SHARE_720P]: 5,
-      [CHANNEL_NAME.SCREEN_SHARE_AUDIO]: 6,
-      // [CHANNEL_NAME.SCREEN_SHARE_1080P]: 2,
-    },
-  };
-
-  return mapping[type]?.[channelName] ?? 5;
+function getDataChannelId(channelName) {
+  switch (channelName) {
+    case CHANNEL_NAME.MEETING_CONTROL:
+      return 0;
+    case CHANNEL_NAME.MIC_AUDIO:
+      return 1;
+    case CHANNEL_NAME.VIDEO_360P:
+      return 2;
+    case CHANNEL_NAME.VIDEO_720P:
+      return 3;
+    case CHANNEL_NAME.SCREEN_SHARE_720P:
+      return 4;
+    case CHANNEL_NAME.SCREEN_SHARE_AUDIO:
+      return 5;
+    default:
+      return 7;
+  }
 }
 
 const SUB_STREAMS = {
@@ -138,12 +139,20 @@ const SUB_STREAMS = {
     name: "screen_share_audio",
     channelName: CHANNEL_NAME.SCREEN_SHARE_AUDIO,
   },
+  // SCREEN_SHARE_720P: {
+  //   name: "screen_share_720p",
+  //   width: 1280,
+  //   height: 720,
+  //   bitrate: 1_000_000,
+  //   framerate: 15,
+  //   channelName: CHANNEL_NAME.SCREEN_SHARE_720P,
+  // },
   SCREEN_SHARE_720P: {
     name: "screen_share_720p",
     width: 1280,
     height: 720,
     bitrate: 1_000_000,
-    framerate: 15,
+    framerate: 30,
     channelName: CHANNEL_NAME.SCREEN_SHARE_720P,
   },
   SCREEN_SHARE_1080P: {
@@ -159,9 +168,9 @@ const SUB_STREAMS = {
 function getSubStreams(streamType) {
   console.log("Getting sub streams for type:", streamType);
   if (streamType === STREAM_TYPE.SCREENSHARE) {
-    return [SUB_STREAMS.SCREEN_SHARE_AUDIO, SUB_STREAMS.SCREEN_SHARE_720P]; //, SUB_STREAMS.SCREEN_SHARE_1080P];
+    return [SUB_STREAMS.SCREEN_SHARE_720P, SUB_STREAMS.SCREEN_SHARE_AUDIO]; //, SUB_STREAMS.SCREEN_SHARE_1080P];
   } else if (streamType === STREAM_TYPE.CAMERA) {
-    return [SUB_STREAMS.MIC_AUDIO, SUB_STREAMS.VIDEO_360P, SUB_STREAMS.VIDEO_720P, SUB_STREAMS.MEETING_CONTROL];
+    return [SUB_STREAMS.MEETING_CONTROL, SUB_STREAMS.MIC_AUDIO, SUB_STREAMS.VIDEO_360P, SUB_STREAMS.VIDEO_720P];
   } else {
     return new Error("Invalid publisher type, cannot get sub streams for type:", streamType);
   }

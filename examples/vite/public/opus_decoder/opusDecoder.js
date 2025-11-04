@@ -1,11 +1,10 @@
 let recorderScriptLoaded = false;
 let recorderScriptLoading = false;
 let recorderScriptLoadPromise = null;
-let configNumberOfChannels = 1; // Default to stereo
+// let configNumberOfChannels = 1; // Default to stereo
+let configNumberOfChannels = 2; // Default to stereo
 
-console.log(
-  "[Opus Decoder] Initializing OpusAudioDecoder module, version 1.0.0"
-);
+console.log("[Opus Decoder] Initializing OpusAudioDecoder module, version 1.0.0");
 
 /**
  * Ensures the Recorder.js script is loaded
@@ -42,11 +41,7 @@ export async function ensureRecorderScriptLoaded() {
     script.onerror = (err) => {
       recorderScriptLoading = false;
       console.error("Failed to load Recorder.js:", err);
-      reject(
-        new Error(
-          "Failed to load Recorder.js. Please ensure the file exists at /opus_decoder/recorder.min.js"
-        )
-      );
+      reject(new Error("Failed to load Recorder.js. Please ensure the file exists at /opus_decoder/recorder.min.js"));
     };
 
     document.head.appendChild(script);

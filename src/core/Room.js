@@ -896,23 +896,8 @@ class Room extends EventEmitter {
       // Start screen share through publisher first
       await this.localParticipant.publisher.startShareScreen(screenStream);
       // todo: change logic screenshare, init new publisher with share screen type
-      // const publishUrl = `${this.mediaConfig.webtpUrl}/publish/${this.id}/${this.streamId}`;
-      // const screenSharePublisher = new Publisher({
-      //   publishUrl,
-      //   publishType: STREAM_TYPE.SCREENSHARE,
-      //   streamId: this.streamId,
-      //   userId: this.localParticipant.userId, // Pass userId for screen share tile mapping
-      //   mediaStream: screenStream,
-      //   roomId: this.id,
-      //   webRtcHost: this.mediaConfig.hostNode,
-      //   // !for testing, in production we should detect based on browser webtransport support, fallback to webrtc. value: "webtransport", "webrtc"
-      //   protocol: this.mediaConfig.publishProtocol,
-      // });
-
-      // await screenSharePublisher.startPublishing();
 
       this.localParticipant.isScreenSharing = true;
-      // this.localParticipant.setScreenSharePublisher(screenSharePublisher);
 
       // Emit with original stream for UI (both can share the same stream)
       this.emit("screenShareStarted", {

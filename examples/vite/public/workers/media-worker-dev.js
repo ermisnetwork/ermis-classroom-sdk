@@ -496,7 +496,7 @@ function handleBinaryPacket(dataBuffer) {
     if (keyFrameReceived) {
       if (mediaDecoders.get(CHANNEL_NAME.VIDEO_720P).state === "closed") {
         mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
-        const config720p = videoConfigs.get(CHANNEL_NAME.VIDEO_720P);
+        const config720p = mediaConfigs.get(CHANNEL_NAME.VIDEO_720P);
         console.log("Decoder error, Configuring 720p decoder with config:", config720p);
         mediaDecoders.get(CHANNEL_NAME.VIDEO_720P).configure(config720p);
       }
@@ -521,7 +521,7 @@ function handleBinaryPacket(dataBuffer) {
     if (keyFrameReceived) {
       if (mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).state === "closed") {
         videoDecoderScreenShare720p = new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P));
-        mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).configure(videoConfigs.get(CHANNEL_NAME.SCREEN_SHARE_720P));
+        mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).configure(mediaConfigs.get(CHANNEL_NAME.SCREEN_SHARE_720P));
       }
       const encodedChunk = new EncodedVideoChunk({
         timestamp: timestamp * 1000,
@@ -594,7 +594,7 @@ async function initializeDecoders() {
 }
 
 // function configureVideoDecoders(channelName) {
-//   const config = videoConfigs.get(channelName);
+//   const config = mediaConfigs.get(channelName);
 //   if (!config) return;
 
 //   try {
