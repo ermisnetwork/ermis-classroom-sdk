@@ -66,7 +66,7 @@ class CommandSender {
 
   async initSubscribeChannelStream(subscriberType) {
     const initQuality =
-      subscriberType === STREAM_TYPE.SCREENSHARE ? CHANNEL_NAME.SCREEN_SHARE_720P : CHANNEL_NAME.VIDEO_720P;
+      subscriberType === STREAM_TYPE.SCREEN_SHARE ? CHANNEL_NAME.SCREEN_SHARE_720P : CHANNEL_NAME.VIDEO_720P;
     console.log(
       "[Client Command]Initializing subscribe channel stream with type:",
       subscriberType,

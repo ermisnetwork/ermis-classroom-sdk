@@ -7,17 +7,7 @@ import Subscriber from "../media/SubscriberDev.js";
 import AudioMixer from "../media/AudioMixer.js";
 import { determineTransport, logTransportInfo } from "../utils/browserDetection.js";
 
-import {
-  FRAME_TYPE,
-  getFrameType,
-  getTransportPacketType,
-  CHANNEL_NAME,
-  getDataChannelId,
-  PUBLISH_TYPE,
-  STREAM_TYPE,
-  getSubStreams,
-  MEETING_EVENTS,
-} from "../constant/publisherConstants.js";
+import { STREAM_TYPE } from "../constant/publisherConstants.js";
 
 /**
  * Represents a meeting room
@@ -949,7 +939,7 @@ class Room extends EventEmitter {
         streamOutputEnabled: true,
         host: this.mediaConfig.hostNode,
         protocol: this.mediaConfig.subscribeProtocol,
-        subscribeType: STREAM_TYPE.SCREENSHARE,
+        subscribeType: STREAM_TYPE.SCREEN_SHARE,
 
         onStatus: (msg, isError) => {
           participant.setConnectionStatus(isError ? "failed" : "connected");

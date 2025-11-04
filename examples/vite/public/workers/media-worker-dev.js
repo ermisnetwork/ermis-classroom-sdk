@@ -563,7 +563,7 @@ async function initializeDecoders() {
       mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, new OpusAudioDecoder(audioInit));
       break;
 
-    case STREAM_TYPE.SCREENSHARE:
+    case STREAM_TYPE.SCREEN_SHARE:
       mediaDecoders.set(
         CHANNEL_NAME.SCREEN_SHARE_720P,
         new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P))

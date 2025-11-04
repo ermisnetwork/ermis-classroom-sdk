@@ -1,6 +1,6 @@
 const STREAM_TYPE = {
   CAMERA: "camera",
-  SCREENSHARE: "screen_share",
+  SCREEN_SHARE: "screen_share",
 };
 
 const CLIENT_COMMANDS = {
@@ -167,7 +167,7 @@ const SUB_STREAMS = {
 
 function getSubStreams(streamType) {
   console.log("Getting sub streams for type:", streamType);
-  if (streamType === STREAM_TYPE.SCREENSHARE) {
+  if (streamType === STREAM_TYPE.SCREEN_SHARE) {
     return [SUB_STREAMS.SCREEN_SHARE_720P, SUB_STREAMS.SCREEN_SHARE_AUDIO]; //, SUB_STREAMS.SCREEN_SHARE_1080P];
   } else if (streamType === STREAM_TYPE.CAMERA) {
     return [SUB_STREAMS.MEETING_CONTROL, SUB_STREAMS.MIC_AUDIO, SUB_STREAMS.VIDEO_360P, SUB_STREAMS.VIDEO_720P];

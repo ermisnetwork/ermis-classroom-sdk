@@ -88,7 +88,7 @@ class Publisher extends EventEmitter {
     this.dcMsgQueues = {};
     this.dcPacketSendTime = {};
     this.userMediaSubChannels = getSubStreams(STREAM_TYPE.CAMERA);
-    this.screenSubChannels = getSubStreams(STREAM_TYPE.SCREENSHARE);
+    this.screenSubChannels = getSubStreams(STREAM_TYPE.SCREEN_SHARE);
 
     // command sender
     // this.commandSender = null;
@@ -121,7 +121,7 @@ class Publisher extends EventEmitter {
   }
 
   getDefaultConfig(type, options) {
-    if (type === STREAM_TYPE.SCREENSHARE) {
+    if (type === STREAM_TYPE.SCREEN_SHARE) {
       return {
         codec: "avc1.640c34",
         width: options.width || 1920,
