@@ -82,6 +82,7 @@ class Publisher extends EventEmitter {
 
     this.currentAudioStream = null;
     this.triggerWorker = null;
+    this.screenShareTriggerWorker = null;
     this.workerPing = null;
 
     this.sequenceNumbers = {};
@@ -126,10 +127,10 @@ class Publisher extends EventEmitter {
     if (type === STREAM_TYPE.SCREEN_SHARE) {
       return {
         codec: "avc1.640c34",
-        width: options.width || 1920,
-        height: options.height || 1080,
+        width: options.width || 1280,
+        height: options.height || 720,
         framerate: options.framerate || 30,
-        bitrate: options.bitrate || 1_500_000,
+        bitrate: options.bitrate || 800_000,
       };
     } else {
       return {
@@ -144,6 +145,13 @@ class Publisher extends EventEmitter {
 
   initializeSequenceTracking() {
     this.userMediaSubChannels.forEach((stream) => {
+      const key = stream.channelName;
+      this.sequenceNumbers[key] = 0;
+      this.dcMsgQueues[key] = [];
+      this.dcPacketSendTime[key] = performance.now();
+    });
+
+    this.screenSubChannels.forEach((stream) => {
       const key = stream.channelName;
       this.sequenceNumbers[key] = 0;
       this.dcMsgQueues[key] = [];
@@ -164,12 +172,28 @@ class Publisher extends EventEmitter {
       }
     });
 
+    this.screenSubChannels.forEach((stream) => {
+      if (!stream.channelName.startsWith(CHANNEL_NAME.MEETING_CONTROL)) {
+        this.dcMsgQueues[stream.channelName] = [];
+      }
+    });
+
     this.gopTracking = {};
     this.needKeyFrame = {};
 
     this.userMediaSubChannels.forEach((stream) => {
       if (stream.width) {
         // video streams
+        this.gopTracking[stream.channelName] = {
+          currentGopStart: 0,
+          lastKeyFrameIndex: -1,
+        };
+        this.needKeyFrame[stream.channelName] = false;
+      }
+    });
+
+    this.screenSubChannels.forEach((stream) => {
+      if (stream.width) {
         this.gopTracking[stream.channelName] = {
           currentGopStart: 0,
           lastKeyFrameIndex: -1,
@@ -893,7 +917,7 @@ class Publisher extends EventEmitter {
             width: subStream.width,
             height: subStream.height,
             bitrate: subStream.bitrate,
-            framerate: this.currentConfig.framerate,
+            framerate: subStream.framerate,
             latencyMode: "realtime",
             hardwareAcceleration: "prefer-hardware",
           },
@@ -1636,6 +1660,11 @@ class Publisher extends EventEmitter {
         this.triggerWorker.terminate();
         this.triggerWorker = null;
       }
+      if (this.screenShareTriggerWorker) {
+        this.screenShareTriggerWorker.terminate();
+        this.screenShareTriggerWorker = null;
+      }
+
       if (this.workerPing) {
         this.workerPing.terminate();
         this.workerPing = null;
@@ -1769,21 +1798,23 @@ class Publisher extends EventEmitter {
     const screenEncoderConfig = this.videoEncoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).config;
     screenVideoEncoder.configure(screenEncoderConfig);
 
+    this.screenShareTriggerWorker = new Worker("/polyfills/triggerWorker.js");
+    this.screenShareTriggerWorker.postMessage({ frameRate: 20 });
     // Create processor
-    this.screenVideoProcessor = new MediaStreamTrackProcessor(videoTrack);
+    this.screenVideoProcessor = new MediaStreamTrackProcessor(videoTrack, this.screenShareTriggerWorker, true);
     this.screenVideoReader = this.screenVideoProcessor.readable.getReader();
 
     // Start processing frames
     (async () => {
-      let frameCounter = 0;
+      let displayFrameCounter = 0;
       try {
         while (this.isScreenSharing) {
           const result = await this.screenVideoReader.read();
           if (result.done) break;
 
           const frame = result.value;
-          frameCounter++;
-          const keyFrame = frameCounter % 30 === 0;
+          displayFrameCounter++;
+          const keyFrame = displayFrameCounter % 30 === 0;
           if (screenVideoEncoder.encodeQueueSize <= 2) {
             screenVideoEncoder.encode(frame, { keyFrame });
           }

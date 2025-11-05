@@ -519,17 +519,23 @@ function handleBinaryPacket(dataBuffer) {
     }
 
     if (keyFrameReceived) {
-      if (mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).state === "closed") {
-        videoDecoderScreenShare720p = new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P));
-        mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).configure(mediaConfigs.get(CHANNEL_NAME.SCREEN_SHARE_720P));
-      }
-      const encodedChunk = new EncodedVideoChunk({
-        timestamp: timestamp * 1000,
-        type,
-        data,
-      });
+      try {
+        if (mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).state === "closed") {
+          videoDecoderScreenShare720p = new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P));
+          const screenShare720pConfig = mediaConfigs.get(CHANNEL_NAME.SCREEN_SHARE_720P);
+          console.log("Decoder error, Configuring screen share 720p decoder with config:", screenShare720pConfig);
+          mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).configure(screenShare720pConfig);
+        }
+        const encodedChunk = new EncodedVideoChunk({
+          timestamp: timestamp * 1000,
+          type,
+          data,
+        });
 
-      videoDecoderScreenShare720p.decode(encodedChunk);
+        videoDecoderScreenShare720p.decode(encodedChunk);
+      } catch (error) {
+        console.error("Screen share video decode error:", error);
+      }
     }
     return;
   } else if (frameType === 6) {

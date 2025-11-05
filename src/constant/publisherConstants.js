@@ -144,8 +144,8 @@ const SUB_STREAMS = {
     name: "screen_share_720p",
     width: 1280,
     height: 720,
-    bitrate: 1_000_000,
-    framerate: 30,
+    bitrate: 800_000,
+    framerate: 20,
     channelName: CHANNEL_NAME.SCREEN_SHARE_720P,
   },
   SCREEN_SHARE_1080P: {
