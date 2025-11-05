@@ -4,7 +4,6 @@ import {
   getFrameType,
   getTransportPacketType,
   CHANNEL_NAME,
-  getDataChannelId,
   STREAM_TYPE,
   getSubStreams,
   MEETING_EVENTS,
@@ -52,6 +51,8 @@ class Publisher extends EventEmitter {
     this.webRtc = null;
     this.isChannelOpen = false;
     this.isPublishing = false;
+
+    this.webRtcConnections = new Map();
 
     // Media state
     this.videoEnabled = true;
@@ -119,8 +120,6 @@ class Publisher extends EventEmitter {
     this.screenAudioProcessor = null;
     this.isScreenSharing = false;
     this.screenVideoEncoder = null;
-
-    this.screenShareWebrtc = null;
   }
 
   getDefaultConfig(type, options) {
@@ -1069,39 +1068,34 @@ class Publisher extends EventEmitter {
   async setupWebRTCConnection(action = STREAM_TYPE.CAMERA) {
     const substreams = action === STREAM_TYPE.SCREEN_SHARE ? this.screenSubChannels : this.userMediaSubChannels;
     try {
-      const webRtc = new RTCPeerConnection();
-
-      if (action === STREAM_TYPE.SCREEN_SHARE) {
-        this.screenShareWebrtc = webRtc;
-      } else {
-        this.webRtc = webRtc;
-      }
-
       for (const subStream of substreams) {
-        await this.createDataChannel(subStream.channelName);
+        const webRtc = new RTCPeerConnection();
+        this.webRtcConnections.set(subStream.channelName, webRtc);
+        this.createDataChannel(subStream.channelName, webRtc);
+        const offer = await webRtc.createOffer();
+        await webRtc.setLocalDescription(offer);
+
+        // ACTION = CHANNEL NAME (không phải stream type)
+        const response = await fetch(`https://${this.webRtcHost}/meeting/sdp/answer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            offer,
+            room_id: this.roomId,
+            stream_id: this.streamId,
+            action: subStream.channelName, // ✅ ACTION = CHANNEL NAME
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server responded with ${response.status} for ${channelName}`);
+        }
+
+        const answer = await response.json();
+        await webRtc.setRemoteDescription(answer);
+
+        console.log(`WebRTC connection established for channel: ${subStream.channelName}`);
       }
-
-      const offer = await webRtc.createOffer();
-      await webRtc.setLocalDescription(offer);
-      console.log("WebRTC offer created and set as local description:", offer);
-      const response = await fetch(`https://${this.webRtcHost}/meeting/sdp/answer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          offer,
-          room_id: this.roomId,
-          stream_id: this.streamId,
-          action,
-        }),
-      });
-      console.log("Response from WebRTC server:", response);
-
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
-      }
-
-      const answer = await response.json();
-      await webRtc.setRemoteDescription(answer);
 
       this.isChannelOpen = true;
     } catch (error) {
@@ -1109,19 +1103,9 @@ class Publisher extends EventEmitter {
     }
   }
 
-  async createDataChannel(channelName) {
-    const id = getDataChannelId(channelName);
+  async createDataChannel(channelName, webRtc) {
+    // const id = getDataChannelId(channelName);
 
-    let webRtc;
-    if (
-      channelName === CHANNEL_NAME.SCREEN_SHARE_720P ||
-      channelName === CHANNEL_NAME.SCREEN_SHARE_1080P ||
-      channelName === CHANNEL_NAME.SCREEN_SHARE_AUDIO
-    ) {
-      webRtc = this.screenShareWebrtc;
-    } else {
-      webRtc = this.webRtc;
-    }
     // Set ordered delivery for control channel
     let ordered = false;
     if (channelName === CHANNEL_NAME.MEETING_CONTROL) {
@@ -1129,7 +1113,7 @@ class Publisher extends EventEmitter {
     }
     const dataChannel = webRtc.createDataChannel(channelName, {
       ordered,
-      id,
+      id: 0,
       negotiated: true,
     });
 
@@ -1165,7 +1149,7 @@ class Publisher extends EventEmitter {
 
     dataChannel.onopen = async () => {
       this.publishStreams.set(channelName, {
-        id,
+        id: 0,
         dataChannel,
         dataChannelReady: true,
         configSent: false,
@@ -1635,10 +1619,11 @@ class Publisher extends EventEmitter {
       }
 
       // Close WebRTC
-      if (this.webRtc) {
-        this.webRtc.close();
-        this.webRtc = null;
+      for (const [channelName, webRtc] of this.webRtcConnections) {
+        webRtc.close();
+        console.log(`Closed WebRTC connection for ${channelName}`);
       }
+      this.webRtcConnections.clear();
 
       // Stop all tracks
       if (this.stream) {
