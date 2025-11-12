@@ -274,9 +274,9 @@ export class VideoProcessor extends EventEmitter<{
       ) {
         const decoderConfig = {
           codec: metadata.decoderConfig.codec,
-          codedWidth: metadata.decoderConfig.codedWidth,
-          codedHeight: metadata.decoderConfig.codedHeight,
-          description: metadata.decoderConfig.description,
+          codedWidth: metadata.decoderConfig.codedWidth!,
+          codedHeight: metadata.decoderConfig.codedHeight!,
+          description: metadata.decoderConfig.description!,
         };
 
         this.videoEncoderManager.setMetadataReady(

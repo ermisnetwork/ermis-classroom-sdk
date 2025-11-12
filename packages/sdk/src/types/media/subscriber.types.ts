@@ -2,8 +2,7 @@
  * Subscriber Types and Interfaces
  */
 
-// Connection status type
-export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'failed';
+import type { ConnectionStatus } from '../core/ermisClient.types';
 
 // Quality levels for bitrate switching
 export type QualityLevel = '360p' | '720p' | '1080p';

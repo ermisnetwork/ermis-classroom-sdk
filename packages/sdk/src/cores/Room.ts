@@ -3,12 +3,12 @@
  * Handles participant management, media connections, sub-rooms, and chat
  */
 
-import { EventEmitter } from '../events/EventEmitter';
-import { Participant } from './Participant';
-import { SubRoom } from './SubRoom';
-import { Publisher } from '../media/Publisher';
-import { Subscriber } from '../media/Subscriber';
-import { AudioMixer } from '../media/audioMixer/AudioMixer';
+import { EventEmitter } from "../events/EventEmitter";
+import { Participant } from "./Participant";
+import { SubRoom } from "./SubRoom";
+import { Publisher } from "../media/publisher/Publisher";
+import { Subscriber } from "../media/subscriber/Subscriber";
+import { AudioMixer } from "../media/audioMixer/AudioMixer";
 import type {
   RoomConfig,
   RoomType,
@@ -23,7 +23,7 @@ import type {
   RoomApiData,
   ServerEvent,
   MediaConfig,
-} from '../types/core/room.types';
+} from "../types/core/room.types";
 
 export class Room extends EventEmitter {
   // Basic room properties
@@ -65,7 +65,7 @@ export class Room extends EventEmitter {
     this.id = config.id;
     this.name = config.name;
     this.code = config.code;
-    this.type = config.type || 'main';
+    this.type = config.type || "main";
     this.ownerId = config.ownerId;
     this.apiClient = config.apiClient;
     this.mediaConfig = config.mediaConfig;
@@ -74,14 +74,17 @@ export class Room extends EventEmitter {
   /**
    * Join this room
    */
-  async join(userId: string, mediaStream: MediaStream | null = null): Promise<JoinRoomResult> {
+  async join(
+    userId: string,
+    mediaStream: MediaStream | null = null,
+  ): Promise<JoinRoomResult> {
     if (this.isActive) {
-      throw new Error('Already joined this room');
+      throw new Error("Already joined this room");
     }
 
     try {
-      this.emit('joining', { room: this });
-      console.log('Joining room with code', this.code);
+      this.emit("joining", { room: this });
+      console.log("Joining room with code", this.code);
 
       // Join via API
       const joinResponse = await this.apiClient.joinRoom(this.code);
@@ -93,8 +96,10 @@ export class Room extends EventEmitter {
       this.localUserId = userId;
 
       // Get room details and members
-      const roomDetails = await this.apiClient.getRoomById(joinResponse.room_id);
-      console.log('Joined room, details:', roomDetails);
+      const roomDetails = await this.apiClient.getRoomById(
+        joinResponse.room_id,
+      );
+      console.log("Joined room, details:", roomDetails);
 
       // Update room info
       this._updateFromApiData(roomDetails.room);
@@ -113,7 +118,7 @@ export class Room extends EventEmitter {
       await this._setupMediaConnections(mediaStream);
 
       this.isActive = true;
-      this.emit('joined', { room: this, participants: this.participants });
+      this.emit("joined", { room: this, participants: this.participants });
 
       return {
         room: this,
@@ -121,10 +126,10 @@ export class Room extends EventEmitter {
         participants: Array.from(this.participants.values()),
       };
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'join',
+        action: "join",
       });
       throw error;
     }
@@ -139,7 +144,7 @@ export class Room extends EventEmitter {
     }
 
     try {
-      this.emit('leaving', { room: this });
+      this.emit("leaving", { room: this });
 
       // Cleanup media connections
       await this._cleanupMediaConnections();
@@ -153,12 +158,12 @@ export class Room extends EventEmitter {
       }
 
       this.isActive = false;
-      this.emit('left', { room: this });
+      this.emit("left", { room: this });
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'leave',
+        action: "leave",
       });
       throw error;
     }
@@ -168,12 +173,12 @@ export class Room extends EventEmitter {
    * Create sub rooms (breakout rooms) - main room only
    */
   async createSubRoom(config: SubRoomCreationConfig): Promise<any> {
-    if (this.type !== 'main') {
-      throw new Error('Only main rooms can create sub rooms');
+    if (this.type !== "main") {
+      throw new Error("Only main rooms can create sub rooms");
     }
 
     try {
-      this.emit('creatingSubRoom', { room: this, config });
+      this.emit("creatingSubRoom", { room: this, config });
 
       // Create sub rooms via API with the expected format
       const subRoomsData = await this.apiClient.createSubRoom({
@@ -199,16 +204,16 @@ export class Room extends EventEmitter {
         }
       }
 
-      this.emit('subRoomCreated', {
+      this.emit("subRoomCreated", {
         room: this,
       });
 
       return subRoomsData;
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'createSubRoom',
+        action: "createSubRoom",
       });
       throw error;
     }
@@ -218,26 +223,28 @@ export class Room extends EventEmitter {
    * Create breakout room
    */
   async createBreakoutRoom(config: BreakoutRoomConfig): Promise<Room[]> {
-    if (this.type !== 'main') {
-      throw new Error('Only main rooms can create breakout rooms');
+    if (this.type !== "main") {
+      throw new Error("Only main rooms can create breakout rooms");
     }
 
     try {
-      this.emit('creatingBreakoutRoom', { room: this, config });
+      this.emit("creatingBreakoutRoom", { room: this, config });
 
       const roomsData = config.rooms.map((roomConfig) => {
-        const formattedParticipants = (roomConfig.participants || []).map((p) => {
-          const participantObj = this.participants.get(p.userId);
+        const formattedParticipants = (roomConfig.participants || []).map(
+          (p) => {
+            const participantObj = this.participants.get(p.userId);
 
-          if (!participantObj) {
-            throw new Error(`Participant ${p.userId} not found in main room`);
-          }
+            if (!participantObj) {
+              throw new Error(`Participant ${p.userId} not found in main room`);
+            }
 
-          return {
-            user_id: participantObj.userId,
-            stream_id: participantObj.streamId,
-          };
-        });
+            return {
+              user_id: participantObj.userId,
+              stream_id: participantObj.streamId,
+            };
+          },
+        );
 
         return {
           room_name: roomConfig.name,
@@ -245,7 +252,10 @@ export class Room extends EventEmitter {
         };
       });
 
-      const apiResponse = await this.apiClient.createBreakoutRoom(this.id, roomsData);
+      const apiResponse = await this.apiClient.createBreakoutRoom(
+        this.id,
+        roomsData,
+      );
 
       const createdRooms: Room[] = [];
       for (const roomData of apiResponse?.rooms || []) {
@@ -253,7 +263,7 @@ export class Room extends EventEmitter {
           id: roomData.room_id,
           name: roomData.room_name,
           code: roomData.room_code,
-          type: 'breakout',
+          type: "breakout",
           ownerId: roomData.user_id,
           apiClient: this.apiClient,
           mediaConfig: this.mediaConfig,
@@ -262,15 +272,15 @@ export class Room extends EventEmitter {
         this.subRooms.set(subRoom.id, subRoom as any);
         createdRooms.push(subRoom);
 
-        this.emit('subRoomCreated', { room: this, subRoom });
+        this.emit("subRoomCreated", { room: this, subRoom });
       }
 
       return createdRooms;
     } catch (err) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: err instanceof Error ? err : new Error(String(err)),
-        action: 'createBreakoutRooms',
+        action: "createBreakoutRooms",
         err: err as Error,
       });
       throw err;
@@ -283,15 +293,17 @@ export class Room extends EventEmitter {
   async joinBreakoutRoom(): Promise<any> {
     try {
       if (!this.apiClient) {
-        throw new Error('Client not initialized or missing ApiClient');
+        throw new Error("Client not initialized or missing ApiClient");
       }
-      if (!this.localParticipant) throw new Error('No local participant found');
+      if (!this.localParticipant) throw new Error("No local participant found");
 
       const localUserId = this.localParticipant.userId;
       let targetSubRoom: SubRoom | null = null;
 
       if (!this.subRooms || this.subRooms.size === 0) {
-        console.warn("⚠️ No breakout rooms found. Maybe they haven't been created yet?");
+        console.warn(
+          "⚠️ No breakout rooms found. Maybe they haven't been created yet?",
+        );
         return;
       }
 
@@ -311,7 +323,7 @@ export class Room extends EventEmitter {
 
       const subRoomId = targetSubRoom.id || (targetSubRoom as any).sub_room_id;
 
-      this.emit('joiningBreakoutRoom', {
+      this.emit("joiningBreakoutRoom", {
         userId: localUserId,
         roomCode: this.code,
         subRoomId,
@@ -322,7 +334,7 @@ export class Room extends EventEmitter {
         parentRoomId: this.id,
       });
 
-      this.emit('joinedBreakoutRoom', {
+      this.emit("joinedBreakoutRoom", {
         userId: localUserId,
         subRoom: targetSubRoom,
         response,
@@ -331,12 +343,12 @@ export class Room extends EventEmitter {
       console.log(`✅ User ${localUserId} joined breakout room: ${this.code}`);
       return response;
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'joinBreakoutRoom',
+        action: "joinBreakoutRoom",
         room: this,
       });
-      console.error('❌ joinBreakoutRoom failed:', error);
+      console.error("❌ joinBreakoutRoom failed:", error);
       throw error;
     }
   }
@@ -345,7 +357,7 @@ export class Room extends EventEmitter {
    * Get all sub rooms
    */
   async getSubRooms(): Promise<any[]> {
-    if (this.type !== 'main') {
+    if (this.type !== "main") {
       return [];
     }
 
@@ -353,10 +365,10 @@ export class Room extends EventEmitter {
       const subRoomsData = await this.apiClient.getSubRooms(this.id);
       return subRoomsData || [];
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'getSubRooms',
+        action: "getSubRooms",
       });
       throw error;
     }
@@ -367,7 +379,7 @@ export class Room extends EventEmitter {
    */
   async joinSubRoom(subRoomId: string): Promise<any> {
     try {
-      this.emit('joiningSubRoom', { room: this, subRoomId });
+      this.emit("joiningSubRoom", { room: this, subRoomId });
 
       // Join via API
       const joinResponse = await this.apiClient.joinSubRoom({
@@ -376,7 +388,7 @@ export class Room extends EventEmitter {
         room_code: this.code,
       });
 
-      this.emit('joinedSubRoom', {
+      this.emit("joinedSubRoom", {
         room: this,
         subRoomId,
         response: joinResponse,
@@ -384,10 +396,10 @@ export class Room extends EventEmitter {
 
       return joinResponse;
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'joinSubRoom',
+        action: "joinSubRoom",
       });
       throw error;
     }
@@ -398,7 +410,7 @@ export class Room extends EventEmitter {
    */
   async leaveSubRoom(subRoomId: string): Promise<any> {
     try {
-      this.emit('leavingSubRoom', { room: this, subRoomId });
+      this.emit("leavingSubRoom", { room: this, subRoomId });
 
       // Leave via API
       const leaveResponse = await this.apiClient.leaveSubRoom({
@@ -406,7 +418,7 @@ export class Room extends EventEmitter {
         sub_room_id: subRoomId,
       });
 
-      this.emit('leftSubRoom', {
+      this.emit("leftSubRoom", {
         room: this,
         subRoomId,
         response: leaveResponse,
@@ -414,10 +426,10 @@ export class Room extends EventEmitter {
 
       return leaveResponse;
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'leaveSubRoom',
+        action: "leaveSubRoom",
       });
       throw error;
     }
@@ -427,27 +439,27 @@ export class Room extends EventEmitter {
    * Close all sub rooms - main room only
    */
   async closeSubRoom(): Promise<any> {
-    if (this.type !== 'main') {
-      throw new Error('Only main rooms can close sub rooms');
+    if (this.type !== "main") {
+      throw new Error("Only main rooms can close sub rooms");
     }
 
     try {
-      this.emit('closingSubRoom', { room: this });
+      this.emit("closingSubRoom", { room: this });
 
       // Close all sub rooms via API
       const closeResponse = await this.apiClient.closeSubRoom(this.id);
 
-      this.emit('closedSubRoom', {
+      this.emit("closedSubRoom", {
         room: this,
         response: closeResponse,
       });
 
       return closeResponse;
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'closeSubRoom',
+        action: "closeSubRoom",
       });
       throw error;
     }
@@ -456,17 +468,22 @@ export class Room extends EventEmitter {
   /**
    * Send a chat message
    */
-  async sendMessage(text: string, metadata: MessageMetadata = {}): Promise<ChatMessage> {
+  async sendMessage(
+    text: string,
+    metadata: MessageMetadata = {},
+  ): Promise<ChatMessage> {
     if (!this.isActive) {
-      throw new Error('Cannot send message: room is not active');
+      throw new Error("Cannot send message: room is not active");
     }
 
     if (!this.localParticipant?.publisher) {
-      throw new Error('Cannot send message: publisher not available');
+      throw new Error("Cannot send message: publisher not available");
     }
 
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
-      throw new Error('Message text is required and must be a non-empty string');
+    if (!text || typeof text !== "string" || text.trim().length === 0) {
+      throw new Error(
+        "Message text is required and must be a non-empty string",
+      );
     }
 
     try {
@@ -482,7 +499,7 @@ export class Room extends EventEmitter {
       };
 
       const messageEvent = {
-        type: 'message',
+        type: "message",
         ...message,
       };
 
@@ -490,17 +507,17 @@ export class Room extends EventEmitter {
 
       this.messages.push(message);
 
-      this.emit('messageSent', {
+      this.emit("messageSent", {
         room: this,
         message,
       });
 
       return message;
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'sendMessage',
+        action: "sendMessage",
       });
       throw error;
     }
@@ -511,16 +528,16 @@ export class Room extends EventEmitter {
    */
   async deleteMessage(messageId: string): Promise<boolean> {
     if (!this.isActive) {
-      throw new Error('Cannot delete message: room is not active');
+      throw new Error("Cannot delete message: room is not active");
     }
 
     if (!this.localParticipant?.publisher) {
-      throw new Error('Cannot delete message: publisher not available');
+      throw new Error("Cannot delete message: publisher not available");
     }
 
     try {
       const deleteEvent = {
-        type: 'messageDelete',
+        type: "messageDelete",
         messageId,
         senderId: this.localParticipant.userId,
         roomId: this.id,
@@ -531,17 +548,17 @@ export class Room extends EventEmitter {
 
       this.messages = this.messages.filter((m) => m.id !== messageId);
 
-      this.emit('messageDeleted', {
+      this.emit("messageDeleted", {
         room: this,
         messageId,
       });
 
       return true;
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'deleteMessage',
+        action: "deleteMessage",
       });
       throw error;
     }
@@ -556,20 +573,26 @@ export class Room extends EventEmitter {
     metadata: MessageMetadata = {},
   ): Promise<boolean> {
     if (!this.isActive) {
-      throw new Error('Cannot update message: room is not active');
+      throw new Error("Cannot update message: room is not active");
     }
 
     if (!this.localParticipant?.publisher) {
-      throw new Error('Cannot update message: publisher not available');
+      throw new Error("Cannot update message: publisher not available");
     }
 
-    if (!newText || typeof newText !== 'string' || newText.trim().length === 0) {
-      throw new Error('New message text is required and must be a non-empty string');
+    if (
+      !newText ||
+      typeof newText !== "string" ||
+      newText.trim().length === 0
+    ) {
+      throw new Error(
+        "New message text is required and must be a non-empty string",
+      );
     }
 
     try {
       const updateEvent = {
-        type: 'messageUpdate',
+        type: "messageUpdate",
         messageId,
         text: newText.trim(),
         senderId: this.localParticipant.userId,
@@ -590,7 +613,7 @@ export class Room extends EventEmitter {
         };
       }
 
-      this.emit('messageUpdated', {
+      this.emit("messageUpdated", {
         room: this,
         messageId,
         text: newText.trim(),
@@ -598,10 +621,10 @@ export class Room extends EventEmitter {
 
       return true;
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'updateMessage',
+        action: "updateMessage",
       });
       throw error;
     }
@@ -621,7 +644,7 @@ export class Room extends EventEmitter {
 
     try {
       const typingEvent = {
-        type: isTyping ? 'typingStart' : 'typingStop',
+        type: isTyping ? "typingStart" : "typingStop",
         userId: this.localParticipant.userId,
         roomId: this.id,
         timestamp: Date.now(),
@@ -629,7 +652,7 @@ export class Room extends EventEmitter {
 
       await this.localParticipant.publisher.sendEvent(typingEvent);
     } catch (error) {
-      console.error('Failed to send typing indicator:', error);
+      console.error("Failed to send typing indicator:", error);
     }
   }
 
@@ -680,7 +703,7 @@ export class Room extends EventEmitter {
       this.localParticipant = participant;
     }
 
-    this.emit('participantAdded', { room: this, participant });
+    this.emit("participantAdded", { room: this, participant });
 
     return participant;
   }
@@ -706,7 +729,7 @@ export class Room extends EventEmitter {
       this.pinnedParticipant = null;
     }
 
-    this.emit('participantRemoved', { room: this, participant });
+    this.emit("participantRemoved", { room: this, participant });
 
     return participant;
   }
@@ -741,7 +764,7 @@ export class Room extends EventEmitter {
     participant.isPinned = true;
     this.pinnedParticipant = participant;
 
-    this.emit('participantPinned', { room: this, participant });
+    this.emit("participantPinned", { room: this, participant });
 
     return true;
   }
@@ -762,7 +785,7 @@ export class Room extends EventEmitter {
       this.pinParticipant(this.localParticipant.userId);
     }
 
-    this.emit('participantUnpinned', {
+    this.emit("participantUnpinned", {
       room: this,
       participant: unpinnedParticipant,
     });
@@ -792,11 +815,11 @@ export class Room extends EventEmitter {
    */
   async startScreenShare(): Promise<MediaStream> {
     if (!this.localParticipant || !this.localParticipant.publisher) {
-      throw new Error('Local participant or publisher not available');
+      throw new Error("Local participant or publisher not available");
     }
 
     try {
-      this.emit('screenShareStarting', { room: this });
+      this.emit("screenShareStarting", { room: this });
 
       // Get display media
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
@@ -810,7 +833,7 @@ export class Room extends EventEmitter {
       this.localParticipant.isScreenSharing = true;
 
       // Emit with original stream for UI
-      this.emit('screenShareStarted', {
+      this.emit("screenShareStarted", {
         room: this,
         stream: screenStream,
         participant: this.localParticipant.getInfo(),
@@ -818,10 +841,10 @@ export class Room extends EventEmitter {
 
       return screenStream;
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'startScreenShare',
+        action: "startScreenShare",
       });
       throw error;
     }
@@ -832,21 +855,21 @@ export class Room extends EventEmitter {
    */
   async stopScreenShare(): Promise<void> {
     if (!this.localParticipant || !this.localParticipant.publisher) {
-      throw new Error('Local participant or publisher not available');
+      throw new Error("Local participant or publisher not available");
     }
 
     try {
-      this.emit('screenShareStopping', { room: this });
+      this.emit("screenShareStopping", { room: this });
 
       await this.localParticipant.publisher.stopShareScreen();
 
       this.localParticipant.isScreenSharing = false;
-      this.emit('screenShareStopped', { room: this });
+      this.emit("screenShareStopped", { room: this });
     } catch (error) {
-      this.emit('error', {
+      this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: 'stopScreenShare',
+        action: "stopScreenShare",
       });
       throw error;
     }
@@ -872,11 +895,8 @@ export class Room extends EventEmitter {
         host: this.mediaConfig.host,
         isScreenSharing: true,
         streamOutputEnabled: true,
-        onStatus: (msg: string, isError: boolean) => {
-          console.log(`Screen share status: ${msg}`);
-        },
-        audioWorkletUrl: '/workers/audio-worklet1.js',
-        mstgPolyfillUrl: '/polyfills/MSTG_polyfill.js',
+        audioWorkletUrl: "/workers/audio-worklet1.js",
+        mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
       });
 
       // Add to audio mixer if has audio
@@ -885,8 +905,8 @@ export class Room extends EventEmitter {
       }
 
       // Setup stream event forwarding
-      screenSubscriber.on('remoteStreamReady', (data: any) => {
-        this.emit('remoteScreenShareStreamReady', {
+      screenSubscriber.on("remoteStreamReady", (data: any) => {
+        this.emit("remoteScreenShareStreamReady", {
           ...data,
           participant: participant.getInfo(),
           roomId: this.id,
@@ -899,7 +919,7 @@ export class Room extends EventEmitter {
       participant.screenSubscriber = screenSubscriber;
       participant.isScreenSharing = true;
 
-      this.emit('remoteScreenShareStarted', { room: this, participant });
+      this.emit("remoteScreenShareStarted", { room: this, participant });
     } else {
       // Stop screen share
       if (participant.screenSubscriber) {
@@ -909,7 +929,7 @@ export class Room extends EventEmitter {
 
       participant.isScreenSharing = false;
 
-      this.emit('remoteScreenShareStopped', { room: this, participant });
+      this.emit("remoteScreenShareStopped", { room: this, participant });
     }
   }
 
@@ -928,7 +948,9 @@ export class Room extends EventEmitter {
   /**
    * Setup media connections for all participants
    */
-  private async _setupMediaConnections(mediaStream: MediaStream | null = null): Promise<void> {
+  private async _setupMediaConnections(
+    mediaStream: MediaStream | null = null,
+  ): Promise<void> {
     // Initialize audio mixer
     if (!this.audioMixer) {
       this.audioMixer = new AudioMixer();
@@ -954,22 +976,26 @@ export class Room extends EventEmitter {
   /**
    * Setup publisher for local participant
    */
-  private async _setupLocalPublisher(mediaStream: MediaStream | null = null): Promise<void> {
+  private async _setupLocalPublisher(
+    mediaStream: MediaStream | null = null,
+  ): Promise<void> {
     if (!this.localParticipant || !this.streamId) return;
 
     // Detect browser and determine transport
-    const { logTransportInfo } = await import('../utils/browserDetection');
+    const { logTransportInfo } = await import("../utils/browserDetection");
     const transportInfo = logTransportInfo();
     const useWebRTC = transportInfo.recommendedTransport.useWebRTC;
 
-    console.log(`🚀 Setting up publisher with ${useWebRTC ? 'WebRTC' : 'WebTransport'}`);
+    console.log(
+      `🚀 Setting up publisher with ${useWebRTC ? "WebRTC" : "WebTransport"}`,
+    );
 
     const publishUrl = `${this.mediaConfig.webtpUrl}/publish/${this.id}/${this.streamId}`;
-    console.log('trying to connect webtransport to', publishUrl);
+    console.log("trying to connect webtransport to", publishUrl);
 
     const publisher = new Publisher({
       publishUrl,
-      streamType: 'camera',
+      streamType: "camera",
       streamId: this.streamId,
       userId: this.localParticipant.userId,
       mediaStream: mediaStream,
@@ -979,8 +1005,10 @@ export class Room extends EventEmitter {
       bitrate: 1_500_000,
       roomId: this.id,
       useWebRTC: useWebRTC,
-      onStatusUpdate: (msg: string, isError: boolean) => {
-        this.localParticipant?.setConnectionStatus(isError ? 'failed' : 'connected');
+      onStatusUpdate: (_message: string, isError?: boolean) => {
+        this.localParticipant?.setConnectionStatus(
+          isError ? "failed" : "connected",
+        );
       },
       onServerEvent: async (event: any) => {
         await this._handleServerEvent(event);
@@ -988,8 +1016,8 @@ export class Room extends EventEmitter {
     });
 
     // Setup stream event forwarding
-    publisher.on('localStreamReady', (data: any) => {
-      this.emit('localStreamReady', {
+    publisher.on("localStreamReady", (data: any) => {
+      this.emit("localStreamReady", {
         ...data,
         participant: this.localParticipant?.getInfo(),
         roomId: this.id,
@@ -997,11 +1025,11 @@ export class Room extends EventEmitter {
     });
 
     // Listen for screen share stopped event
-    publisher.on('screenShareStopped', (data: any) => {
+    publisher.on("screenShareStopped", (data: any) => {
       if (this.localParticipant) {
         this.localParticipant.isScreenSharing = false;
       }
-      this.emit('screenShareStopped', {
+      this.emit("screenShareStopped", {
         ...data,
         participant: this.localParticipant?.getInfo(),
         roomId: this.id,
@@ -1015,20 +1043,24 @@ export class Room extends EventEmitter {
   /**
    * Setup subscriber for remote participant
    */
-  private async _setupRemoteSubscriber(participant: Participant): Promise<void> {
+  private async _setupRemoteSubscriber(
+    participant: Participant,
+  ): Promise<void> {
     const subscriber = new Subscriber({
       subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
       streamId: participant.streamId,
       roomId: this.id,
       host: this.mediaConfig.host,
       streamOutputEnabled: true,
-      userMediaWorker: 'sfu-adaptive-trung.ermis-network.workers.dev',
-      screenShareWorker: 'sfu-screen-share.ermis-network.workers.dev',
-      onStatus: (msg: string, isError: boolean) => {
-        participant.setConnectionStatus(isError ? 'failed' : 'connected');
-      },
-      audioWorkletUrl: '/workers/audio-worklet1.js',
-      mstgPolyfillUrl: '/polyfills/MSTG_polyfill.js',
+      userMediaWorker: "sfu-adaptive-trung.ermis-network.workers.dev",
+      screenShareWorker: "sfu-screen-share.ermis-network.workers.dev",
+      audioWorkletUrl: "/workers/audio-worklet1.js",
+      mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
+    });
+
+    // Listen to connection status changes
+    subscriber.on("connectionStatusChanged", ({ status }) => {
+      participant.setConnectionStatus(status);
     });
 
     // Add to audio mixer
@@ -1037,8 +1069,8 @@ export class Room extends EventEmitter {
     }
 
     // Setup stream event forwarding
-    subscriber.on('remoteStreamReady', (data: any) => {
-      this.emit('remoteStreamReady', {
+    subscriber.on("remoteStreamReady", (data: any) => {
+      this.emit("remoteStreamReady", {
         ...data,
         participant: participant.getInfo(),
         roomId: this.id,
@@ -1049,7 +1081,11 @@ export class Room extends EventEmitter {
     participant.setSubscriber(subscriber);
 
     if (participant.isScreenSharing) {
-      await this.handleRemoteScreenShare(participant.userId, participant.streamId, true);
+      await this.handleRemoteScreenShare(
+        participant.userId,
+        participant.streamId,
+        true,
+      );
     }
   }
 
@@ -1057,9 +1093,9 @@ export class Room extends EventEmitter {
    * Handle server events from publisher
    */
   private async _handleServerEvent(event: ServerEvent): Promise<void> {
-    console.log('-----Received server event----', event);
+    console.log("-----Received server event----", event);
 
-    if (event.type === 'join') {
+    if (event.type === "join") {
       const joinEvent = event as any;
       const joinedParticipant = joinEvent.participant;
       if (joinedParticipant.user_id === this.localParticipant?.userId) return;
@@ -1072,13 +1108,13 @@ export class Room extends EventEmitter {
           role: joinedParticipant.role,
           name: joinedParticipant.name,
         },
-        this.localParticipant?.userId || '',
+        this.localParticipant?.userId || "",
       );
 
       await this._setupRemoteSubscriber(participant);
     }
 
-    if (event.type === 'leave') {
+    if (event.type === "leave") {
       const leaveEvent = event as any;
       const participant = this.participants.get(leaveEvent.participant.user_id);
       if (participant) {
@@ -1090,19 +1126,19 @@ export class Room extends EventEmitter {
       }
     }
 
-    if (event.type === 'join_sub_room') {
+    if (event.type === "join_sub_room") {
       const subRoomEvent = event as any;
       const { room, participants } = subRoomEvent;
       this._setupSubRoom({ room, participants });
-      this.emit('subRoomJoined', { room: this });
+      this.emit("subRoomJoined", { room: this });
     }
 
-    if (event.type === 'leave_sub_room') {
+    if (event.type === "leave_sub_room") {
       this.currentSubRoom = null;
-      this.emit('subRoomLeft', { room: this });
+      this.emit("subRoomLeft", { room: this });
     }
 
-    if (event.type === 'message') {
+    if (event.type === "message") {
       const msgEvent = event as any;
       const message: ChatMessage = {
         id: msgEvent.id,
@@ -1118,27 +1154,31 @@ export class Room extends EventEmitter {
 
       const sender = this.getParticipant(msgEvent.senderId);
 
-      this.emit('messageReceived', {
+      this.emit("messageReceived", {
         room: this,
         message,
         sender: sender ? sender.getInfo() : null,
       });
     }
 
-    if (event.type === 'messageDelete') {
+    if (event.type === "messageDelete") {
       const deleteEvent = event as any;
-      this.messages = this.messages.filter((m) => m.id !== deleteEvent.messageId);
+      this.messages = this.messages.filter(
+        (m) => m.id !== deleteEvent.messageId,
+      );
 
-      this.emit('messageDeleted', {
+      this.emit("messageDeleted", {
         room: this,
         messageId: deleteEvent.messageId,
         senderId: deleteEvent.senderId,
       });
     }
 
-    if (event.type === 'messageUpdate') {
+    if (event.type === "messageUpdate") {
       const updateEvent = event as any;
-      const messageIndex = this.messages.findIndex((m) => m.id === updateEvent.messageId);
+      const messageIndex = this.messages.findIndex(
+        (m) => m.id === updateEvent.messageId,
+      );
       if (messageIndex !== -1) {
         this.messages[messageIndex].text = updateEvent.text;
         this.messages[messageIndex].updatedAt = updateEvent.timestamp;
@@ -1148,7 +1188,7 @@ export class Room extends EventEmitter {
         };
       }
 
-      this.emit('messageUpdated', {
+      this.emit("messageUpdated", {
         room: this,
         messageId: updateEvent.messageId,
         text: updateEvent.text,
@@ -1156,7 +1196,7 @@ export class Room extends EventEmitter {
       });
     }
 
-    if (event.type === 'typingStart') {
+    if (event.type === "typingStart") {
       const typingEvent = event as any;
       if (typingEvent.userId !== this.localParticipant?.userId) {
         this.typingUsers.set(typingEvent.userId, {
@@ -1164,7 +1204,7 @@ export class Room extends EventEmitter {
           timestamp: typingEvent.timestamp,
         });
 
-        this.emit('typingStarted', {
+        this.emit("typingStarted", {
           room: this,
           userId: typingEvent.userId,
           user: this.getParticipant(typingEvent.userId)?.getInfo(),
@@ -1172,7 +1212,7 @@ export class Room extends EventEmitter {
 
         setTimeout(() => {
           this.typingUsers.delete(typingEvent.userId);
-          this.emit('typingStopped', {
+          this.emit("typingStopped", {
             room: this,
             userId: typingEvent.userId,
           });
@@ -1180,12 +1220,12 @@ export class Room extends EventEmitter {
       }
     }
 
-    if (event.type === 'typingStop') {
+    if (event.type === "typingStop") {
       const typingEvent = event as any;
       if (typingEvent.userId !== this.localParticipant?.userId) {
         this.typingUsers.delete(typingEvent.userId);
 
-        this.emit('typingStopped', {
+        this.emit("typingStopped", {
           room: this,
           userId: typingEvent.userId,
           user: this.getParticipant(typingEvent.userId)?.getInfo(),
@@ -1193,40 +1233,50 @@ export class Room extends EventEmitter {
       }
     }
 
-    if (event.type === 'start_share_screen') {
+    if (event.type === "start_share_screen") {
       const screenEvent = event as any;
-      const participant = this.participants.get(screenEvent.participant.user_id);
+      const participant = this.participants.get(
+        screenEvent.participant.user_id,
+      );
       if (participant && participant.userId !== this.localParticipant?.userId) {
         await this.handleRemoteScreenShare(
           participant.userId,
           screenEvent.participant.stream_id,
           true,
         );
-      } else if (participant && participant.userId === this.localParticipant?.userId) {
+      } else if (
+        participant &&
+        participant.userId === this.localParticipant?.userId
+      ) {
         participant.isScreenSharing = true;
       }
     }
 
-    if (event.type === 'stop_share_screen') {
+    if (event.type === "stop_share_screen") {
       const screenEvent = event as any;
-      const participant = this.participants.get(screenEvent.participant.user_id);
+      const participant = this.participants.get(
+        screenEvent.participant.user_id,
+      );
       if (participant && participant.userId !== this.localParticipant?.userId) {
         await this.handleRemoteScreenShare(
           participant.userId,
           screenEvent.participant.stream_id,
           false,
         );
-      } else if (participant && participant.userId === this.localParticipant?.userId) {
+      } else if (
+        participant &&
+        participant.userId === this.localParticipant?.userId
+      ) {
         participant.isScreenSharing = false;
       }
     }
 
-    if (event.type === 'mic_on') {
+    if (event.type === "mic_on") {
       const micEvent = event as any;
       const participant = this.participants.get(micEvent.participant.user_id);
       if (participant) {
         participant.updateMicStatus(true);
-        this.emit('remoteAudioStatusChanged', {
+        this.emit("remoteAudioStatusChanged", {
           room: this,
           participant,
           enabled: true,
@@ -1234,12 +1284,12 @@ export class Room extends EventEmitter {
       }
     }
 
-    if (event.type === 'mic_off') {
+    if (event.type === "mic_off") {
       const micEvent = event as any;
       const participant = this.participants.get(micEvent.participant.user_id);
       if (participant) {
         participant.updateMicStatus(false);
-        this.emit('remoteAudioStatusChanged', {
+        this.emit("remoteAudioStatusChanged", {
           room: this,
           participant,
           enabled: false,
@@ -1247,12 +1297,14 @@ export class Room extends EventEmitter {
       }
     }
 
-    if (event.type === 'camera_on') {
+    if (event.type === "camera_on") {
       const cameraEvent = event as any;
-      const participant = this.participants.get(cameraEvent.participant.user_id);
+      const participant = this.participants.get(
+        cameraEvent.participant.user_id,
+      );
       if (participant) {
         participant.updateCameraStatus(true);
-        this.emit('remoteVideoStatusChanged', {
+        this.emit("remoteVideoStatusChanged", {
           room: this,
           participant,
           enabled: true,
@@ -1260,12 +1312,14 @@ export class Room extends EventEmitter {
       }
     }
 
-    if (event.type === 'camera_off') {
+    if (event.type === "camera_off") {
       const cameraEvent = event as any;
-      const participant = this.participants.get(cameraEvent.participant.user_id);
+      const participant = this.participants.get(
+        cameraEvent.participant.user_id,
+      );
       if (participant) {
         participant.updateCameraStatus(false);
-        this.emit('remoteVideoStatusChanged', {
+        this.emit("remoteVideoStatusChanged", {
           room: this,
           participant,
           enabled: false,
@@ -1273,34 +1327,34 @@ export class Room extends EventEmitter {
       }
     }
 
-    if (event.type === 'pin_for_everyone') {
+    if (event.type === "pin_for_everyone") {
       const pinEvent = event as any;
       console.log(`Pin for everyone event received:`, pinEvent.participant);
       const participant = this.participants.get(pinEvent.participant.user_id);
       if (participant) {
         this.pinParticipant(participant.userId);
-        this.emit('participantPinnedForEveryone', { room: this, participant });
+        this.emit("participantPinnedForEveryone", { room: this, participant });
       }
     }
 
-    if (event.type === 'unpin_for_everyone') {
+    if (event.type === "unpin_for_everyone") {
       console.log(`Unpin for everyone event received`);
       if (this.pinnedParticipant) {
         const participant = this.pinnedParticipant;
         this.unpinParticipant();
-        this.emit('participantUnpinnedForEveryone', {
+        this.emit("participantUnpinnedForEveryone", {
           room: this,
           participant,
         });
       }
     }
 
-    if (event.type === 'raise_hand') {
+    if (event.type === "raise_hand") {
       const handEvent = event as any;
       const participant = this.participants.get(handEvent.participant.user_id);
       if (participant) {
         participant.updateHandRaiseStatus(true);
-        this.emit('remoteHandRaisingStatusChanged', {
+        this.emit("remoteHandRaisingStatusChanged", {
           room: this,
           participant,
           raised: true,
@@ -1308,12 +1362,12 @@ export class Room extends EventEmitter {
       }
     }
 
-    if (event.type === 'lower_hand') {
+    if (event.type === "lower_hand") {
       const handEvent = event as any;
       const participant = this.participants.get(handEvent.participant.user_id);
       if (participant) {
         participant.updateHandRaiseStatus(false);
-        this.emit('remoteHandRaisingStatusChanged', {
+        this.emit("remoteHandRaisingStatusChanged", {
           room: this,
           participant,
           raised: false,
@@ -1326,7 +1380,7 @@ export class Room extends EventEmitter {
    * Setup participant event handlers
    */
   private _setupParticipantEvents(participant: Participant): void {
-    participant.on('pinToggled', ({ participant: p, pinned }: any) => {
+    participant.on("pinToggled", ({ participant: p, pinned }: any) => {
       if (pinned) {
         this.pinParticipant(p.userId);
       } else if (this.pinnedParticipant === p) {
@@ -1334,32 +1388,32 @@ export class Room extends EventEmitter {
       }
     });
 
-    participant.on('audioToggled', ({ participant: p, enabled }: any) => {
-      this.emit('audioToggled', {
+    participant.on("audioToggled", ({ participant: p, enabled }: any) => {
+      this.emit("audioToggled", {
         room: this,
         participant: p,
         enabled,
       });
     });
 
-    participant.on('videoToggled', ({ participant: p, enabled }: any) => {
-      this.emit('videoToggled', {
+    participant.on("videoToggled", ({ participant: p, enabled }: any) => {
+      this.emit("videoToggled", {
         room: this,
         participant: p,
         enabled,
       });
     });
 
-    participant.on('handRaiseToggled', ({ participant: p, enabled }: any) => {
-      this.emit('handRaiseToggled', {
+    participant.on("handRaiseToggled", ({ participant: p, enabled }: any) => {
+      this.emit("handRaiseToggled", {
         room: this,
         participant: p,
         enabled,
       });
     });
 
-    participant.on('error', ({ participant: p, error, action }: any) => {
-      this.emit('participantError', {
+    participant.on("error", ({ participant: p, error, action }: any) => {
+      this.emit("participantError", {
         room: this,
         participant: p,
         error,
@@ -1426,8 +1480,8 @@ export class Room extends EventEmitter {
   private _setupStreamEventForwarding(): void {
     // Setup for local participant if exists
     if (this.localParticipant && this.localParticipant.publisher) {
-      this.localParticipant.publisher.on('localStreamReady', (data: any) => {
-        this.emit('localStreamReady', {
+      this.localParticipant.publisher.on("localStreamReady", (data: any) => {
+        this.emit("localStreamReady", {
           ...data,
           participant: this.localParticipant?.getInfo(),
           roomId: this.id,
@@ -1438,8 +1492,8 @@ export class Room extends EventEmitter {
     // Setup for remote participants
     for (const participant of this.participants.values()) {
       if (participant.subscriber && !participant.isLocal) {
-        participant.subscriber.on('remoteStreamReady', (data: any) => {
-          this.emit('remoteStreamReady', {
+        participant.subscriber.on("remoteStreamReady", (data: any) => {
+          this.emit("remoteStreamReady", {
             ...data,
             participant: participant.getInfo(),
             roomId: this.id,
@@ -1455,14 +1509,14 @@ export class Room extends EventEmitter {
   private _removeStreamEventForwarding(): void {
     // Remove local participant events
     if (this.localParticipant && this.localParticipant.publisher) {
-      this.localParticipant.publisher.removeAllListeners('localStreamReady');
+      this.localParticipant.publisher.removeAllListeners("localStreamReady");
     }
 
     // Remove remote participants events
     for (const participant of this.participants.values()) {
       if (participant.subscriber && !participant.isLocal) {
-        participant.subscriber.removeAllListeners('remoteStreamReady');
-        participant.subscriber.removeAllListeners('streamRemoved');
+        participant.subscriber.removeAllListeners("remoteStreamReady");
+        participant.subscriber.removeAllListeners("streamRemoved");
       }
     }
   }
@@ -1482,14 +1536,16 @@ export class Room extends EventEmitter {
     // Setup sub room participants if they exist
     if (subRoomData.participants?.length) {
       for (const participantData of subRoomData.participants) {
-        subRoom.addParticipant(participantData, this.localUserId || '');
+        subRoom.addParticipant(participantData, this.localUserId || "");
       }
     }
 
     // Add to sub rooms map
     this.subRooms.set(subRoom.id, subRoom);
 
-    if (subRoomData.participants?.some((p: any) => p.user_id === this.localUserId)) {
+    if (
+      subRoomData.participants?.some((p: any) => p.user_id === this.localUserId)
+    ) {
       this.currentSubRoom = subRoom;
     }
   }

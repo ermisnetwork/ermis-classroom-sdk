@@ -56,23 +56,6 @@ export interface PublisherConfig {
   onServerEvent?: (event: ServerEvent) => void;
 }
 
-// Video configuration
-export interface VideoConfig {
-  codec: string;
-  width: number;
-  height: number;
-  framerate: number;
-  bitrate: number;
-}
-
-// Audio configuration
-export interface AudioConfig {
-  codec?: string;
-  sampleRate: number;
-  numberOfChannels: number;
-  description?: Uint8Array;
-}
-
 // Sub-stream configuration
 export interface SubStreamConfig {
   name: string;
@@ -88,7 +71,7 @@ export interface StreamData {
   writer: WritableStreamDefaultWriter | null;
   reader: ReadableStreamDefaultReader | null;
   configSent: boolean;
-  config: VideoConfig | null;
+  config: VideoEncoderConfig | null;
   metadataReady: boolean;
   videoDecoderConfig: VideoDecoderConfig | null;
   dataChannel?: RTCDataChannel;
@@ -131,7 +114,7 @@ export interface ConfigPacket {
   type: "config";
   channelName: ChannelName;
   mediaType: "video" | "audio";
-  config: VideoConfig | AudioConfig;
+  config: VideoEncoderConfig | AudioEncoderConfig;
 }
 
 // Video encoder config
@@ -143,9 +126,9 @@ export interface VideoEncoderConfig {
   framerate: number;
   latencyMode?: "quality" | "realtime";
   hardwareAcceleration?:
-    | "no-preference"
-    | "prefer-hardware"
-    | "prefer-software";
+  | "no-preference"
+  | "prefer-hardware"
+  | "prefer-software";
 }
 
 // Audio encoder config
@@ -176,7 +159,7 @@ export interface AudioRecorderOptions {
 // Stream info return type
 export interface StreamInfo {
   streamType: string;
-  config: VideoConfig;
+  config: VideoEncoderConfig;
   sequenceNumber: number;
   activeStreams: string[];
 }
@@ -205,7 +188,7 @@ export interface MediaStreamResult {
   videoOnlyStream: MediaStream | null;
   streamType: string;
   streamId: string;
-  config: VideoConfig;
+  config: VideoEncoderConfig;
   hasAudio: boolean;
   hasVideo: boolean;
 }
@@ -222,7 +205,7 @@ export interface FecConfig {
 // WASM Encoder interface
 export interface WasmEncoder {
   encode: (data: Uint8Array, config: FecConfig) => Uint8Array[];
-  new (): WasmEncoder;
+  new(): WasmEncoder;
 }
 
 // Audio recorder interface

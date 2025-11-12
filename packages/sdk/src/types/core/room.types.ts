@@ -3,11 +3,11 @@
  * Type definitions for Room class
  */
 
-import type { Participant } from '../../core/Participant';
-import type { SubRoom } from '../../core/SubRoom';
-import type { Publisher } from '../../media/Publisher';
-import type { Subscriber } from '../../media/Subscriber';
-import type { AudioMixer } from '../../media/AudioMixer';
+import type { Participant } from '../../cores/Participant';
+import type { SubRoom } from '../../cores/SubRoom';
+import type { Publisher } from '../../media/publisher/Publisher';
+import type { Subscriber } from '../../media/subscriber/Subscriber';
+import type { AudioMixer } from '../../media/audioMixer/AudioMixer';
 
 /**
  * Room type identifier

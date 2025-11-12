@@ -14,12 +14,12 @@ import { AudioEncoderManager } from "./managers/AudioEncoderManager";
 import { VideoProcessor } from "./processors/VideoProcessor";
 import { AudioProcessor } from "./processors/AudioProcessor";
 import { loadScript } from "./utils/publisher.utils";
+import { ChannelName } from "../../types/media/publisher.types";
 import type {
   PublisherConfig,
-  VideoConfig,
-  AudioConfig,
+  VideoEncoderConfig,
+  AudioEncoderConfig,
   SubStreamConfig,
-  ChannelName,
   ServerEvent,
   StreamInfo,
   CameraSwitchResult,
@@ -46,8 +46,8 @@ interface PublisherEvents extends Record<string, unknown> {
 export class Publisher extends EventEmitter<PublisherEvents> {
   // Configuration
   private options: Required<PublisherConfig>;
-  private currentVideoConfig: VideoConfig;
-  private currentAudioConfig: AudioConfig;
+  private currentVideoConfig: VideoEncoderConfig;
+  private currentAudioConfig: AudioEncoderConfig;
   private subStreams: SubStreamConfig[];
 
   // Managers
@@ -64,10 +64,13 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private isInitialized = false;
   private isPublishing = false;
   private currentStream: MediaStream | null = null;
+  private screenStream: MediaStream | null = null;
   private hasCamera = false;
   private hasMic = false;
   private cameraEnabled = true;
   private micEnabled = true;
+  private isHandRaised = false;
+  private isScreenSharing = false;
 
   // WASM & Dependencies
   private wasmInitialized = false;
@@ -732,6 +735,14 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   }
 
   /**
+   * Get current media stream (for backward compatibility)
+   * @deprecated Use getCurrentStream() instead
+   */
+  get stream(): MediaStream | null {
+    return this.currentStream;
+  }
+
+  /**
    * Get current stream information
    */
   get streamInfo(): StreamInfo {
@@ -752,6 +763,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     hasMic: boolean;
     cameraEnabled: boolean;
     micEnabled: boolean;
+    isHandRaised: boolean;
+    isScreenSharing: boolean;
     videoStats?: ReturnType<VideoProcessor["getStats"]>;
     audioStats?: ReturnType<AudioProcessor["getStats"]>;
     streamStats?: ReturnType<StreamManager["getStats"]>;
@@ -762,10 +775,467 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       hasMic: this.hasMic,
       cameraEnabled: this.cameraEnabled,
       micEnabled: this.micEnabled,
+      isHandRaised: this.isHandRaised,
+      isScreenSharing: this.isScreenSharing,
       videoStats: this.videoProcessor?.getStats(),
       audioStats: this.audioProcessor?.getStats(),
       streamStats: this.streamManager?.getStats(),
     };
+  }
+
+  // ==================== Camera/Mic Control Methods ====================
+
+  /**
+   * Turn on camera (resume video encoding)
+   */
+  async turnOnCamera(): Promise<void> {
+    if (!this.hasCamera) {
+      console.warn("Cannot turn on camera: no camera available");
+      return;
+    }
+
+    if (this.cameraEnabled) {
+      return;
+    }
+
+    this.cameraEnabled = true;
+    this.updateStatus("Camera turned on");
+
+    // Send camera_on event to server
+    await this.sendMeetingEvent("camera_on");
+  }
+
+  /**
+   * Turn off camera (stop video encoding)
+   */
+  async turnOffCamera(): Promise<void> {
+    if (!this.hasCamera) {
+      console.warn("Cannot turn off camera: no camera available");
+      return;
+    }
+
+    if (!this.cameraEnabled) {
+      return;
+    }
+
+    this.cameraEnabled = false;
+    this.updateStatus("Camera turned off");
+
+    // Send camera_off event to server
+    await this.sendMeetingEvent("camera_off");
+  }
+
+  /**
+   * Turn on microphone (resume audio encoding)
+   */
+  async turnOnMic(): Promise<void> {
+    if (!this.hasMic) {
+      console.warn("Cannot turn on mic: no microphone available");
+      return;
+    }
+
+    if (this.micEnabled) {
+      return;
+    }
+
+    this.micEnabled = true;
+    this.updateStatus("Mic turned on");
+
+    // Send mic_on event to server
+    await this.sendMeetingEvent("mic_on");
+  }
+
+  /**
+   * Turn off microphone (stop audio encoding)
+   */
+  async turnOffMic(): Promise<void> {
+    if (!this.hasMic) {
+      console.warn("Cannot turn off mic: no microphone available");
+      return;
+    }
+
+    if (!this.micEnabled) {
+      return;
+    }
+
+    this.micEnabled = false;
+    this.updateStatus("Mic turned off");
+
+    // Send mic_off event to server
+    await this.sendMeetingEvent("mic_off");
+  }
+
+  // ==================== Hand Raise Methods ====================
+
+  /**
+   * Raise hand
+   */
+  async raiseHand(): Promise<void> {
+    if (this.isHandRaised) {
+      return;
+    }
+
+    this.isHandRaised = true;
+    await this.sendMeetingEvent("raise_hand");
+    this.updateStatus("Hand raised");
+  }
+
+  /**
+   * Lower hand
+   */
+  async lowerHand(): Promise<void> {
+    if (!this.isHandRaised) {
+      return;
+    }
+
+    this.isHandRaised = false;
+    await this.sendMeetingEvent("lower_hand");
+    this.updateStatus("Hand lowered");
+  }
+
+  /**
+   * Toggle raise hand
+   */
+  async toggleRaiseHand(): Promise<boolean> {
+    if (this.isHandRaised) {
+      await this.lowerHand();
+    } else {
+      await this.raiseHand();
+    }
+
+    return this.isHandRaised;
+  }
+
+  // ==================== Pin/Unpin Methods ====================
+
+  /**
+   * Pin stream for everyone
+   */
+  async pinForEveryone(targetStreamId: string): Promise<void> {
+    if (!targetStreamId) {
+      console.warn("Target stream ID required for pinning");
+      return;
+    }
+
+    await this.sendMeetingEvent("pin_for_everyone", targetStreamId);
+    this.updateStatus(`Pinned stream ${targetStreamId} for everyone`);
+  }
+
+  /**
+   * Unpin stream for everyone
+   */
+  async unpinForEveryone(targetStreamId: string): Promise<void> {
+    if (!targetStreamId) {
+      console.warn("Target stream ID required for unpinning");
+      return;
+    }
+
+    await this.sendMeetingEvent("unpin_for_everyone", targetStreamId);
+    this.updateStatus(`Unpinned stream ${targetStreamId} for everyone`);
+  }
+
+  // ==================== Screen Share Methods ====================
+
+  /**
+   * Start screen sharing
+   * @param screenMediaStream - Optional pre-configured screen stream. If not provided, will request screen capture.
+   * @returns The screen share MediaStream
+   */
+  async startShareScreen(
+    screenMediaStream?: MediaStream,
+  ): Promise<MediaStream> {
+    if (this.isScreenSharing) {
+      throw new Error("Screen sharing already active");
+    }
+
+    try {
+      this.updateStatus("Starting screen share...");
+
+      // Use provided stream or get new screen share stream
+      if (screenMediaStream) {
+        this.screenStream = screenMediaStream;
+        this.updateStatus("Using pre-configured screen stream");
+      } else {
+        this.screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30 },
+          },
+          audio: false,
+        });
+        this.updateStatus("Screen capture acquired");
+      }
+
+      this.isScreenSharing = true;
+
+      // Send screen_share_start event
+      await this.sendMeetingEvent("screen_share_start");
+
+      this.updateStatus("Screen sharing started");
+
+      // Setup track ended listener
+      const videoTrack = this.screenStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          this.stopShareScreen().catch((error) => {
+            console.error("Error stopping screen share:", error);
+          });
+        };
+      }
+
+      return this.screenStream;
+    } catch (error) {
+      this.isScreenSharing = false;
+      this.screenStream = null;
+      const message = error instanceof Error ? error.message : "Unknown error";
+      this.updateStatus(`Failed to start screen share: ${message}`, true);
+      throw error;
+    }
+  }
+
+  /**
+   * Stop screen sharing
+   */
+  async stopShareScreen(): Promise<void> {
+    if (!this.isScreenSharing || !this.screenStream) {
+      return;
+    }
+
+    try {
+      this.updateStatus("Stopping screen share...");
+
+      // Stop all tracks
+      this.screenStream.getTracks().forEach((track) => track.stop());
+      this.screenStream = null;
+      this.isScreenSharing = false;
+
+      // Send screen_share_stop event
+      await this.sendMeetingEvent("screen_share_stop");
+
+      this.updateStatus("Screen sharing stopped");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      this.updateStatus(`Error stopping screen share: ${message}`, true);
+      throw error;
+    }
+  }
+
+  // ==================== Stream Switching Methods ====================
+
+  /**
+   * Switch microphone to a different device
+   */
+  async switchMicrophone(deviceId: string): Promise<void> {
+    if (!deviceId) {
+      throw new Error("Device ID is required");
+    }
+
+    try {
+      this.updateStatus(`Switching to microphone: ${deviceId}...`);
+
+      // Get new audio stream
+      const newAudioStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: { exact: deviceId },
+          sampleRate: 48000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+
+      const newAudioTrack = newAudioStream.getAudioTracks()[0];
+
+      if (!newAudioTrack) {
+        throw new Error("Failed to get audio track from new stream");
+      }
+
+      if (!this.currentStream) {
+        throw new Error("No current stream available");
+      }
+
+      // Replace track in current stream
+      const oldAudioTrack = this.currentStream.getAudioTracks()[0];
+      if (oldAudioTrack) {
+        this.currentStream.removeTrack(oldAudioTrack);
+        oldAudioTrack.stop();
+      }
+      this.currentStream.addTrack(newAudioTrack);
+
+      // Switch in audio processor
+      if (this.audioProcessor) {
+        await this.audioProcessor.switchAudioTrack(newAudioTrack);
+      }
+
+      this.updateStatus("Microphone switched successfully");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      this.updateStatus(`Failed to switch microphone: ${message}`, true);
+      throw error;
+    }
+  }
+
+  /**
+   * Replace the entire media stream
+   */
+  async replaceMediaStream(newStream: MediaStream): Promise<void> {
+    if (!newStream) {
+      throw new Error("New stream is required");
+    }
+
+    try {
+      this.updateStatus("Replacing media stream...");
+
+      // Stop old stream
+      if (this.currentStream) {
+        this.currentStream.getTracks().forEach((track) => track.stop());
+      }
+
+      // Set new stream
+      this.currentStream = newStream;
+
+      const videoTracks = newStream.getVideoTracks();
+      const audioTracks = newStream.getAudioTracks();
+
+      this.hasCamera = videoTracks.length > 0;
+      this.hasMic = audioTracks.length > 0;
+
+      // Update video processor
+      if (this.hasCamera && videoTracks.length > 0 && this.videoProcessor) {
+        await this.videoProcessor.switchCamera(videoTracks[0]);
+      }
+
+      // Update audio processor
+      if (this.hasMic && audioTracks.length > 0 && this.audioProcessor) {
+        await this.audioProcessor.switchAudioTrack(audioTracks[0]);
+      }
+
+      this.updateStatus("Media stream replaced successfully");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      this.updateStatus(`Failed to replace media stream: ${message}`, true);
+      throw error;
+    }
+  }
+
+  // ==================== Meeting Event Methods ====================
+
+  /**
+   * Send meeting control event to server
+   */
+  async sendMeetingEvent(
+    eventType: string,
+    targetStreamId?: string,
+  ): Promise<void> {
+    if (!eventType) {
+      return;
+    }
+
+    if (!this.streamManager) {
+      console.warn(`Skipping ${eventType} event: Stream manager not ready`);
+      return;
+    }
+
+    console.log("[Meeting Event] Sender stream ID:", this.options.streamId);
+
+    const eventMessage: Record<string, unknown> = {
+      type: eventType,
+      sender_stream_id: this.options.streamId,
+      timestamp: Date.now(),
+    };
+
+    if (
+      (eventType === "pin_for_everyone" || eventType === "unpin_for_everyone") &&
+      targetStreamId
+    ) {
+      eventMessage.target_stream_id = targetStreamId;
+    }
+
+    try {
+      await this.sendEvent(eventMessage);
+      console.log("Sent meeting event:", eventMessage);
+    } catch (error) {
+      console.error(`Failed to send meeting event ${eventType}:`, error);
+      this.updateStatus(`Failed to notify server about ${eventType}`, true);
+    }
+  }
+
+  /**
+   * Send event through event stream
+   */
+  async sendEvent(event: Record<string, unknown>): Promise<void> {
+    if (!this.streamManager) {
+      throw new Error("Stream manager not initialized");
+    }
+
+    await this.streamManager.sendData(ChannelName.MEETING_CONTROL, event);
+  }
+
+  /**
+   * Send publisher state to server
+   */
+  async sendPublisherState(): Promise<void> {
+    const state = {
+      type: "publisher_state",
+      stream_id: this.options.streamId,
+      camera_enabled: this.cameraEnabled,
+      mic_enabled: this.micEnabled,
+      hand_raised: this.isHandRaised,
+      screen_sharing: this.isScreenSharing,
+      timestamp: Date.now(),
+    };
+
+    try {
+      await this.sendEvent(state);
+      console.log("Sent publisher state:", state);
+    } catch (error) {
+      console.error("Failed to send publisher state:", error);
+    }
+  }
+
+  // ==================== Utility Methods ====================
+
+  /**
+   * Get current media stream (public access)
+   */
+  getCurrentStream(): MediaStream | null {
+    return this.currentStream;
+  }
+
+  /**
+   * Get screen share stream
+   */
+  getScreenStream(): MediaStream | null {
+    return this.screenStream;
+  }
+
+  /**
+   * Check if camera is enabled
+   */
+  isCameraEnabled(): boolean {
+    return this.cameraEnabled;
+  }
+
+  /**
+   * Check if microphone is enabled
+   */
+  isMicEnabled(): boolean {
+    return this.micEnabled;
+  }
+
+  /**
+   * Check if hand is raised
+   */
+  isHandRaisedStatus(): boolean {
+    return this.isHandRaised;
+  }
+
+  /**
+   * Check if screen sharing is active
+   */
+  isScreenSharingActive(): boolean {
+    return this.isScreenSharing;
   }
 }
 

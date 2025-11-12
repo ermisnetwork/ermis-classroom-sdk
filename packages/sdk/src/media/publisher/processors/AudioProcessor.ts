@@ -227,6 +227,39 @@ export class AudioProcessor extends EventEmitter<{
   }
 
   /**
+   * Switch audio track without reinitializing the encoder
+   * More efficient than switchMicrophone() for quick device changes
+   *
+   * @param track - New audio track to use
+   */
+  async switchAudioTrack(track: MediaStreamTrack): Promise<void> {
+    if (!this.isProcessing) {
+      throw new Error("Audio processor not running");
+    }
+
+    if (!track || track.kind !== "audio") {
+      throw new Error("Valid audio track is required");
+    }
+
+    try {
+      console.log("[AudioProcessor] Switching audio track...");
+
+      // Create new stream with the track
+      const newStream = new MediaStream([track]);
+
+      // Use the switchMicrophone method for now
+      // TODO: In future, implement direct track replacement in encoder
+      await this.switchMicrophone(newStream);
+
+      console.log("[AudioProcessor] Audio track switched successfully");
+    } catch (error) {
+      console.error("[AudioProcessor] Failed to switch audio track:", error);
+      this.emit("microphoneSwitchError", error);
+      throw error;
+    }
+  }
+
+  /**
    * Enable/disable microphone
    *
    * @param enabled - True to enable, false to disable

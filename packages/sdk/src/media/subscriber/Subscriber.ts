@@ -9,13 +9,13 @@ import { EventEmitter } from "../../events/EventEmitter";
 import type {
   SubscriberConfig,
   SubscriberInfo,
-  ConnectionStatus,
 } from "../../types/media/subscriber.types";
 import { WebTransportManager } from "./transports/WebTransportManager";
 import { WorkerManager } from "./managers/WorkerManager";
 import { PolyfillManager } from "./managers/PolyfillManager";
 import { VideoProcessor } from "./processors/VideoProcessor";
 import { AudioProcessor } from "./processors/AudioProcessor";
+import { ConnectionStatus } from "../../types/core/ermisClient.types";
 
 // Event type definitions
 interface SubscriberEvents extends Record<string, unknown> {
@@ -63,12 +63,12 @@ interface SubscriberEvents extends Record<string, unknown> {
     subscriber: Subscriber;
     error: Error;
     action:
-      | "start"
-      | "stop"
-      | "toggleAudio"
-      | "switchBitrate"
-      | "videoWrite"
-      | "workerMessage";
+    | "start"
+    | "stop"
+    | "toggleAudio"
+    | "switchBitrate"
+    | "videoWrite"
+    | "workerMessage";
   };
 }
 

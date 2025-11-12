@@ -275,6 +275,39 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
+   * Send raw data over a specific channel
+   * Generic method for sending arbitrary data
+   *
+   * @param channelName - Channel to send data on
+   * @param data - Data to send (will be JSON stringified if object)
+   */
+  async sendData(channelName: ChannelName, data: unknown): Promise<void> {
+    let dataBytes: Uint8Array;
+
+    // Convert data to bytes
+    if (data instanceof Uint8Array) {
+      dataBytes = data;
+    } else if (data instanceof ArrayBuffer) {
+      dataBytes = new Uint8Array(data);
+    } else if (typeof data === "string") {
+      dataBytes = new TextEncoder().encode(data);
+    } else {
+      // Assume it's an object, stringify it
+      const jsonString = JSON.stringify(data);
+      dataBytes = new TextEncoder().encode(jsonString);
+    }
+
+    // Create packet with EVENT frame type for generic data
+    const packet = PacketBuilder.createPacket(
+      dataBytes,
+      Date.now(),
+      FrameType.EVENT,
+    );
+
+    await this.sendPacket(channelName, packet, FrameType.EVENT);
+  }
+
+  /**
    * Send packet over transport
    */
   private async sendPacket(
@@ -341,7 +374,6 @@ export class StreamManager extends EventEmitter<{
       transportPacketType,
     );
 
-    // Ensure ArrayBuffer-backed Uint8Array for compatibility with DOM typings
     streamData.dataChannel.send(wrappedPacket.slice());
   }
 

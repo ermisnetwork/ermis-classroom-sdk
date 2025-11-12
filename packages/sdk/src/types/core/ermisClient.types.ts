@@ -3,7 +3,8 @@
  * Type definitions for ErmisClient class
  */
 
-import type { Room } from '../../core/Room';
+import type { Room } from '../../cores/Room';
+import type { RoomType } from './room.types';
 
 /**
  * Connection status
@@ -87,7 +88,7 @@ export interface CreateRoomConfig {
   /** Room name */
   name: string;
   /** Room type */
-  type?: string;
+  type?: RoomType;
   /** Auto-join after creation */
   autoJoin?: boolean;
 }
@@ -112,16 +113,6 @@ export interface TokenResponse {
   token_type?: string;
   /** Expiration time */
   expires_in?: number;
-}
-
-/**
- * Join room result
- */
-export interface JoinRoomResult {
-  /** Room instance */
-  room: Room;
-  /** Join result details */
-  joinResult: any;
 }
 
 /**
@@ -305,6 +296,5 @@ export interface ErmisClientEventMap {
   typingStarted: any;
   typingStopped: any;
   creatingBreakoutRoom: any;
-  joiningBreakoutRoom: any;
   participantError: any;
 }

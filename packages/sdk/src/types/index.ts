@@ -2,15 +2,60 @@
  * Core types and interfaces for Ermis Meeting SDK
  */
 
-// Re-export all types from specific modules
+// Re-export core types
 export * from "./core/participant.types";
 export * from "./core/subRoom.types";
 export * from "./core/room.types";
 export * from "./core/ermisClient.types";
-export * from "./media/publisher.types";
+
+// Re-export media types (selective to avoid conflicts)
+export type {
+  FrameType,
+  TransportPacketType,
+  ChannelName,
+  PublisherConfig,
+  SubStreamConfig,
+  StreamData,
+  EncoderData,
+  MeetingEvent,
+  MediaPacket,
+  ConfigPacket,
+  VideoEncoderConfig,
+  AudioEncoderConfig,
+  VideoEncoderObject,
+  AudioRecorderOptions,
+  PublisherStateEvent,
+  MediaStreamResult,
+  FecConfig,
+} from "./media/publisher.types";
+
 export * from "./media/subscriber.types";
 export * from "./media/audioMixer.types";
-export * from "./api/apiClient.types";
+
+// Re-export API types (selective to avoid conflicts with room.types and ermisClient.types)
+export type {
+  ApiClientConfig,
+  ParticipantData,
+  SubRoomData,
+  RoomData,
+  CreateRoomResponse,
+  JoinRoomResponse,
+  JoinRoomRequest,
+  ListRoomsResponse,
+  ListRoomsRequest,
+  RoomDetailsResponse,
+  CreateSubRoomResponse,
+  CreateSubRoomRequest,
+  JoinSubRoomRequest,
+  LeaveSubRoomRequest,
+  SubRoomParticipant,
+  RoomUpdateData,
+  HttpMethod,
+  ListQuery,
+  ListConditions,
+} from "./api/apiClient.types";
+
+// Re-export utils
 export * from "./utils/browserDetection.types";
 export * from "./utils/mediaUtils.types";
 

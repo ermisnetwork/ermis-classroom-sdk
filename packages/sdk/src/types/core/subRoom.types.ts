@@ -3,7 +3,7 @@
  * Type definitions for SubRoom class
  */
 
-import type { Participant } from '../../core/Participant';
+import type { Participant } from '../../cores/Participant';
 
 /**
  * SubRoom type identifier

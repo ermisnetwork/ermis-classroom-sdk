@@ -16,7 +16,7 @@ import type {
   TokenResponse,
   ConnectionStatus,
 } from '../types/core/ermisClient.types';
-import type { MediaConfig } from '../types/core/room.types';
+import type { MediaConfig, RoomType } from '../types/core/room.types';
 
 export class ErmisClient extends EventEmitter {
   // Configuration
@@ -208,7 +208,7 @@ export class ErmisClient extends EventEmitter {
         id: roomData.id,
         name: roomData.room_name,
         code: roomData.room_code,
-        type: config.type || 'main',
+        type: (config.type || 'main') as RoomType,
         ownerId: roomData.user_id,
         apiClient: this.apiClient,
         mediaConfig: this.mediaConfig,
