@@ -1,0 +1,387 @@
+/**
+ * Participant - Represents a participant in a meeting room
+ * Handles both local and remote participants with media management
+ */
+
+import { EventEmitter } from '../events/EventEmitter';
+import type {
+  ParticipantConfig,
+  ParticipantConnectionStatus,
+  ParticipantInfo,
+  ParticipantRole,
+  MediaStreamReplaceResult,
+} from '../types/core/participant.types';
+import type { Publisher } from '../media/publisher/Publisher';
+import type { Subscriber } from '../media/Subscriber';
+
+export class Participant extends EventEmitter {
+  // Identity
+  readonly userId: string;
+  readonly streamId: string;
+  readonly membershipId: string;
+  readonly role: ParticipantRole;
+  readonly roomId: string;
+  readonly isLocal: boolean;
+  readonly name?: string;
+
+  // Media state
+  isAudioEnabled = true;
+  isVideoEnabled = true;
+  isPinned = false;
+  isHandRaised = false;
+
+  // Media components
+  publisher: Publisher | null = null;
+  subscriber: Subscriber | null = null;
+
+  // Screen share state
+  isScreenSharing: boolean;
+  screenSubscriber: Subscriber | null = null;
+
+  // Sub-room state
+  subRoomId: string | null;
+
+  // Status
+  connectionStatus: ParticipantConnectionStatus = 'disconnected';
+
+  constructor(config: ParticipantConfig) {
+    super();
+
+    this.userId = config.userId;
+    this.streamId = config.streamId;
+    this.membershipId = config.membershipId;
+    this.role = config.role || 'participant';
+    this.roomId = config.roomId;
+    this.isLocal = config.isLocal || false;
+    this.name = config.name;
+
+    this.isScreenSharing = config.isScreenSharing || false;
+    this.subRoomId = config.subRoomId || null;
+  }
+
+  /**
+   * Get participant name
+   */
+  getName(): string {
+    return this.name || '';
+  }
+
+  /**
+   * Get display name with role indicator
+   */
+  getDisplayName(): string {
+    const roleText = this.role === 'owner' ? ' (Host)' : '';
+    const localText = this.isLocal ? ' (You)' : '';
+    return `${this.userId}${roleText}${localText}`;
+  }
+
+  /**
+   * Toggle microphone (local only)
+   */
+  async toggleMicrophone(): Promise<void> {
+    if (!this.isLocal || !this.publisher) return;
+
+    try {
+      await this.publisher.toggleMic();
+      this.isAudioEnabled = !this.isAudioEnabled;
+      this.emit('audioToggled', {
+        participant: this,
+        enabled: this.isAudioEnabled,
+      });
+    } catch (error) {
+      this.emit('error', {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: 'toggleMicrophone',
+      });
+    }
+  }
+
+  /**
+   * Toggle camera (local only)
+   */
+  async toggleCamera(): Promise<void> {
+    if (!this.isLocal || !this.publisher) return;
+
+    try {
+      await this.publisher.toggleCamera();
+      this.isVideoEnabled = !this.isVideoEnabled;
+      this.emit('videoToggled', {
+        participant: this,
+        enabled: this.isVideoEnabled,
+      });
+    } catch (error) {
+      this.emit('error', {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: 'toggleCamera',
+      });
+    }
+  }
+
+  /**
+   * Toggle remote participant's audio
+   */
+  async toggleRemoteAudio(): Promise<void> {
+    if (this.isLocal || !this.subscriber) return;
+
+    try {
+      await this.subscriber.toggleAudio();
+      this.isAudioEnabled = !this.isAudioEnabled;
+      this.emit('remoteAudioToggled', {
+        participant: this,
+        enabled: this.isAudioEnabled,
+      });
+    } catch (error) {
+      this.emit('error', {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: 'toggleRemoteAudio',
+      });
+    }
+  }
+
+  /**
+   * Toggle pin status
+   */
+  togglePin(): void {
+    if (!this.isLocal) {
+      if (this.isPinned) {
+        this.subscriber?.switchBitrate('360p');
+        console.warn('Unpin participant, switch to low quality');
+      } else {
+        this.subscriber?.switchBitrate('720p');
+        console.warn('Pin participant, switch to high quality');
+      }
+    }
+
+    this.isPinned = !this.isPinned;
+    this.emit('pinToggled', { participant: this, pinned: this.isPinned });
+  }
+
+  /**
+   * Toggle raise hand (local only)
+   */
+  async toggleRaiseHand(): Promise<void> {
+    if (!this.isLocal || !this.publisher) return;
+
+    try {
+      if (this.isHandRaised) {
+        await this.publisher.lowerHand();
+      } else {
+        await this.publisher.raiseHand();
+      }
+      this.isHandRaised = !this.isHandRaised;
+      this.emit('handRaiseToggled', {
+        participant: this,
+        enabled: this.isHandRaised,
+      });
+      console.log('toggleRaiseHand', this.isHandRaised);
+    } catch (error) {
+      console.log('toggleRaiseHand error', error);
+      this.emit('error', {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: 'toggleRaiseHand',
+      });
+    }
+  }
+
+  /**
+   * Update connection status
+   */
+  setConnectionStatus(status: ParticipantConnectionStatus): void {
+    this.connectionStatus = status;
+    this.emit('statusChanged', { participant: this, status });
+  }
+
+  /**
+   * Set publisher instance
+   */
+  setPublisher(publisher: Publisher | null): void {
+    this.publisher = publisher;
+    if (publisher) {
+      this.setConnectionStatus('connected');
+    }
+  }
+
+  /**
+   * Set subscriber instance
+   */
+  setSubscriber(subscriber: Subscriber | null): void {
+    this.subscriber = subscriber;
+    if (subscriber) {
+      this.setConnectionStatus('connected');
+    }
+  }
+
+  /**
+   * Update media stream (local only)
+   */
+  updateMediaStream(newStream: MediaStream): void {
+    if (!this.isLocal || !this.publisher) {
+      console.warn('Cannot update media stream: not a local participant or no publisher');
+      return;
+    }
+
+    if (!newStream || !(newStream instanceof MediaStream)) {
+      console.error('Invalid media stream provided');
+      return;
+    }
+
+    try {
+      const audioTracks = newStream.getAudioTracks();
+      const videoTracks = newStream.getVideoTracks();
+
+      this.publisher.stream = newStream;
+      this.publisher.hasCamera = videoTracks.length > 0;
+      this.publisher.hasMic = audioTracks.length > 0;
+
+      if (videoTracks.length > 0) {
+        this.publisher.cameraEnabled = true;
+        this.isVideoEnabled = true;
+      }
+
+      if (audioTracks.length > 0) {
+        this.publisher.micEnabled = true;
+        this.isAudioEnabled = true;
+      }
+
+      this.emit('mediaStreamUpdated', {
+        participant: this,
+        stream: newStream,
+        hasAudio: audioTracks.length > 0,
+        hasVideo: videoTracks.length > 0,
+      });
+
+      console.log('Media stream updated successfully');
+    } catch (error) {
+      console.error('Failed to update media stream:', error);
+      this.emit('error', {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: 'updateMediaStream',
+      });
+    }
+  }
+
+  /**
+   * Replace media stream (local only)
+   */
+  async replaceMediaStream(newStream: MediaStream): Promise<MediaStreamReplaceResult> {
+    if (!this.isLocal || !this.publisher) {
+      throw new Error('Cannot replace media stream: not a local participant or no publisher');
+    }
+
+    if (!newStream || !(newStream instanceof MediaStream)) {
+      throw new Error('Invalid MediaStream provided');
+    }
+
+    try {
+      const result = await this.publisher.replaceMediaStream(newStream);
+
+      this.isVideoEnabled = result.hasVideo;
+      this.isAudioEnabled = result.hasAudio;
+
+      this.emit('mediaStreamReplaced', {
+        participant: this,
+        stream: result.stream,
+        videoOnlyStream: result.videoOnlyStream,
+        hasAudio: result.hasAudio,
+        hasVideo: result.hasVideo,
+      });
+
+      return result;
+    } catch (error) {
+      console.error('Failed to replace media stream:', error);
+      this.emit('error', {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: 'replaceMediaStream',
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Update microphone status from server event
+   */
+  updateMicStatus(enabled: boolean): void {
+    this.isAudioEnabled = enabled;
+    this.emit('remoteAudioStatusChanged', {
+      participant: this,
+      enabled: this.isAudioEnabled,
+    });
+  }
+
+  /**
+   * Update camera status from server event
+   */
+  updateCameraStatus(enabled: boolean): void {
+    this.isVideoEnabled = enabled;
+    this.emit('remoteVideoStatusChanged', {
+      participant: this,
+      enabled: this.isVideoEnabled,
+    });
+  }
+
+  /**
+   * Update hand raise status from server event
+   */
+  updateHandRaiseStatus(enabled: boolean): void {
+    this.isHandRaised = enabled;
+    this.emit('remoteHandRaisingStatusChanged', {
+      participant: this,
+      enabled: this.isHandRaised,
+    });
+  }
+
+  /**
+   * Cleanup participant resources
+   */
+  cleanup(): void {
+    // Stop media streams
+    if (this.publisher) {
+      this.publisher.stop();
+      this.publisher = null;
+    }
+
+    if (this.subscriber) {
+      this.subscriber.stop();
+      this.subscriber = null;
+    }
+
+    // Stop screen subscriber
+    if (this.screenSubscriber) {
+      this.screenSubscriber.stop();
+      this.screenSubscriber = null;
+    }
+
+    this.setConnectionStatus('disconnected');
+    this.removeAllListeners();
+
+    this.emit('cleanup', { participant: this });
+  }
+
+  /**
+   * Get participant info snapshot
+   */
+  getInfo(): ParticipantInfo {
+    return {
+      userId: this.userId,
+      streamId: this.streamId,
+      membershipId: this.membershipId,
+      role: this.role,
+      isLocal: this.isLocal,
+      isAudioEnabled: this.isAudioEnabled,
+      isVideoEnabled: this.isVideoEnabled,
+      isHandRaised: this.isHandRaised,
+      isPinned: this.isPinned,
+      isScreenSharing: this.isScreenSharing,
+      connectionStatus: this.connectionStatus,
+      name: this.name,
+    };
+  }
+}
+
+export default Participant;
