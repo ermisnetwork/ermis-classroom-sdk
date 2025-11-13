@@ -70,7 +70,7 @@ export default function VideoMeeting({
   setApiHost,
 }: VideoMeetingProps) {
   const [userId, setUserId] = useState("khoaphan7795@gmail.com");
-  const [roomCode, setRoomCode] = useState("5fe7-h6z2-jejc");
+  const [roomCode, setRoomCode] = useState("5fhe-2ndc-872k");
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [pinMenuOpen, setPinMenuOpen] = useState<string | null>(null); // Stores participantId of open menu

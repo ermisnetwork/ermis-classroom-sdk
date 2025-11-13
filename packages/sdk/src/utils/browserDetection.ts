@@ -148,3 +148,16 @@ export function logTransportInfo(): BrowserInfo {
 
     return info;
 }
+
+/**
+ * Browser detection utilities namespace
+ */
+export const BrowserDetection = {
+    isSafari,
+    isIOSSafari,
+    isWebTransportSupported,
+    isWebRTCSupported,
+    determineTransport,
+    getBrowserInfo,
+    logTransportInfo,
+};

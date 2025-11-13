@@ -17,6 +17,12 @@ import type {
   ConnectionStatus,
 } from '../types/core/ermisClient.types';
 import type { MediaConfig, RoomType } from '../types/core/room.types';
+import { MediaDeviceManager } from '../media/devices/MediaDeviceManager';
+import { RoomTypes } from '../constants/roomTypes';
+import { ConnectionStatus as ConnectionStatusConst } from '../constants/connectionStatus';
+import { ParticipantRoles } from '../constants/participantRoles';
+import { BrowserDetection } from '../utils/browserDetection';
+import { VERSION } from '../constants/version';
 
 export class ErmisClient extends EventEmitter {
   // Configuration
@@ -68,6 +74,74 @@ export class ErmisClient extends EventEmitter {
     PARTICIPANT_UNPINNED_FOR_EVERYONE: 'participantUnpinnedForEveryone',
     REMOTE_HAND_RAISING_STATUS_CHANGED: 'remoteHandRaisingStatusChanged',
     ERROR: 'error',
+  };
+
+  /**
+   * Room type constants
+   */
+  static RoomTypes = RoomTypes;
+
+  /**
+   * Connection status constants
+   */
+  static ConnectionStatus = ConnectionStatusConst;
+
+  /**
+   * Participant role constants
+   */
+  static ParticipantRoles = ParticipantRoles;
+
+  /**
+   * Browser detection utilities
+   */
+  static BrowserDetection = BrowserDetection;
+
+  /**
+   * SDK Version
+   */
+  static VERSION = VERSION;
+
+  /**
+   * Create a new MediaDeviceManager instance
+   */
+  static createMediaDeviceManager(): MediaDeviceManager {
+    return new MediaDeviceManager();
+  }
+
+  /**
+   * MediaDevices utilities - static access to device methods
+   */
+  static MediaDevices = {
+    /**
+     * Get available media devices
+     */
+    async getDevices() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      return {
+        cameras: devices.filter(d => d.kind === 'videoinput'),
+        microphones: devices.filter(d => d.kind === 'audioinput'),
+        speakers: devices.filter(d => d.kind === 'audiooutput'),
+      };
+    },
+
+    /**
+     * Get user media with constraints
+     */
+    async getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream> {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    },
+
+    /**
+     * Check media permissions
+     */
+    async checkPermissions(): Promise<{ camera: PermissionState; microphone: PermissionState }> {
+      const cameraPermission = await navigator.permissions.query({ name: 'camera' as PermissionName });
+      const microphonePermission = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+      return {
+        camera: cameraPermission.state,
+        microphone: microphonePermission.state,
+      };
+    },
   };
 
   constructor(config: ErmisClientConfig = {}) {
