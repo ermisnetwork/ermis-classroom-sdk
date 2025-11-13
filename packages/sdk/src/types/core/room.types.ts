@@ -4,10 +4,6 @@
  */
 
 import type { Participant } from '../../cores/Participant';
-import type { SubRoom } from '../../cores/SubRoom';
-import type { Publisher } from '../../media/publisher/Publisher';
-import type { Subscriber } from '../../media/subscriber/Subscriber';
-import type { AudioMixer } from '../../media/audioMixer/AudioMixer';
 
 /**
  * Room type identifier

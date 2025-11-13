@@ -3,9 +3,6 @@
  * Type definitions for Participant class
  */
 
-import type { Publisher } from '../../media/publisher/Publisher';
-import type { Subscriber } from '../../media/subscriber/Subscriber';
-
 /**
  * Participant role in the room
  */

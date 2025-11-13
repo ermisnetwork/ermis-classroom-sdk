@@ -1506,6 +1506,7 @@ export class Room extends EventEmitter {
   /**
    * Remove stream event forwarding
    */
+  // @ts-expect-error - Defined for future use
   private _removeStreamEventForwarding(): void {
     // Remove local participant events
     if (this.localParticipant && this.localParticipant.publisher) {

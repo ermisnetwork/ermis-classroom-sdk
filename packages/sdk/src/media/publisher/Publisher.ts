@@ -204,31 +204,62 @@ export class Publisher extends EventEmitter<PublisherEvents> {
           await this.wasmInitPromise;
         } else {
           this.wasmInitializing = true;
-          const wasmModule = await import("../../raptorQ/raptorq_wasm.js");
 
-          this.wasmInitPromise = wasmModule
-            .default("../../raptorQ/raptorq_wasm_bg.wasm")
-            .then(() => {
+          // Load WASM module as ES module
+          this.wasmInitPromise = new Promise(async (resolve, reject) => {
+            try {
+              // Dynamically import as module using data URL trick
+              const scriptUrl = '/raptorQ/raptorq_wasm.js';
+              const response = await fetch(scriptUrl);
+              const scriptContent = await response.text();
+
+              // Create a blob URL to load as module
+              const blob = new Blob([scriptContent], { type: 'application/javascript' });
+              const blobUrl = URL.createObjectURL(blob);
+
+              const wasmModule = await import(/* @vite-ignore */ blobUrl);
+              await wasmModule.default('/raptorQ/raptorq_wasm_bg.wasm');
+
+              URL.revokeObjectURL(blobUrl);
+
               this.wasmInitialized = true;
               this.wasmInitializing = false;
               console.log("[Publisher] WASM encoder loaded");
-            })
-            .catch((err: Error) => {
+              resolve();
+            } catch (err: any) {
               this.wasmInitializing = false;
-              throw new Error(`Failed to load WASM: ${err.message}`);
-            });
+              reject(new Error(`Failed to initialize WASM: ${err.message}`));
+            }
+          });
 
           await this.wasmInitPromise;
         }
       }
 
-      // Load Opus decoder
-      const opusModule = await import(
-        `/opus_decoder/opusDecoder.js?t=${Date.now()}`
-      );
-      this.initAudioRecorder =
-        opusModule.initAudioRecorder as InitAudioRecorder;
-      console.log("[Publisher] Opus decoder loaded");
+      // Load Opus decoder via script tag
+      if (!this.initAudioRecorder) {
+        await new Promise(async (resolve, reject) => {
+          try {
+            const scriptUrl = `/opus_decoder/opusDecoder.js`;
+            const response = await fetch(scriptUrl);
+            const scriptContent = await response.text();
+
+            // Create blob URL to load as module
+            const blob = new Blob([scriptContent], { type: 'application/javascript' });
+            const blobUrl = URL.createObjectURL(blob);
+
+            const opusModule = await import(/* @vite-ignore */ blobUrl);
+            this.initAudioRecorder = opusModule.initAudioRecorder as InitAudioRecorder;
+
+            URL.revokeObjectURL(blobUrl);
+
+            console.log("[Publisher] Opus decoder loaded");
+            resolve(true);
+          } catch (err: any) {
+            reject(new Error(`Failed to load Opus decoder: ${err.message}`));
+          }
+        });
+      }
 
       this.updateStatus("All dependencies loaded");
     } catch (error) {

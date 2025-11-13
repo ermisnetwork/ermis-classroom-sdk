@@ -2,8 +2,8 @@ import {
   FrameType,
   TransportPacketType,
   ChannelName,
-} from "../../types/media/publisher.types";
-import { DATA_CHANNEL_IDS } from "../../types/media/constants";
+} from "../../../types/media/publisher.types";
+import { DATA_CHANNEL_IDS } from "../../../types/media/constants";
 
 /**
  * FrameTypeHelper - Utility class for frame type conversions and mappings

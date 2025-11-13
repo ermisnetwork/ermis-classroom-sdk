@@ -1,13 +1,25 @@
 import EventEmitter from "../../../events/EventEmitter";
 import { ChannelName, FrameType } from "../../../types/media/publisher.types";
 import type {
-  VideoConfig,
-  AudioConfig,
   StreamData,
-  TransportPacketType,
 } from "../../../types/media/publisher.types";
 import { PacketBuilder } from "../../shared/utils/PacketBuilder";
 import { FrameTypeHelper } from "../../shared/utils/FrameTypeHelper";
+
+// Temporary type definitions
+interface VideoConfig {
+  width: number;
+  height: number;
+  framerate: number;
+  bitrate: number;
+  codec?: string;
+}
+
+interface AudioConfig {
+  sampleRate: number;
+  numberOfChannels: number;
+  codec?: string;
+}
 
 /**
  * StreamManager - Manages media streams for both WebTransport and WebRTC
@@ -252,7 +264,7 @@ export class StreamManager extends EventEmitter<{
     await this.sendPacket(channelName, packet, FrameType.CONFIG);
 
     streamData.configSent = true;
-    streamData.config = config as VideoConfig;
+    streamData.config = config as any; // Type workaround
 
     console.log(`[StreamManager] Config sent for ${channelName}:`, config);
     this.emit("configSent", { channelName });

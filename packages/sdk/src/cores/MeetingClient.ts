@@ -37,6 +37,39 @@ export class ErmisClient extends EventEmitter {
   // Media configuration
   private mediaConfig: MediaConfig;
 
+  /**
+   * Static factory method for backward compatibility
+   */
+  static create(config?: ErmisClientConfig): ErmisClient {
+    return new ErmisClient(config);
+  }
+
+  /**
+   * Event constants for backward compatibility
+   */
+  static events = {
+    AUTHENTICATED: 'authenticated',
+    ROOM_JOINED: 'roomJoined',
+    ROOM_LEFT: 'roomLeft',
+    PARTICIPANT_JOINED: 'participantJoined',
+    PARTICIPANT_LEFT: 'participantLeft',
+    PARTICIPANT_ADDED: 'participantAdded',
+    PARTICIPANT_REMOVED: 'participantRemoved',
+    LOCAL_STREAM_READY: 'localStreamReady',
+    REMOTE_STREAM_READY: 'remoteStreamReady',
+    REMOTE_AUDIO_STATUS_CHANGED: 'remoteAudioStatusChanged',
+    REMOTE_VIDEO_STATUS_CHANGED: 'remoteVideoStatusChanged',
+    SCREEN_SHARE_STARTED: 'screenShareStarted',
+    SCREEN_SHARE_STOPPED: 'screenShareStopped',
+    REMOTE_SCREEN_SHARE_STARTED: 'remoteScreenShareStarted',
+    REMOTE_SCREEN_SHARE_STOPPED: 'remoteScreenShareStopped',
+    REMOTE_SCREEN_SHARE_STREAM_READY: 'remoteScreenShareStreamReady',
+    PARTICIPANT_PINNED_FOR_EVERYONE: 'participantPinnedForEveryone',
+    PARTICIPANT_UNPINNED_FOR_EVERYONE: 'participantUnpinnedForEveryone',
+    REMOTE_HAND_RAISING_STATUS_CHANGED: 'remoteHandRaisingStatusChanged',
+    ERROR: 'error',
+  };
+
   constructor(config: ErmisClientConfig = {}) {
     super();
 
