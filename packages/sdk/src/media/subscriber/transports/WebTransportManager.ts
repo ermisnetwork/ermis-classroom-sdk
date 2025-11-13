@@ -12,7 +12,7 @@ import EventEmitter from "../../../events/EventEmitter";
 /**
  * Stream channel types
  */
-export type StreamChannelType = "cam_360p" | "cam_720p" | "mic_48k";
+export type StreamChannelType = "cam_360p" | "cam_720p" | "mic_48k" | "media";
 
 /**
  * WebTransport stream info

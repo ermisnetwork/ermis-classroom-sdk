@@ -7,6 +7,12 @@ import type { ConnectionStatus } from '../core/ermisClient.types';
 // Quality levels for bitrate switching
 export type QualityLevel = '360p' | '720p' | '1080p';
 
+// Protocol types for subscriber
+export type SubscriberProtocol = 'webtransport' | 'webrtc' | 'websocket';
+
+// Subscribe type (for different stream types)
+export type SubscribeType = 'camera' | 'screenshare';
+
 // Subscriber configuration
 export interface SubscriberConfig {
   streamId: string;
@@ -15,6 +21,8 @@ export interface SubscriberConfig {
   userMediaWorker?: string;
   screenShareWorker?: string;
   isOwnStream?: boolean;
+  protocol?: SubscriberProtocol;
+  subscribeType?: SubscribeType;
   mediaWorkerUrl?: string;
   audioWorkletUrl?: string;
   mstgPolyfillUrl?: string;
@@ -59,6 +67,8 @@ export interface WorkerMessageData {
 export type WorkerMessageType =
   | 'init'
   | 'attachStream'
+  | 'attachDataChannel'
+  | 'attachWebSocket'
   | 'switchBitrate'
   | 'toggleAudio'
   | 'videoData'

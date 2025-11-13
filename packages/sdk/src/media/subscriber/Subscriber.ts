@@ -79,11 +79,16 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   // Configuration
   private config: Required<SubscriberConfig>;
   private subscriberId: string;
+  private protocol: "webtransport" | "webrtc" | "websocket";
+  private subscribeType: "camera" | "screenshare";
 
   // Managers
   private transportManager: WebTransportManager | null = null;
   private workerManager: WorkerManager | null = null;
   private polyfillManager: PolyfillManager | null = null;
+
+  // WebRTC specific
+  private webRtc: RTCPeerConnection | null = null;
 
   // Processors
   private videoProcessor: VideoProcessor | null = null;
@@ -108,6 +113,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       screenShareWorker:
         config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev",
       isOwnStream: config.isOwnStream || false,
+      protocol: config.protocol || "webtransport",
+      subscribeType: config.subscribeType || "camera",
       mediaWorkerUrl: config.mediaWorkerUrl || "/workers/media-worker-ab.js",
       audioWorkletUrl: config.audioWorkletUrl || "/workers/audio-worklet1.js",
       mstgPolyfillUrl: config.mstgPolyfillUrl || "/polyfills/MSTG_polyfill.js",
@@ -118,6 +125,10 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
           ? config.streamOutputEnabled
           : true,
     };
+
+    // Set protocol and subscribeType
+    this.protocol = this.config.protocol;
+    this.subscribeType = this.config.subscribeType;
 
     // Generate unique ID
     this.subscriberId = `subscriber_${this.config.streamId}_${Date.now()}`;
@@ -257,7 +268,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     }
 
     try {
-      console.log("Starting subscriber:", this.subscriberId);
+      console.log("Starting subscriber:", this.subscriberId, "protocol:", this.protocol);
       this.emit("starting", { subscriber: this });
       this.updateConnectionStatus("connecting");
 
@@ -269,17 +280,19 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         await this.polyfillManager.load();
       }
 
-      // Connect to WebTransport
-      if (!this.transportManager) {
-        throw new Error("Transport manager not initialized");
+      // Connect to WebTransport only if protocol is webtransport
+      if (this.protocol === "webtransport") {
+        if (!this.transportManager) {
+          throw new Error("Transport manager not initialized");
+        }
+        await this.transportManager.connect();
       }
-      await this.transportManager.connect();
 
       // Initialize worker
       if (!this.workerManager) {
         throw new Error("Worker manager not initialized");
       }
-      await this.workerManager.init(channel.port2, this.config.isScreenSharing);
+      await this.workerManager.init(channel.port2, this.subscribeType);
 
       // Initialize audio system
       if (this.audioProcessor) {
@@ -294,7 +307,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         await this.videoProcessor.init();
       }
 
-      // Attach streams to worker
+      // Attach streams to worker (WebTransport, WebRTC, or WebSocket)
       await this.attachStreams();
 
       this.isStarted = true;
@@ -430,40 +443,190 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   // ==================== Private Helper Methods ====================
 
   /**
-   * Attach WebTransport streams to worker
+   * Attach streams to worker (WebTransport, WebRTC, or WebSocket)
    */
   private async attachStreams(): Promise<void> {
-    if (!this.transportManager || !this.workerManager) {
-      throw new Error("Managers not initialized");
+    if (!this.workerManager) {
+      throw new Error("Worker manager not initialized");
     }
 
     try {
-      // Attach video stream (360p)
-      const stream360p =
-        await this.transportManager.createBidirectionalStream("cam_360p");
-      if (stream360p) {
-        await this.workerManager.attachStream(
-          "cam_360p",
-          stream360p.readable,
-          stream360p.writable
-        );
-      }
-
-      // Attach audio stream
-      const streamAudio =
-        await this.transportManager.createBidirectionalStream("mic_48k");
-      if (streamAudio) {
-        await this.workerManager.attachStream(
-          "mic_48k",
-          streamAudio.readable,
-          streamAudio.writable
-        );
+      if (this.protocol === "webtransport") {
+        await this.attachWebTransportStreams();
+      } else if (this.protocol === "webrtc") {
+        await this.attachWebRTCChannels();
+      } else if (this.protocol === "websocket") {
+        await this.attachWebSocketConnection();
       }
     } catch (error) {
       throw new Error(
         `Failed to attach streams: ${error instanceof Error ? error.message : "Unknown error"}`
       );
     }
+  }
+
+  /**
+   * Attach WebTransport streams to worker
+   */
+  private async attachWebTransportStreams(): Promise<void> {
+    if (!this.transportManager || !this.workerManager) {
+      throw new Error("Managers not initialized");
+    }
+
+    console.log("Attaching WebTransport streams...");
+
+    // For SubscriberDev-style (single stream mode) - used by media-worker-dev.js
+    if (this.config.mediaWorkerUrl.includes("media-worker-dev")) {
+      // Single bidirectional stream for all media
+      const mediaStream = await this.transportManager.createBidirectionalStream("media");
+      if (mediaStream) {
+        this.workerManager.attachStream(
+          "media",
+          mediaStream.readable,
+          mediaStream.writable
+        );
+      }
+      console.log("WebTransport single stream attached successfully");
+      return;
+    }
+
+    // For SubscriberWs-style (multi-stream mode) - used by media-worker-ab.js
+    // Attach video stream (360p)
+    const stream360p =
+      await this.transportManager.createBidirectionalStream("cam_360p");
+    if (stream360p) {
+      await this.workerManager.attachStream(
+        "cam_360p",
+        stream360p.readable,
+        stream360p.writable
+      );
+    }
+
+    // Attach audio stream
+    const streamAudio =
+      await this.transportManager.createBidirectionalStream("mic_48k");
+    if (streamAudio) {
+      await this.workerManager.attachStream(
+        "mic_48k",
+        streamAudio.readable,
+        streamAudio.writable
+      );
+    }
+
+    console.log("WebTransport multi-streams attached successfully");
+  }
+
+  /**
+   * Attach WebRTC data channels to worker
+   */
+  private async attachWebRTCChannels(): Promise<void> {
+    if (!this.workerManager) {
+      throw new Error("Worker manager not initialized");
+    }
+
+    console.log("Using WebRTC for media transport");
+
+    try {
+      this.webRtc = new RTCPeerConnection();
+
+      // Create data channels
+      const streamAudioChannel = await this.createWrtcDataChannel("mic_48k", this.webRtc);
+      console.log("Audio data channel created, id:", streamAudioChannel.id);
+
+      const stream360pChannel = await this.createWrtcDataChannel("cam_360p", this.webRtc);
+      console.log("360p data channel created, id:", stream360pChannel.id);
+
+      const stream720pChannel = await this.createWrtcDataChannel("cam_720p", this.webRtc);
+      console.log("720p data channel created, id:", stream720pChannel.id);
+
+      // Attach channels to worker
+      this.workerManager.attachDataChannel("mic_48k", streamAudioChannel);
+      this.workerManager.attachDataChannel("cam_720p", stream720pChannel);
+
+      // Create and send offer
+      const offer = await this.webRtc.createOffer();
+      await this.webRtc.setLocalDescription(offer);
+
+      console.log("[WebRTC subscriber] Created offer, sending to server...");
+
+      const response = await fetch(
+        `https://${this.config.host}/meeting/sdp/answer`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            offer,
+            room_id: this.config.roomId,
+            stream_id: this.config.streamId,
+            action: "subscribe",
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+
+      const answer = await response.json();
+      await this.webRtc.setRemoteDescription(answer);
+
+      console.log("[WebRTC] Data channels attached to worker successfully");
+    } catch (error) {
+      console.error("[WebRTC] Setup error:", error);
+      throw new Error(`WebRTC setup failed: ${error instanceof Error ? error.message : "Unknown"}`);
+    }
+  }
+
+  /**
+   * Create WebRTC data channel
+   */
+  private async createWrtcDataChannel(
+    channelName: "cam_360p" | "cam_720p" | "mic_48k",
+    webRtcConnection: RTCPeerConnection
+  ): Promise<RTCDataChannel> {
+    const id = this.getDataChannelId(channelName);
+
+    const dataChannel = webRtcConnection.createDataChannel(channelName, {
+      ordered: false,
+      id,
+      negotiated: true,
+    });
+
+    return dataChannel;
+  }
+
+  /**
+   * Get data channel ID based on channel name
+   */
+  private getDataChannelId(channelName: string): number {
+    const channelMap: Record<string, number> = {
+      "meeting_control": 0,
+      "mic_48k": 1,
+      "cam_360p": 2,
+      "cam_720p": 3,
+      "cam_1080p": 4,
+      "screen_360p": 5,
+      "screen_720p": 6,
+      "screen_audio": 7,
+    };
+
+    return channelMap[channelName] || 0;
+  }
+
+  /**
+   * Attach WebSocket connection to worker
+   */
+  private async attachWebSocketConnection(): Promise<void> {
+    if (!this.workerManager) {
+      throw new Error("Worker manager not initialized");
+    }
+
+    console.log("Using WebSocket for media transport");
+
+    const wsUrl = `wss://${this.config.host}/meeting/${this.config.roomId}/${this.config.streamId}`;
+    this.workerManager.attachWebSocket(wsUrl);
+
+    console.log("WebSocket attached successfully");
   }
 
   /**
@@ -511,6 +674,13 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     // Cleanup transport manager
     if (this.transportManager) {
       this.transportManager.disconnect();
+    }
+
+    // Cleanup WebRTC connection
+    if (this.webRtc) {
+      this.webRtc.close();
+      this.webRtc = null;
+      console.log("WebRTC connection closed");
     }
 
     // Clear references

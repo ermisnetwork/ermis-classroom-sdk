@@ -45,7 +45,10 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   /**
    * Initialize the worker
    */
-  async init(channelPort: MessagePort, isScreenSharing: boolean): Promise<void> {
+  async init(
+    channelPort: MessagePort,
+    subscribeType: "camera" | "screenshare" = "camera"
+  ): Promise<void> {
     try {
       console.log("Initializing media worker:", this.workerUrl);
 
@@ -68,15 +71,13 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
         });
       };
 
-      // Send init message
+      // Send init message with subscriberId and subscribeType
       this.worker.postMessage(
         {
           type: "init",
-          data: {
-            subscriberId: this.subscriberId,
-          },
+          subscriberId: this.subscriberId,
+          subscribeType: subscribeType,
           port: channelPort,
-          isShare: isScreenSharing,
         },
         [channelPort]
       );
@@ -98,7 +99,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
    * Attach a stream to the worker
    */
   attachStream(
-    channelName: "cam_360p" | "cam_720p" | "mic_48k",
+    channelName: "cam_360p" | "cam_720p" | "mic_48k" | "media",
     readable: ReadableStream,
     writable: WritableStream
   ): void {
@@ -117,6 +118,45 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       },
       [readable as unknown as Transferable, writable as unknown as Transferable]
     );
+  }
+
+  /**
+   * Attach a WebRTC data channel to the worker
+   */
+  attachDataChannel(
+    channelName: "cam_360p" | "cam_720p" | "mic_48k",
+    dataChannel: RTCDataChannel
+  ): void {
+    if (!this.worker || !this.isInitialized) {
+      throw new Error("Worker not initialized");
+    }
+
+    console.log(`Attaching data channel to worker: ${channelName}`);
+
+    this.worker.postMessage(
+      {
+        type: "attachDataChannel",
+        channelName,
+        dataChannel,
+      },
+      [dataChannel as unknown as Transferable]
+    );
+  }
+
+  /**
+   * Attach WebSocket to the worker
+   */
+  attachWebSocket(wsUrl: string): void {
+    if (!this.worker || !this.isInitialized) {
+      throw new Error("Worker not initialized");
+    }
+
+    console.log(`Attaching WebSocket to worker: ${wsUrl}`);
+
+    this.worker.postMessage({
+      type: "attachWebSocket",
+      wsUrl,
+    });
   }
 
   /**
