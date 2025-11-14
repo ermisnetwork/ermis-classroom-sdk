@@ -824,6 +824,7 @@ export default function VideoMeeting({
                     onChange={(e) => setSelectedNode(e.target.value)}
                     disabled={inRoom}
                   >
+                    <option value="daibo.ermis.network:9996">daibo.ermis.network:9996</option>
                     <option value="admin.bandia.vn:9995">admin.bandia.vn:9995</option>
                     <option value="admin.bandia.vn:9996">admin.bandia.vn:9996</option>
                     <option value="admin.bandia.vn:9998">admin.bandia.vn:9998</option>
