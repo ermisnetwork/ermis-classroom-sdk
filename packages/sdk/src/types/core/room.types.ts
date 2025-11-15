@@ -38,8 +38,14 @@ export interface RoomConfig {
 export interface MediaConfig {
   /** Server host */
   host: string;
+  /** Server host node (for compatibility) */
+  hostNode: string;
   /** WebTransport URL */
   webtpUrl: string;
+  /** Subscribe protocol */
+  subscribeProtocol?: string;
+  /** Publish protocol */
+  publishProtocol?: string;
   /** User media worker URL */
   userMediaWorker?: string;
   /** Screen share worker URL */

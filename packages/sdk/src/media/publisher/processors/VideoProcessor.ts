@@ -153,8 +153,9 @@ export class VideoProcessor extends EventEmitter<{
       console.log("[VideoProcessor] Starting frame processing...");
       this.emit("started");
 
-      // Start processing loop
-      await this.processFrames();
+      // Start processing loop in background (fire-and-forget)
+      // Do NOT await - this is an infinite loop that should run asynchronously
+      this.processFrames();
     } catch (error) {
       console.error("[VideoProcessor] Failed to start:", error);
       this.isProcessing = false;

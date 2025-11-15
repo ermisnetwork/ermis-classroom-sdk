@@ -9,6 +9,7 @@ import { SubRoom } from "./SubRoom";
 import { Publisher } from "../media/publisher/Publisher";
 import { Subscriber } from "../media/subscriber/Subscriber";
 import { AudioMixer } from "../media/audioMixer/AudioMixer";
+import { STREAM_TYPE } from "../constants/streamTypes";
 import type {
   RoomConfig,
   RoomType,
@@ -895,7 +896,7 @@ export class Room extends EventEmitter {
         host: this.mediaConfig.host,
         isScreenSharing: true,
         streamOutputEnabled: true,
-        audioWorkletUrl: "/workers/audio-worklet1.js",
+        audioWorkletUrl: "/workers/audio-worklet.js",
         mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
       });
 
@@ -1050,17 +1051,16 @@ export class Room extends EventEmitter {
       subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
       streamId: participant.streamId,
       roomId: this.id,
-      host: this.mediaConfig.host,
       streamOutputEnabled: true,
-      userMediaWorker: "sfu-adaptive-trung.ermis-network.workers.dev",
-      screenShareWorker: "sfu-screen-share.ermis-network.workers.dev",
-      audioWorkletUrl: "/workers/audio-worklet1.js",
-      mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
-    });
+      host: this.mediaConfig.hostNode,
+      protocol: this.mediaConfig.subscribeProtocol as any,
+      subscribeType: STREAM_TYPE.CAMERA,
 
-    // Listen to connection status changes
-    subscriber.on("connectionStatusChanged", ({ status }) => {
-      participant.setConnectionStatus(status);
+      onStatus: (_msg, isError) => {
+        participant.setConnectionStatus(isError ? "failed" : "connected");
+      },
+      audioWorkletUrl: "/workers/audio-worklet.js",
+      mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
     });
 
     // Add to audio mixer

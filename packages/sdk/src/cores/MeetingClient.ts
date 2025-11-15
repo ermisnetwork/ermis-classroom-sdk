@@ -150,6 +150,7 @@ export class ErmisClient extends EventEmitter {
     // Set default configuration
     this.config = {
       host: config.host || 'daibo.ermis.network:9993',
+      hostNode: config.hostNode || config.host || 'daibo.ermis.network:9993',
       apiUrl: config.apiUrl || `https://${config.host || 'daibo.ermis.network:9993'}/meeting`,
       webtpUrl: config.webtpUrl || 'https://daibo.ermis.network:9993/meeting/wt',
       reconnectAttempts: config.reconnectAttempts ?? 3,
@@ -167,7 +168,8 @@ export class ErmisClient extends EventEmitter {
 
     // Media configuration
     this.mediaConfig = {
-      host: this.config.host,
+      host: this.config.hostNode || this.config.host,
+      hostNode: this.config.hostNode || this.config.host,
       webtpUrl: this.config.webtpUrl,
       userMediaWorker: this.config.userMediaWorker,
       screenShareWorker: this.config.screenShareWorker,

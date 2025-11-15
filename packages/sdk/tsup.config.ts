@@ -14,5 +14,7 @@ export default defineConfig({
   clean: true,
   target: 'es2020',
   outDir: 'dist',
+  // Copy static files (workers, WASM, polyfills) after build
+  onSuccess: 'node scripts/copy-static-files.js',
 });
 

@@ -21,6 +21,8 @@ export type ConnectionStatus =
 export interface ErmisClientConfig {
   /** Server host */
   host?: string;
+  /** Media node host (for WebSocket subscriber connections) */
+  hostNode?: string;
   /** API URL */
   apiUrl?: string;
   /** WebTransport URL */

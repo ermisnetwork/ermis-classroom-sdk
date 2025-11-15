@@ -5,6 +5,7 @@ import type {
 } from "../../../types/media/publisher.types";
 import { PacketBuilder } from "../../shared/utils/PacketBuilder";
 import { FrameTypeHelper } from "../../shared/utils/FrameTypeHelper";
+import { LengthDelimitedReader } from "../../shared/utils/LengthDelimitedReader";
 
 // Temporary type definitions
 interface VideoConfig {
@@ -34,10 +35,13 @@ export class StreamManager extends EventEmitter<{
   sendError: { channelName: ChannelName; error: unknown };
   streamReady: { channelName: ChannelName };
   configSent: { channelName: ChannelName };
+  serverEvent: unknown; // Events received from server
 }> {
   private streams = new Map<ChannelName, StreamData>();
   private isWebRTC: boolean;
-  private sequenceNumber = 0;
+  private sequenceNumbers = new Map<ChannelName, number>(); // Per-channel sequence numbers
+  private dcMsgQueues = new Map<ChannelName, Uint8Array[]>(); // Per-channel message queues
+  private dcPacketSendTime = new Map<ChannelName, number>(); // Per-channel send timing
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private webTransport: any | null = null;
   private peerConnection: RTCPeerConnection | null = null;
@@ -111,9 +115,13 @@ export class StreamManager extends EventEmitter<{
         videoDecoderConfig: null,
       });
 
-      // Send channel name as initialization
-      const initData = new TextEncoder().encode(channelName);
-      await writer.write(initData);
+      // Initialize channel stream with server
+      await this.sendInitChannelStream(channelName);
+
+      // Setup event reader for MEETING_CONTROL channel
+      if (channelName === ChannelName.MEETING_CONTROL) {
+        this.setupEventStreamReader(reader, channelName);
+      }
 
       console.log(
         `[StreamManager] Created bidirectional stream for ${channelName}`,
@@ -126,6 +134,84 @@ export class StreamManager extends EventEmitter<{
       );
       throw error;
     }
+  }
+
+  /**
+   * Send init channel stream command to server
+   */
+  private async sendInitChannelStream(channelName: ChannelName): Promise<void> {
+    const command = {
+      type: "init_channel_stream",
+      data: {
+        channel: channelName,
+      },
+    };
+
+    const commandJson = JSON.stringify(command);
+    const commandBytes = new TextEncoder().encode(commandJson);
+
+    const streamData = this.streams.get(channelName);
+    if (!streamData || !streamData.writer) {
+      throw new Error(`Stream ${channelName} not ready for init`);
+    }
+
+    // Send with length-delimited format
+    const len = commandBytes.length;
+    const out = new Uint8Array(4 + len);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, len, false);
+    out.set(commandBytes, 4);
+
+    await streamData.writer.write(out.slice());
+    console.log(`[StreamManager] Sent init_channel_stream for ${channelName}`);
+  }
+
+  /**
+   * Setup event stream reader for receiving server events
+   * Only for MEETING_CONTROL channel
+   */
+  private setupEventStreamReader(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    channelName: ChannelName,
+  ): void {
+    const delimitedReader = new LengthDelimitedReader(reader);
+
+    // Start reading loop in background
+    (async () => {
+      try {
+        console.log(`[StreamManager] Starting event reader for ${channelName}`);
+
+        while (true) {
+          const message = await delimitedReader.readMessage();
+
+          if (message === null) {
+            console.log(`[StreamManager] Event stream ${channelName} ended`);
+            break;
+          }
+
+          // Decode and parse message
+          const messageStr = new TextDecoder().decode(message);
+
+          try {
+            const event = JSON.parse(messageStr);
+            console.log(`[StreamManager] Received server event:`, event);
+
+            // Emit event to Publisher
+            this.emit("serverEvent", event);
+          } catch (e) {
+            console.log(
+              `[StreamManager] Non-JSON event message:`,
+              messageStr,
+            );
+          }
+        }
+      } catch (err) {
+        console.error(
+          `[StreamManager] Error reading event stream ${channelName}:`,
+          err,
+        );
+      }
+    })();
   }
 
   /**
@@ -145,6 +231,44 @@ export class StreamManager extends EventEmitter<{
     });
 
     dataChannel.binaryType = "arraybuffer";
+
+    // Set buffer threshold based on channel type
+    const bufferAmounts = {
+      SMALL: 8192,
+      LOW: 16384,
+      MEDIUM: 32768,
+      HIGH: 65536,
+    };
+
+    if (channelName.includes("1080p")) {
+      dataChannel.bufferedAmountLowThreshold = bufferAmounts.HIGH;
+    } else if (channelName.includes("720p")) {
+      dataChannel.bufferedAmountLowThreshold = bufferAmounts.MEDIUM;
+    } else if (channelName.includes("360p") || channelName === ChannelName.MICROPHONE) {
+      dataChannel.bufferedAmountLowThreshold = bufferAmounts.LOW;
+    } else {
+      dataChannel.bufferedAmountLowThreshold = bufferAmounts.MEDIUM;
+    }
+
+    // Setup queue drain handler
+    dataChannel.onbufferedamountlow = () => {
+      const queue = this.getQueue(channelName);
+
+      while (
+        queue.length > 0 &&
+        dataChannel.bufferedAmount <= dataChannel.bufferedAmountLowThreshold
+      ) {
+        const packet = queue.shift();
+        if (packet) {
+          dataChannel.send(packet.slice()); // Use slice() to avoid SharedArrayBuffer issues
+          this.dcPacketSendTime.set(channelName, performance.now());
+        }
+      }
+    };
+
+    // Initialize queue and timing for this channel
+    this.dcMsgQueues.set(channelName, []);
+    this.dcPacketSendTime.set(channelName, performance.now());
 
     // Wait for channel to open
     await new Promise<void>((resolve, reject) => {
@@ -198,10 +322,12 @@ export class StreamManager extends EventEmitter<{
     const arrayBuffer = new ArrayBuffer(chunk.byteLength);
     chunk.copyTo(arrayBuffer);
 
+    const sequenceNumber = this.getAndIncrementSequence(channelName);
     const packet = PacketBuilder.createPacket(
       arrayBuffer,
       chunk.timestamp,
       frameType,
+      sequenceNumber,
     );
 
     await this.sendPacket(channelName, packet, frameType);
@@ -215,10 +341,12 @@ export class StreamManager extends EventEmitter<{
     audioData: Uint8Array,
     timestamp: number,
   ): Promise<void> {
+    const sequenceNumber = this.getAndIncrementSequence(channelName);
     const packet = PacketBuilder.createPacket(
       audioData,
       timestamp,
       FrameType.AUDIO,
+      sequenceNumber,
     );
 
     await this.sendPacket(channelName, packet, FrameType.AUDIO);
@@ -255,10 +383,12 @@ export class StreamManager extends EventEmitter<{
     });
 
     const configData = new TextEncoder().encode(configJson);
+    const sequenceNumber = this.getAndIncrementSequence(channelName);
     const packet = PacketBuilder.createPacket(
       configData,
       Date.now(),
       FrameType.CONFIG,
+      sequenceNumber,
     );
 
     await this.sendPacket(channelName, packet, FrameType.CONFIG);
@@ -277,10 +407,12 @@ export class StreamManager extends EventEmitter<{
     const eventJson = JSON.stringify(eventData);
     const eventBytes = new TextEncoder().encode(eventJson);
 
+    const sequenceNumber = this.getAndIncrementSequence(channelName);
     const packet = PacketBuilder.createPacket(
       eventBytes,
       Date.now(),
       FrameType.EVENT,
+      sequenceNumber,
     );
 
     await this.sendPacket(channelName, packet, FrameType.EVENT);
@@ -310,10 +442,12 @@ export class StreamManager extends EventEmitter<{
     }
 
     // Create packet with EVENT frame type for generic data
+    const sequenceNumber = this.getAndIncrementSequence(channelName);
     const packet = PacketBuilder.createPacket(
       dataBytes,
       Date.now(),
       FrameType.EVENT,
+      sequenceNumber,
     );
 
     await this.sendPacket(channelName, packet, FrameType.EVENT);
@@ -334,12 +468,10 @@ export class StreamManager extends EventEmitter<{
 
     try {
       if (this.isWebRTC) {
-        await this.sendViaDataChannel(streamData, packet, frameType);
+        await this.sendViaDataChannel(channelName, streamData, packet, frameType);
       } else {
         await this.sendViaWebTransport(streamData, packet);
       }
-
-      this.sequenceNumber++;
     } catch (error) {
       console.error(
         `[StreamManager] Error sending packet on ${channelName}:`,
@@ -361,8 +493,15 @@ export class StreamManager extends EventEmitter<{
       throw new Error("Stream writer not available");
     }
 
+    // Wrap packet with length-delimited format (4 bytes length prefix)
+    const len = packet.length;
+    const out = new Uint8Array(4 + len);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, len, false); // 4 bytes length prefix
+    out.set(packet, 4); // Copy packet after length prefix
+
     // Ensure the Uint8Array is backed by a regular ArrayBuffer (not SharedArrayBuffer)
-    const dataToWrite = packet.slice();
+    const dataToWrite = out.slice();
     await streamData.writer.write(dataToWrite);
   }
 
@@ -370,6 +509,7 @@ export class StreamManager extends EventEmitter<{
    * Send via WebRTC data channel
    */
   private async sendViaDataChannel(
+    channelName: ChannelName,
     streamData: StreamData,
     packet: Uint8Array,
     frameType: FrameType,
@@ -378,15 +518,50 @@ export class StreamManager extends EventEmitter<{
       throw new Error("Data channel not ready");
     }
 
+    const sequenceNumber = this.getAndIncrementSequence(channelName);
     const transportPacketType =
       FrameTypeHelper.getTransportPacketType(frameType);
     const wrappedPacket = PacketBuilder.createRegularPacket(
       packet,
-      this.sequenceNumber,
+      sequenceNumber,
       transportPacketType,
     );
 
-    streamData.dataChannel.send(wrappedPacket.slice());
+    // Use queue management instead of sending directly
+    this.sendOrQueue(channelName, streamData.dataChannel, wrappedPacket);
+  }
+
+  /**
+   * Send packet or add to queue if buffer is full
+   */
+  private sendOrQueue(
+    channelName: ChannelName,
+    dataChannel: RTCDataChannel,
+    packet: Uint8Array,
+  ): void {
+    const queue = this.getQueue(channelName);
+
+    // Send directly if buffer has space and queue is empty
+    if (
+      dataChannel.bufferedAmount <= dataChannel.bufferedAmountLowThreshold &&
+      queue.length === 0
+    ) {
+      dataChannel.send(packet.slice()); // Use slice() to avoid SharedArrayBuffer issues
+      this.dcPacketSendTime.set(channelName, performance.now());
+    } else {
+      // Add to queue if buffer is full
+      queue.push(packet);
+    }
+  }
+
+  /**
+   * Get message queue for a channel
+   */
+  private getQueue(channelName: ChannelName): Uint8Array[] {
+    if (!this.dcMsgQueues.has(channelName)) {
+      this.dcMsgQueues.set(channelName, []);
+    }
+    return this.dcMsgQueues.get(channelName)!;
   }
 
   /**
@@ -467,16 +642,18 @@ export class StreamManager extends EventEmitter<{
   getStats(): {
     totalStreams: number;
     activeStreams: number;
-    sequenceNumber: number;
+    sequenceNumbers: Record<string, number>;
     streams: Record<string, { ready: boolean; configSent: boolean }>;
   } {
     const stats: Record<string, { ready: boolean; configSent: boolean }> = {};
+    const sequences: Record<string, number> = {};
 
     for (const [channelName, streamData] of this.streams.entries()) {
       stats[channelName] = {
         ready: this.isStreamReady(channelName),
         configSent: streamData.configSent,
       };
+      sequences[channelName] = this.sequenceNumbers.get(channelName) || 0;
     }
 
     return {
@@ -484,9 +661,23 @@ export class StreamManager extends EventEmitter<{
       activeStreams: Array.from(this.streams.values()).filter((s) =>
         this.isWebRTC ? s.dataChannelReady : s.writer !== null,
       ).length,
-      sequenceNumber: this.sequenceNumber,
+      sequenceNumbers: sequences,
       streams: stats,
     };
+  }
+
+  /**
+   * Get and increment sequence number for a channel
+   * @param channelName - Channel name
+   * @returns Current sequence number
+   */
+  private getAndIncrementSequence(channelName: ChannelName): number {
+    if (!this.sequenceNumbers.has(channelName)) {
+      this.sequenceNumbers.set(channelName, 0);
+    }
+    const current = this.sequenceNumbers.get(channelName)!;
+    this.sequenceNumbers.set(channelName, current + 1);
+    return current;
   }
 
   /**
@@ -502,10 +693,10 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
-   * Reset sequence number
+   * Reset sequence numbers for all channels
    */
-  resetSequenceNumber(): void {
-    this.sequenceNumber = 0;
+  resetSequenceNumbers(): void {
+    this.sequenceNumbers.clear();
   }
 
   /**

@@ -8,7 +8,7 @@ import { ChannelName } from "./publisher.types";
  * Packet header sizes
  */
 export const PACKET_HEADER = {
-  STANDARD_SIZE: 5, // 4 bytes timestamp + 1 byte frame type
+  STANDARD_SIZE: 9, // 4 bytes sequenceNumber + 4 bytes timestamp + 1 byte frame type
   FEC_SIZE: 20, // 4 bytes seq + 1 byte FEC marker + 1 byte type + 14 bytes RaptorQ config
   REGULAR_SIZE: 6, // 4 bytes seq + 1 byte FEC flag + 1 byte type
 } as const;

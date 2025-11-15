@@ -29,20 +29,23 @@ export class PacketBuilder {
   private static videoBaseTimestamp: number | undefined;
 
   /**
-   * Create a standard packet with 5-byte header
+   * Create a standard packet with 9-byte header
    * Header structure:
+   * - 4 bytes: sequence number (uint32, big-endian)
    * - 4 bytes: timestamp (uint32, big-endian)
    * - 1 byte: frame type
    *
    * @param data - Raw data to be packetized
    * @param timestamp - Frame timestamp in microseconds
    * @param frameType - Type of frame (video/audio/control)
+   * @param sequenceNumber - Packet sequence number
    * @returns Complete packet with header
    */
   static createPacket(
     data: ArrayBuffer | Uint8Array,
     timestamp: number,
     frameType: FrameType,
+    sequenceNumber: number,
   ): Uint8Array {
     const adjustedTimestamp = PacketBuilder.normalizeTimestamp(timestamp);
     const safeTimestamp = PacketBuilder.validateTimestamp(adjustedTimestamp);
@@ -52,12 +55,15 @@ export class PacketBuilder {
       PACKET_HEADER.STANDARD_SIZE + dataArray.length,
     );
 
+    // Write sequence number (4 bytes, big-endian)
+    const view = new DataView(packet.buffer, 0, 8);
+    view.setUint32(0, sequenceNumber, false);
+
     // Write timestamp (4 bytes, big-endian)
-    const view = new DataView(packet.buffer, 0, 4);
-    view.setUint32(0, safeTimestamp, false);
+    view.setUint32(4, safeTimestamp, false);
 
     // Write frame type (1 byte)
-    packet[4] = frameType;
+    packet[8] = frameType;
 
     // Copy payload
     packet.set(dataArray, PACKET_HEADER.STANDARD_SIZE);

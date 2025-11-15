@@ -132,7 +132,7 @@ export class WebTransportManager extends EventEmitter<WebTransportManagerEvents>
   }
 
   /**
-   * Handle disconnection
+   * Handle disconnection with smart retry logic
    */
   private handleDisconnection(error?: unknown): void {
     this.isConnected = false;
@@ -143,10 +143,67 @@ export class WebTransportManager extends EventEmitter<WebTransportManagerEvents>
       error,
     });
 
-    // Attempt reconnection if needed
+    // Check if error is retriable
+    const shouldRetry = this.isRetriableError(error);
+
+    if (!shouldRetry) {
+      console.error(
+        "[WebTransport] Non-retriable error, not attempting reconnection"
+      );
+      this.emit("error", {
+        error:
+          error instanceof Error ? error : new Error(String(error)),
+        context: "Non-retriable disconnection",
+      });
+      return;
+    }
+
+    // Attempt reconnection for retriable errors
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.attemptReconnection();
+    } else {
+      console.error("[WebTransport] Max reconnection attempts reached");
+      this.emit("error", {
+        error: new Error("Max reconnection attempts exceeded"),
+        context: "reconnection",
+      });
     }
+  }
+
+  /**
+   * Determine if an error is retriable
+   */
+  private isRetriableError(error: unknown): boolean {
+    if (!error) return true; // Graceful closure, can retry
+
+    const errorMessage =
+      error instanceof Error
+        ? error.message.toLowerCase()
+        : String(error).toLowerCase();
+
+    // Don't retry on configuration/authentication errors
+    const nonRetriablePatterns = [
+      "invalid url",
+      "authentication",
+      "unauthorized",
+      "forbidden",
+      "not found",
+      "bad request",
+      "invalid configuration",
+      "stream mode",
+    ];
+
+    for (const pattern of nonRetriablePatterns) {
+      if (errorMessage.includes(pattern)) {
+        console.warn(
+          `[WebTransport] Non-retriable error detected: ${errorMessage}`
+        );
+        return false;
+      }
+    }
+
+    // Retry on network/temporary errors
+    return true;
   }
 
   /**
@@ -159,21 +216,41 @@ export class WebTransportManager extends EventEmitter<WebTransportManagerEvents>
   }
 
   /**
-   * Attempt to reconnect
+   * Attempt to reconnect with exponential backoff
    */
   private async attemptReconnection(): Promise<void> {
     this.reconnectAttempts++;
 
-    console.log(
-      `Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
+    // Exponential backoff with max cap
+    const baseDelay = this.reconnectDelay; // 2000ms
+    const maxDelay = 30000; // 30 seconds max
+    const delay = Math.min(
+      baseDelay * Math.pow(2, this.reconnectAttempts - 1),
+      maxDelay
     );
 
-    await new Promise((resolve) => setTimeout(resolve, this.reconnectDelay));
+    console.log(
+      `[WebTransport] Reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms...`
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, delay));
 
     try {
       await this.connect();
+      console.log("[WebTransport] Reconnection successful!");
     } catch (error) {
-      console.error("Reconnection failed:", error);
+      console.error(
+        `[WebTransport] Reconnection attempt ${this.reconnectAttempts} failed:`,
+        error
+      );
+
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        console.error("[WebTransport] All reconnection attempts failed");
+        this.emit("error", {
+          error: new Error("All reconnection attempts failed"),
+          context: "reconnection",
+        });
+      }
     }
   }
 

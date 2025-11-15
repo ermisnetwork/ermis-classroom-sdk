@@ -13,6 +13,9 @@ export type SubscriberProtocol = 'webtransport' | 'webrtc' | 'websocket';
 // Subscribe type (for different stream types)
 export type SubscribeType = 'camera' | 'screenshare';
 
+// Stream mode for WebTransport
+export type StreamMode = 'single' | 'multi';
+
 // Subscriber configuration
 export interface SubscriberConfig {
   streamId: string;
@@ -29,6 +32,17 @@ export interface SubscriberConfig {
   subcribeUrl: string;
   isScreenSharing?: boolean;
   streamOutputEnabled?: boolean;
+  /**
+   * Stream mode for WebTransport
+   * - 'single': Single bidirectional stream for all media (default, SubscriberDev-style)
+   * - 'multi': Separate streams for video and audio (SubscriberWs-style)
+   * @default 'single'
+   */
+  streamMode?: StreamMode;
+  /**
+   * Status callback (for compatibility with original API)
+   */
+  onStatus?: (msg: string, isError: boolean) => void;
 }
 
 // Subscriber information

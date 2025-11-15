@@ -72,6 +72,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       };
 
       // Send init message with subscriberId and subscribeType
+      // ⚠️ CRITICAL: Worker expects FLAT structure, not nested in 'data'
       this.worker.postMessage(
         {
           type: "init",

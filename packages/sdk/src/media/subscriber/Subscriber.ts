@@ -9,6 +9,9 @@ import { EventEmitter } from "../../events/EventEmitter";
 import type {
   SubscriberConfig,
   SubscriberInfo,
+  SubscriberProtocol,
+  SubscribeType,
+  StreamMode,
 } from "../../types/media/subscriber.types";
 import { WebTransportManager } from "./transports/WebTransportManager";
 import { WorkerManager } from "./managers/WorkerManager";
@@ -76,11 +79,28 @@ interface SubscriberEvents extends Record<string, unknown> {
  * Subscriber class - orchestrates media stream receiving
  */
 export class Subscriber extends EventEmitter<SubscriberEvents> {
-  // Configuration
-  private config: Required<SubscriberConfig>;
+  // Configuration - make required fields explicit
+  private config: {
+    streamId: string;
+    roomId: string;
+    host: string;
+    userMediaWorker: string;
+    screenShareWorker: string;
+    isOwnStream: boolean;
+    protocol: SubscriberProtocol;
+    subscribeType: SubscribeType;
+    mediaWorkerUrl: string;
+    audioWorkletUrl: string;
+    mstgPolyfillUrl: string;
+    subcribeUrl: string;
+    isScreenSharing: boolean;
+    streamOutputEnabled: boolean;
+    streamMode: StreamMode;
+    onStatus?: (msg: string, isError: boolean) => void;
+  };
   private subscriberId: string;
-  private protocol: "webtransport" | "webrtc" | "websocket";
-  private subscribeType: "camera" | "screenshare";
+  private protocol: SubscriberProtocol;
+  private subscribeType: SubscribeType;
 
   // Managers
   private transportManager: WebTransportManager | null = null;
@@ -96,6 +116,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
   // State
   private isStarted = false;
+  private isAudioEnabled = true; // ✅ MATCH SubscriberDev.js
   private connectionStatus: ConnectionStatus = "disconnected";
   private mediaStream: MediaStream | null = null;
 
@@ -106,17 +127,17 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     this.config = {
       streamId: config.streamId || "",
       roomId: config.roomId || "",
-      host: config.host || "stream-gate.bandia.vn",
+      host: config.host || "admin.bandia.vn:9995",
       userMediaWorker:
         config.userMediaWorker ||
         "sfu-adaptive-trung.ermis-network.workers.dev",
       screenShareWorker:
         config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev",
       isOwnStream: config.isOwnStream || false,
-      protocol: config.protocol || "webtransport",
+      protocol: config.protocol || "websocket",
       subscribeType: config.subscribeType || "camera",
-      mediaWorkerUrl: config.mediaWorkerUrl || "/workers/media-worker-ab.js",
-      audioWorkletUrl: config.audioWorkletUrl || "/workers/audio-worklet1.js",
+      mediaWorkerUrl: config.mediaWorkerUrl || "/workers/media-worker-dev.js",
+      audioWorkletUrl: config.audioWorkletUrl || "/workers/audio-worklet.js",
       mstgPolyfillUrl: config.mstgPolyfillUrl || "/polyfills/MSTG_polyfill.js",
       subcribeUrl: config.subcribeUrl,
       isScreenSharing: config.isScreenSharing || false,
@@ -124,6 +145,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         config.streamOutputEnabled !== undefined
           ? config.streamOutputEnabled
           : true,
+      streamMode: config.streamMode || "single",
+      onStatus: config.onStatus,
     };
 
     // Set protocol and subscribeType
@@ -132,6 +155,13 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
     // Generate unique ID
     this.subscriberId = `subscriber_${this.config.streamId}_${Date.now()}`;
+
+    // Setup status callback listener if provided
+    if (this.config.onStatus) {
+      this.on("status", ({ message, isError }) => {
+        this.config.onStatus?.(message, isError);
+      });
+    }
 
     // Initialize managers
     this.initializeManagers();
@@ -303,8 +333,9 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       }
 
       // Initialize video system if needed (not for screen sharing streams)
+      // ✅ MATCH SubscriberDev.js: _initVideoSystem() is NOT awaited
       if (this.videoProcessor) {
-        await this.videoProcessor.init();
+        this.videoProcessor.init(); // ❗ NO await
       }
 
       // Attach streams to worker (WebTransport, WebRTC, or WebSocket)
@@ -325,6 +356,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
   /**
    * Stop the subscriber
+   * ✅ MATCH EXACT LOGIC FROM SubscriberDev.js
    */
   stop(): void {
     if (!this.isStarted) {
@@ -343,8 +375,11 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         });
       }
 
-      // Cleanup all components
+      // Cleanup all components (includes removing from audio mixer)
       this.cleanup();
+
+      // Clear references (MATCH JS version)
+      this.mediaStream = null;
 
       this.isStarted = false;
       this.updateConnectionStatus("disconnected");
@@ -359,19 +394,29 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
   /**
    * Toggle audio on/off
+   * ✅ MATCH EXACT LOGIC FROM SubscriberDev.js
    */
-  toggleAudio(): void {
+  toggleAudio(): boolean {
     if (!this.isStarted || !this.workerManager) {
-      return;
+      throw new Error("Subscriber not started");
     }
 
     try {
       this.workerManager.toggleAudio();
+      this.isAudioEnabled = !this.isAudioEnabled;
+
+      this.emit("audioToggled", {
+        subscriber: this,
+        enabled: this.isAudioEnabled,
+      });
+
+      return this.isAudioEnabled;
     } catch (error) {
       this.handleError(
         error instanceof Error ? error : new Error("Toggle audio failed"),
         "toggleAudio"
       );
+      throw error;
     }
   }
 
@@ -405,16 +450,17 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
   /**
    * Get subscriber info
+   * ✅ MATCH EXACT STRUCTURE FROM SubscriberDev.js
    */
   getInfo(): SubscriberInfo {
     return {
+      subscriberId: this.subscriberId,
       streamId: this.config.streamId,
       roomId: this.config.roomId || "",
       host: this.config.host || "",
       isOwnStream: this.config.isOwnStream || false,
-      subscriberId: this.subscriberId,
       isStarted: this.isStarted,
-      isAudioEnabled: true, // Default to true since we don't track this separately
+      isAudioEnabled: this.isAudioEnabled,
       connectionStatus: this.connectionStatus,
     };
   }
@@ -467,6 +513,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
   /**
    * Attach WebTransport streams to worker
+   * ⚠️ CRITICAL: SubscriberDev.js uses SINGLE stream mode only (no channelName param)
+   * Worker does NOT use channelName - it only needs readable/writable streams
    */
   private async attachWebTransportStreams(): Promise<void> {
     if (!this.transportManager || !this.workerManager) {
@@ -475,49 +523,30 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
     console.log("Attaching WebTransport streams...");
 
-    // For SubscriberDev-style (single stream mode) - used by media-worker-dev.js
-    if (this.config.mediaWorkerUrl.includes("media-worker-dev")) {
-      // Single bidirectional stream for all media
-      const mediaStream = await this.transportManager.createBidirectionalStream("media");
-      if (mediaStream) {
-        this.workerManager.attachStream(
-          "media",
-          mediaStream.readable,
-          mediaStream.writable
-        );
-      }
-      console.log("WebTransport single stream attached successfully");
-      return;
-    }
+    // ✅ MATCH EXACT LOGIC FROM SubscriberDev.js
+    // Create WebTransport connection
+    const webTpUrl = `https://${this.config.host}/meeting/wt/subscribe/${this.config.roomId}/${this.config.streamId}`;
+    console.log("Trying to connect to WebTransport to subscribe:", webTpUrl);
 
-    // For SubscriberWs-style (multi-stream mode) - used by media-worker-ab.js
-    // Attach video stream (360p)
-    const stream360p =
-      await this.transportManager.createBidirectionalStream("cam_360p");
-    if (stream360p) {
-      await this.workerManager.attachStream(
-        "cam_360p",
-        stream360p.readable,
-        stream360p.writable
-      );
-    }
+    const wt = new WebTransport(webTpUrl);
+    await wt.ready;
 
-    // Attach audio stream
-    const streamAudio =
-      await this.transportManager.createBidirectionalStream("mic_48k");
-    if (streamAudio) {
-      await this.workerManager.attachStream(
-        "mic_48k",
-        streamAudio.readable,
-        streamAudio.writable
-      );
-    }
-
-    console.log("WebTransport multi-streams attached successfully");
+    // ✅ SINGLE bidirectional stream (no channelName - worker doesn't use it)
+    const mediaStream = await wt.createBidirectionalStream();
+    this.workerManager.attachStream(
+      "media",  // channelName not used by worker, just for logging
+      mediaStream.readable,
+      mediaStream.writable
+    );
+    console.log("✅ WebTransport stream attached");
   }
 
   /**
    * Attach WebRTC data channels to worker
+   * ⚠️ CRITICAL: Must use EXACT channel names from SubscriberDev.js:
+   * - "mic_48k" for audio
+   * - "cam_360p" for 360p video (even though it's wrong, it matches JS version)
+   * - "cam_720p" for 720p video (even though it's wrong, it matches JS version)
    */
   private async attachWebRTCChannels(): Promise<void> {
     if (!this.workerManager) {
@@ -529,7 +558,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     try {
       this.webRtc = new RTCPeerConnection();
 
-      // Create data channels
+      // ✅ MATCH EXACT LOGIC FROM SubscriberDev.js
+      // Create data channels with EXACT same channel names
       const streamAudioChannel = await this.createWrtcDataChannel("mic_48k", this.webRtc);
       console.log("Audio data channel created, id:", streamAudioChannel.id);
 
@@ -537,9 +567,10 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       console.log("360p data channel created, id:", stream360pChannel.id);
 
       const stream720pChannel = await this.createWrtcDataChannel("cam_720p", this.webRtc);
-      console.log("720p data channel created, id:", stream720pChannel.id);
+      console.log("cam_720p data channel created, id:", stream720pChannel.id);
 
-      // Attach channels to worker
+      // ✅ ATTACH EXACT SAME CHANNELS AS JS VERSION
+      // JS version attaches: mic_48k and cam_720p
       this.workerManager.attachDataChannel("mic_48k", streamAudioChannel);
       this.workerManager.attachDataChannel("cam_720p", stream720pChannel);
 
