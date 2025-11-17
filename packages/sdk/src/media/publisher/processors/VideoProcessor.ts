@@ -310,10 +310,11 @@ export class VideoProcessor extends EventEmitter<{
           channelName,
           {
             codec: decoderConfig.codec,
-            width: decoderConfig.codedWidth,
-            height: decoderConfig.codedHeight,
-            framerate: subStream?.framerate || 30,
-            bitrate: subStream?.bitrate || 800_000,
+            codedWidth: decoderConfig.codedWidth,
+            codedHeight: decoderConfig.codedHeight,
+            frameRate: subStream?.framerate || 30,
+            quality: subStream?.bitrate || 800_000,
+            description: decoderConfig.description,
           },
           "video",
         );

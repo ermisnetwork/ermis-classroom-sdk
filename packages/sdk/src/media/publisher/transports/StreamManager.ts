@@ -9,17 +9,19 @@ import { LengthDelimitedReader } from "../../shared/utils/LengthDelimitedReader"
 
 // Temporary type definitions
 interface VideoConfig {
-  width: number;
-  height: number;
-  framerate: number;
-  bitrate: number;
-  codec?: string;
+  codec: string;
+  codedWidth: number;
+  codedHeight: number;
+  frameRate: number;
+  quality?: number;
+  description?: ArrayBuffer;
 }
 
 interface AudioConfig {
+  codec: string;
   sampleRate: number;
   numberOfChannels: number;
-  codec?: string;
+  description?: ArrayBuffer;
 }
 
 /**
@@ -376,10 +378,10 @@ export class StreamManager extends EventEmitter<{
         mediaType: "video",
         config: {
           codec: vConfig.codec,
-          codedWidth: vConfig.width,
-          codedHeight: vConfig.height,
-          frameRate: vConfig.framerate,
-          quality: vConfig.bitrate,
+          codedWidth: vConfig.codedWidth,
+          codedHeight: vConfig.codedHeight,
+          frameRate: vConfig.frameRate,
+          quality: vConfig.quality,
           description: (vConfig as any).description
             ? this.arrayBufferToBase64((vConfig as any).description)
             : null,
@@ -412,20 +414,25 @@ export class StreamManager extends EventEmitter<{
 
     const configJson = JSON.stringify(command);
     const configData = new TextEncoder().encode(configJson);
-    const sequenceNumber = this.getAndIncrementSequence(channelName);
-    const packet = PacketBuilder.createPacket(
-      configData,
-      Date.now(),
-      FrameType.CONFIG,
-      sequenceNumber,
-    );
 
-    await this.sendPacket(channelName, packet, FrameType.CONFIG);
+    // ⚠️ CRITICAL: Send directly without PacketBuilder header!
+    // Publisher.js sends config via commandSender which does NOT use packet headers
+    // Config is sent as raw command bytes, not as a media packet
+    if (this.isWebRTC) {
+      // For WebRTC, send with CONFIG frame type
+      await this.sendViaDataChannel(channelName, streamData, configData, FrameType.CONFIG);
+    } else {
+      // For WebTransport, send directly to stream
+      await this.sendViaWebTransport(streamData, configData);
+    }
 
     streamData.configSent = true;
     streamData.config = config as any;
 
-    console.log(`[StreamManager] ✅ Config sent for ${channelName}:`, configPacket);
+    console.log(`[StreamManager] ✅ Config sent for ${channelName}`);
+    console.log(`[StreamManager] Config packet:`, configPacket);
+    console.log(`[StreamManager] Command wrapper:`, command);
+    console.log(`[StreamManager] Final JSON:`, configJson);
     this.emit("configSent", { channelName });
   }
 

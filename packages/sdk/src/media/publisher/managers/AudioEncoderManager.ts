@@ -103,8 +103,9 @@ export class AudioEncoderManager extends EventEmitter<{
         audioRecorderOptions,
       );
 
-      this.audioRecorder.ondataavailable = (event: { data: Uint8Array }) => {
-        this.handleAudioData(event.data);
+      this.audioRecorder.ondataavailable = (event: any) => {
+        const data = event?.data || event;
+        this.handleAudioData(data);
       };
 
       console.log(
