@@ -69,7 +69,10 @@ export class VideoProcessor extends EventEmitter<{
     super();
     this.videoEncoderManager = videoEncoderManager;
     this.streamManager = streamManager;
-    this.subStreams = subStreams.filter((s) => s.channelName.startsWith("cam"));
+    // Filter for video streams (not audio or control)
+    this.subStreams = subStreams.filter((s) =>
+      s.width !== undefined && s.height !== undefined
+    );
   }
 
   /**
@@ -88,6 +91,7 @@ export class VideoProcessor extends EventEmitter<{
 
     try {
       console.log("[VideoProcessor] Initializing...");
+      console.log("[VideoProcessor] Sub-streams:", this.subStreams.length, this.subStreams.map(s => s.name));
 
       // Create encoders for each sub-stream
       for (const subStream of this.subStreams) {
@@ -99,6 +103,8 @@ export class VideoProcessor extends EventEmitter<{
           bitrate: subStream.bitrate!,
         };
 
+        console.log(`[VideoProcessor] Creating encoder for ${subStream.name}:`, encoderConfig);
+
         this.videoEncoderManager.createEncoder(
           subStream.name,
           subStream.channelName,
@@ -108,6 +114,8 @@ export class VideoProcessor extends EventEmitter<{
           (error) => this.handleEncoderError(error, subStream.name),
         );
       }
+
+      console.log("[VideoProcessor] Setting up video processor with trigger worker...");
 
       // Setup video processor with trigger worker
       this.triggerWorker = new Worker("/polyfills/triggerWorker.js");
@@ -121,7 +129,7 @@ export class VideoProcessor extends EventEmitter<{
 
       this.videoReader = this.videoProcessor.readable.getReader();
 
-      console.log("[VideoProcessor] Initialized successfully");
+      console.log("[VideoProcessor] Initialized successfully, videoReader:", !!this.videoReader);
       this.emit("initialized", { subStreams: this.subStreams });
     } catch (error) {
       console.error("[VideoProcessor] Initialization failed:", error);
@@ -215,7 +223,9 @@ export class VideoProcessor extends EventEmitter<{
    * Process video frames loop
    */
   private async processFrames(): Promise<void> {
+    console.log("[VideoProcessor] processFrames() started, isProcessing:", this.isProcessing, "videoReader:", !!this.videoReader);
     try {
+      let frameCount = 0;
       while (this.isProcessing && this.videoReader) {
         const result = await this.videoReader.read();
 
@@ -225,6 +235,7 @@ export class VideoProcessor extends EventEmitter<{
         }
 
         const frame = result.value;
+        frameCount++;
 
         // Set base timestamp on first frame
         if (!(window as any).videoBaseTimestamp) {
@@ -233,6 +244,11 @@ export class VideoProcessor extends EventEmitter<{
             "[VideoProcessor] Base timestamp set:",
             frame.timestamp,
           );
+        }
+
+        // Log first few frames
+        if (frameCount <= 5) {
+          console.log(`[VideoProcessor] Processing frame ${frameCount}, timestamp:`, frame.timestamp);
         }
 
         // Skip frame if camera disabled
@@ -247,6 +263,7 @@ export class VideoProcessor extends EventEmitter<{
 
         this.frameCounter++;
       }
+      console.log("[VideoProcessor] processFrames() ended, total frames:", frameCount);
     } catch (error) {
       console.error("[VideoProcessor] Frame processing error:", error);
       this.emit("processingError", error);

@@ -94,6 +94,10 @@ export class AudioEncoderManager extends EventEmitter<{
         `[AudioEncoder] Initializing recorder for ${this.channelName}`,
       );
 
+      if (!this.initAudioRecorder || typeof this.initAudioRecorder !== 'function') {
+        throw new Error(`initAudioRecorder is not a function: ${typeof this.initAudioRecorder}`);
+      }
+
       this.audioRecorder = await this.initAudioRecorder(
         audioStream,
         audioRecorderOptions,

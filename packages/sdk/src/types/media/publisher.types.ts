@@ -29,9 +29,11 @@ export enum TransportPacketType {
 export enum ChannelName {
   MEETING_CONTROL = "meeting_control",
   MICROPHONE = "mic_48k",
-  CAMERA_360P = "cam_360p",
-  CAMERA_720P = "cam_720p",
+  VIDEO_360P = "video_360p",
+  VIDEO_720P = "video_720p",
+  SCREEN_SHARE_720P = "screen_share_720p",
   SCREEN_SHARE_1080P = "screen_share_1080p",
+  SCREEN_SHARE_AUDIO = "screen_share_audio",
 }
 
 // Publisher configuration

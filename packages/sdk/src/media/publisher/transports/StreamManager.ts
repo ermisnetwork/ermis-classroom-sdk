@@ -365,23 +365,52 @@ export class StreamManager extends EventEmitter<{
       throw new Error(`Stream ${channelName} not found`);
     }
 
-    const configJson = JSON.stringify({
-      type: "config",
-      mediaType,
-      codec: config.codec,
-      width: (config as VideoConfig).width,
-      height: (config as VideoConfig).height,
-      framerate: (config as VideoConfig).framerate,
-      bitrate: (config as VideoConfig).bitrate,
-      sampleRate: (config as AudioConfig).sampleRate,
-      numberOfChannels: (config as AudioConfig).numberOfChannels,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      description: (config as any).description
-        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.arrayBufferToBase64((config as any).description)
-        : null,
-    });
+    // Match Publisher.js format - nested config structure
+    let configPacket: any;
 
+    if (mediaType === "video") {
+      const vConfig = config as VideoConfig;
+      configPacket = {
+        type: "StreamConfig",
+        channelName: channelName,
+        mediaType: "video",
+        config: {
+          codec: vConfig.codec,
+          codedWidth: vConfig.width,
+          codedHeight: vConfig.height,
+          frameRate: vConfig.framerate,
+          quality: vConfig.bitrate,
+          description: (vConfig as any).description
+            ? this.arrayBufferToBase64((vConfig as any).description)
+            : null,
+        },
+      };
+    } else {
+      const aConfig = config as AudioConfig;
+      configPacket = {
+        type: "StreamConfig",
+        channelName: channelName,
+        mediaType: "audio",
+        config: {
+          codec: aConfig.codec,
+          sampleRate: aConfig.sampleRate,
+          numberOfChannels: aConfig.numberOfChannels,
+          description: (aConfig as any).description
+            ? this.arrayBufferToBase64((aConfig as any).description)
+            : null,
+        },
+      };
+    }
+
+    // Send config wrapped in command format (matching Publisher.js)
+    // Publisher.js does: JSON.stringify(configPacket) before sending to sendMediaConfig
+    // Then sendMediaConfig wraps it: { type: "media_config", data: stringifiedConfig }
+    const command = {
+      type: "media_config",
+      data: JSON.stringify(configPacket), // Stringify first like Publisher.js line 1517
+    };
+
+    const configJson = JSON.stringify(command);
     const configData = new TextEncoder().encode(configJson);
     const sequenceNumber = this.getAndIncrementSequence(channelName);
     const packet = PacketBuilder.createPacket(
@@ -394,9 +423,9 @@ export class StreamManager extends EventEmitter<{
     await this.sendPacket(channelName, packet, FrameType.CONFIG);
 
     streamData.configSent = true;
-    streamData.config = config as any; // Type workaround
+    streamData.config = config as any;
 
-    console.log(`[StreamManager] Config sent for ${channelName}:`, config);
+    console.log(`[StreamManager] ✅ Config sent for ${channelName}:`, configPacket);
     this.emit("configSent", { channelName });
   }
 

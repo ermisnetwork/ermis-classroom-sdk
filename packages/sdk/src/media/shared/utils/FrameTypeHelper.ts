@@ -34,12 +34,13 @@ export class FrameTypeHelper {
     const isKeyFrame = chunkType === "key";
 
     switch (channelName) {
-      case ChannelName.CAMERA_360P:
+      case ChannelName.VIDEO_360P:
         return isKeyFrame ? FrameType.CAM_360P_KEY : FrameType.CAM_360P_DELTA;
 
-      case ChannelName.CAMERA_720P:
+      case ChannelName.VIDEO_720P:
         return isKeyFrame ? FrameType.CAM_720P_KEY : FrameType.CAM_720P_DELTA;
 
+      case ChannelName.SCREEN_SHARE_720P:
       case ChannelName.SCREEN_SHARE_1080P:
         return isKeyFrame
           ? FrameType.SCREEN_SHARE_KEY

@@ -20,9 +20,11 @@ export const PACKET_HEADER = {
 export const DATA_CHANNEL_IDS: Record<ChannelName, number> = {
   [ChannelName.MEETING_CONTROL]: 0,
   [ChannelName.MICROPHONE]: 1,
-  [ChannelName.CAMERA_360P]: 2,
-  [ChannelName.CAMERA_720P]: 3,
-  [ChannelName.SCREEN_SHARE_1080P]: 4,
+  [ChannelName.VIDEO_360P]: 2,
+  [ChannelName.VIDEO_720P]: 3,
+  [ChannelName.SCREEN_SHARE_720P]: 4,
+  [ChannelName.SCREEN_SHARE_1080P]: 5,
+  [ChannelName.SCREEN_SHARE_AUDIO]: 6,
 } as const;
 
 /**
