@@ -367,7 +367,6 @@ export class StreamManager extends EventEmitter<{
       throw new Error(`Stream ${channelName} not found`);
     }
 
-    // Match Publisher.js format - nested config structure
     let configPacket: any;
 
     if (mediaType === "video") {
@@ -389,6 +388,18 @@ export class StreamManager extends EventEmitter<{
       };
     } else {
       const aConfig = config as AudioConfig;
+
+      // Convert Uint8Array description to base64 string
+      let descriptionBase64 = null;
+      if ((aConfig as any).description) {
+        const desc = (aConfig as any).description;
+        // Handle both Uint8Array and ArrayBuffer
+        const uint8Array = desc instanceof Uint8Array
+          ? desc
+          : new Uint8Array(desc);
+        descriptionBase64 = this.arrayBufferToBase64(uint8Array.buffer);
+      }
+
       configPacket = {
         type: "StreamConfig",
         channelName: channelName,
@@ -397,26 +408,24 @@ export class StreamManager extends EventEmitter<{
           codec: aConfig.codec,
           sampleRate: aConfig.sampleRate,
           numberOfChannels: aConfig.numberOfChannels,
-          description: (aConfig as any).description
-            ? this.arrayBufferToBase64((aConfig as any).description)
-            : null,
+          description: descriptionBase64,
         },
       };
     }
 
-    // Send config wrapped in command format (matching Publisher.js)
-    // Publisher.js does: JSON.stringify(configPacket) before sending to sendMediaConfig
+    // Send config wrapped in command format
+    //  JSON.stringify(configPacket) before sending to sendMediaConfig
     // Then sendMediaConfig wraps it: { type: "media_config", data: stringifiedConfig }
     const command = {
       type: "media_config",
-      data: JSON.stringify(configPacket), // Stringify first like Publisher.js line 1517
+      data: JSON.stringify(configPacket),
     };
 
     const configJson = JSON.stringify(command);
     const configData = new TextEncoder().encode(configJson);
 
     // ⚠️ CRITICAL: Send directly without PacketBuilder header!
-    // Publisher.js sends config via commandSender which does NOT use packet headers
+    //  sends config via commandSender which does NOT use packet headers
     // Config is sent as raw command bytes, not as a media packet
     if (this.isWebRTC) {
       // For WebRTC, send with CONFIG frame type
@@ -700,6 +709,23 @@ export class StreamManager extends EventEmitter<{
       sequenceNumbers: sequences,
       streams: stats,
     };
+  }
+
+  /**
+   * Create packet with header for audio config description
+   */
+  public createAudioConfigPacket(
+    channelName: ChannelName,
+    data: Uint8Array,
+  ): Uint8Array {
+    const timestamp = performance.now() * 1000;
+    const sequenceNumber = this.getAndIncrementSequence(channelName);
+    return PacketBuilder.createPacket(
+      data,
+      timestamp,
+      FrameType.AUDIO,
+      sequenceNumber,
+    );
   }
 
   /**

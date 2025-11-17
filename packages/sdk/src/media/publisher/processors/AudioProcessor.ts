@@ -77,12 +77,18 @@ export class AudioProcessor extends EventEmitter<{
     this.audioEncoderManager.on("configReady", async (data) => {
       console.log("[AudioProcessor] Config ready:", data);
 
+      // Wrap description in packet header.
+      const config = { ...data.config };
+      if (config.description && config.description instanceof Uint8Array) {
+        const packetWithHeader = this.streamManager.createAudioConfigPacket(
+          this.channelName,
+          config.description,
+        );
+        config.description = packetWithHeader;
+      }
+
       // Send config to server
-      await this.streamManager.sendConfig(
-        this.channelName,
-        data.config,
-        "audio",
-      );
+      await this.streamManager.sendConfig(this.channelName, config, "audio");
 
       this.audioEncoderManager.setConfigSent();
       this.emit("configReady", data);

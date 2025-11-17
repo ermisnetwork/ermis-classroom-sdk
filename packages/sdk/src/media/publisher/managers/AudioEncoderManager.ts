@@ -219,7 +219,7 @@ export class AudioEncoderManager extends EventEmitter<{
           config: this.audioConfig,
         });
 
-        return;
+        // Don't return - continue to send this chunk after config is sent
       }
 
       // Initialize timing on first audio chunk after config
