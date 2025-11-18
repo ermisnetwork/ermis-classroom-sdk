@@ -14,14 +14,14 @@ interface VideoConfig {
   codedHeight: number;
   frameRate: number;
   quality?: number;
-  description?: ArrayBuffer;
+  description?: AllowSharedBufferSource;
 }
 
 interface AudioConfig {
   codec: string;
   sampleRate: number;
   numberOfChannels: number;
-  description?: ArrayBuffer;
+  description?: AllowSharedBufferSource;
 }
 
 /**
