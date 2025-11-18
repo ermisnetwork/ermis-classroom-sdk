@@ -283,7 +283,7 @@ export class StreamManager extends EventEmitter<{
   /**
    * Create WebRTC data channel (public method for direct use, same as JS)
    */
-  createDataChannelDirect(channelName: ChannelName, peerConnection: RTCPeerConnection): void {
+  async createDataChannelDirect(channelName: ChannelName, peerConnection: RTCPeerConnection): Promise<void> {
     console.log(`[StreamManager] Creating data channel: ${channelName}`);
 
     let ordered = false;
@@ -345,17 +345,19 @@ export class StreamManager extends EventEmitter<{
     dataChannel.onopen = async () => {
       console.log(`[StreamManager] ✅ Data channel ${channelName} OPENED! readyState: ${dataChannel.readyState}`);
 
+      // Match JS Publisher exactly
       this.streams.set(channelName, {
-        writer: null as any,
-        reader: null as any,
-        configSent: false,
-        config: null,
-        metadataReady: false,
-        videoDecoderConfig: null,
+        id: 0,
         dataChannel,
         dataChannelReady: true,
-      });
+        configSent: false,
+        config: null,
+      } as any);
 
+      if (channelName === ChannelName.MEETING_CONTROL) {
+        // TODO: Send publisher state (needs commandSender)
+      }
+      
       console.log(`WebRTC data channel (${channelName}) established`);
     };
 

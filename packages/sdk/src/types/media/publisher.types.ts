@@ -76,16 +76,24 @@ export interface SubStream {
   framerate?: number;
 }
 
-// Stream data structure
+// Stream data structure (supports both WebTransport and WebRTC)
 export interface StreamData {
-  writer: WritableStreamDefaultWriter | null;
-  reader: ReadableStreamDefaultReader | null;
-  configSent: boolean;
-  config: VideoEncoderConfig | null;
-  metadataReady: boolean;
-  videoDecoderConfig: VideoDecoderConfig | null;
+  // WebTransport fields
+  writer?: WritableStreamDefaultWriter | null;
+  reader?: ReadableStreamDefaultReader | null;
+  
+  // WebRTC fields (match JS Publisher)
+  id?: number;
   dataChannel?: RTCDataChannel;
   dataChannelReady?: boolean;
+  
+  // Common fields
+  configSent: boolean;
+  config: VideoEncoderConfig | AudioEncoderConfig | null;
+  
+  // Video-specific fields (for encoders)
+  metadataReady?: boolean;
+  videoDecoderConfig?: VideoDecoderConfig | null;
 }
 
 // Encoder data structure

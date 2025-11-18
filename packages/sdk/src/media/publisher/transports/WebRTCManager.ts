@@ -120,7 +120,7 @@ export class WebRTCManager extends EventEmitter<
       for (const channelName of channelNames) {
         console.log(`[WebRTC] Setting up connection for: ${channelName}`);
 
-        const webRtc = new RTCPeerConnection(this.config);
+        const webRtc = new RTCPeerConnection();
         this.peerConnections.set(channelName, webRtc);
 
         // Log ICE candidates for debugging
