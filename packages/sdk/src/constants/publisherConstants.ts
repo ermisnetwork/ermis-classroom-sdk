@@ -136,10 +136,10 @@ export function getSubStreams(streamType: string): SubStream[] {
         return [SUB_STREAMS.SCREEN_SHARE_AUDIO, SUB_STREAMS.SCREEN_SHARE_720P];
     } else if (streamType === StreamTypes.CAMERA) {
         return [
+            SUB_STREAMS.MEETING_CONTROL,
             SUB_STREAMS.MIC_AUDIO,
             SUB_STREAMS.VIDEO_360P,
             SUB_STREAMS.VIDEO_720P,
-            SUB_STREAMS.MEETING_CONTROL,
         ];
     } else {
         throw new Error(`Invalid publisher type, cannot get sub streams for type: ${streamType}`);

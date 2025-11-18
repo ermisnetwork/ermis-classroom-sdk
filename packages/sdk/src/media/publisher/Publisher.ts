@@ -114,15 +114,23 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   }
 
   private async loadPolyfills(): Promise<void> {
-    if (!(window as any).MediaStreamTrackProcessor) {
-      // @ts-ignore - JavaScript polyfill file
-      const polyfillModule: any = await import("../../polyfills/MSTP_polyfill");
-      await polyfillModule.default();
-    }
-    if (!(window as any).MediaStreamTrackGenerator) {
-      // @ts-ignore - JavaScript polyfill file
-      const polyfillModule: any = await import("../../polyfills/MSTG_polyfill");
-      await polyfillModule.default();
+    // Only load MSTP polyfill (same as original JS version)
+    // MSTG polyfill is loaded by Subscriber when needed
+    console.log("[Publisher] 🔧 loadPolyfills() v2.0 - TypeScript version");
+    if (!document.querySelector('script[src*="MSTP_polyfill.js"]')) {
+      console.log("[Publisher] Loading MSTP polyfill from /polyfills/MSTP_polyfill.js");
+      await new Promise<void>((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "/polyfills/MSTP_polyfill.js";
+        script.onload = () => {
+          console.log("[Publisher] ✅ Polyfill loaded successfully");
+          resolve();
+        };
+        script.onerror = () => reject(new Error("Failed to load MSTP polyfill"));
+        document.head.appendChild(script);
+      });
+    } else {
+      console.log("[Publisher] ℹ️ MSTP polyfill already loaded");
     }
   }
 
@@ -268,28 +276,26 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private async setupWebRTCConnection(): Promise<void> {
     this.updateStatus("Connecting via WebRTC...");
 
-    if (!this.options.webRtcServerUrl) {
-      throw new Error("WebRTC server URL is required");
-    }
+    // Use provided webRtcHost or fallback to default (same as JS version)
+    const webRtcHost = this.options.webRtcHost || "admin.bandia.vn:9995";
 
+    // Initialize StreamManager first
+    this.streamManager = new StreamManager(true);
+
+    // Initialize WebRTCManager to handle multiple connections
     this.webRtcManager = new WebRTCManager(
-      this.options.webRtcServerUrl,
+      webRtcHost,
       this.options.roomId || "",
       this.options.streamId || ""
     );
 
-    const peerConnection = await this.webRtcManager.connect();
-    this.streamManager = new StreamManager(true);
+    // Get all channel names from subStreams (already includes MEETING_CONTROL, MIC_AUDIO, and video channels)
+    const channelNames: ChannelName[] = this.subStreams.map(s => s.channelName as ChannelName);
 
-    const channelNames: ChannelName[] = [
-      ...this.subStreams.map(s => s.channelName as ChannelName),
-    ];
+    console.log("[Publisher] Setting up WebRTC for channels:", channelNames);
 
-    if (this.hasAudio) {
-      channelNames.push(ChannelName.MICROPHONE);
-    }
-
-    await this.streamManager.initWebRTCChannels(peerConnection, channelNames);
+    // Connect all channels (WebRTCManager handles creating multiple peer connections)
+    await this.webRtcManager.connectMultipleChannels(channelNames, this.streamManager);
 
     this.updateStatus("WebRTC connected");
     this.emit("connected");

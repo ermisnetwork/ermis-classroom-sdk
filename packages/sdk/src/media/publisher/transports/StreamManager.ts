@@ -5,8 +5,20 @@ import type {
   ServerEvent,
 } from "../../../types/media/publisher.types";
 import { PacketBuilder } from "../../shared/utils/PacketBuilder";
+import type { RaptorQConfig } from "../../shared/utils/PacketBuilder";
 import { FrameTypeHelper } from "../../shared/utils/FrameTypeHelper";
 import { LengthDelimitedReader } from "../../shared/utils/LengthDelimitedReader";
+
+// WasmEncoder type from RaptorQ
+interface WasmEncoderType {
+  new(data: Uint8Array, blockSize: number): WasmEncoderInstance;
+}
+
+interface WasmEncoderInstance {
+  encode(redundancy: number): Uint8Array[];
+  getConfigBuffer(): Uint8Array;
+  free(): void;
+}
 
 // StreamManager-specific config types
 export interface VideoConfig {
@@ -49,9 +61,59 @@ export class StreamManager extends EventEmitter<{
   private webTransport: any | null = null;
   private peerConnection: RTCPeerConnection | null = null;
 
+  // FEC/RaptorQ WASM encoder (same as JS)
+  private WasmEncoder: WasmEncoderType | null = null;
+  private wasmInitialized = false;
+  private wasmInitializing = false;
+  private wasmInitPromise: Promise<void> | null = null;
+
   constructor(isWebRTC: boolean = false) {
     super();
     this.isWebRTC = isWebRTC;
+  }
+
+  /**
+   * Initialize WASM encoder for FEC (same as JS Publisher)
+   */
+  private async initWasmEncoder(): Promise<void> {
+    if (this.wasmInitialized) {
+      return;
+    }
+
+    if (this.wasmInitializing && this.wasmInitPromise) {
+      await this.wasmInitPromise;
+      return;
+    }
+
+    this.wasmInitializing = true;
+
+    try {
+      // Dynamic import RaptorQ WASM module
+      const { default: init, WasmEncoder } = await import(
+        /* @vite-ignore */
+        `/raptorQ/raptorq_wasm.js?t=${Date.now()}`
+      );
+
+      this.WasmEncoder = WasmEncoder as WasmEncoderType;
+
+      this.wasmInitPromise = init(`/raptorQ/raptorq_wasm_bg.wasm?t=${Date.now()}`)
+        .then(() => {
+          this.wasmInitialized = true;
+          this.wasmInitializing = false;
+          console.log("[StreamManager] WASM encoder module loaded successfully");
+        })
+        .catch((err: unknown) => {
+          this.wasmInitializing = false;
+          console.error("[StreamManager] Failed to load WASM encoder module:", err);
+          throw new Error("Failed to load WASM encoder module");
+        });
+
+      await this.wasmInitPromise;
+    } catch (error) {
+      this.wasmInitializing = false;
+      console.error("[StreamManager] Error initializing WASM:", error);
+      throw error;
+    }
   }
 
   /**
@@ -219,6 +281,94 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
+   * Create WebRTC data channel (public method for direct use, same as JS)
+   */
+  createDataChannelDirect(channelName: ChannelName, peerConnection: RTCPeerConnection): void {
+    console.log(`[StreamManager] Creating data channel: ${channelName}`);
+
+    let ordered = false;
+    if (channelName === ChannelName.MEETING_CONTROL) {
+      ordered = true;
+    }
+
+    // Use id: 0 like JS - each channel has separate peer connection
+    const dataChannel = peerConnection.createDataChannel(channelName, {
+      ordered,
+      id: 0,
+      negotiated: true,
+    });
+
+    console.log(`[StreamManager] Data channel created for ${channelName}, readyState: ${dataChannel.readyState}`);
+
+    const bufferAmounts = {
+      SMALL: 8192,
+      LOW: 16384,
+      MEDIUM: 32768,
+      HIGH: 65536,
+    };
+
+    if (channelName.includes("1080p")) {
+      dataChannel.bufferedAmountLowThreshold = bufferAmounts.HIGH;
+    } else if (channelName.includes("720p")) {
+      dataChannel.bufferedAmountLowThreshold = bufferAmounts.MEDIUM;
+    } else if (channelName.includes("360p") || channelName === ChannelName.MICROPHONE) {
+      dataChannel.bufferedAmountLowThreshold = bufferAmounts.LOW;
+    } else {
+      dataChannel.bufferedAmountLowThreshold = bufferAmounts.MEDIUM;
+    }
+
+    dataChannel.onbufferedamountlow = () => {
+      const queue = this.getQueue(channelName);
+
+      while (
+        queue.length > 0 &&
+        dataChannel.bufferedAmount <= dataChannel.bufferedAmountLowThreshold
+      ) {
+        const packet = queue.shift();
+        if (packet) {
+          dataChannel.send(packet.slice());
+          this.dcPacketSendTime.set(channelName, performance.now());
+        }
+      }
+    };
+
+    dataChannel.binaryType = "arraybuffer";
+
+    dataChannel.onerror = (error) => {
+      console.error(`[StreamManager] Data channel ${channelName} error:`, error);
+    };
+
+    dataChannel.onclose = () => {
+      console.log(`[StreamManager] Data channel ${channelName} closed`);
+    };
+
+    dataChannel.onopen = async () => {
+      console.log(`[StreamManager] ✅ Data channel ${channelName} OPENED! readyState: ${dataChannel.readyState}`);
+
+      this.streams.set(channelName, {
+        writer: null as any,
+        reader: null as any,
+        configSent: false,
+        config: null,
+        metadataReady: false,
+        videoDecoderConfig: null,
+        dataChannel,
+        dataChannelReady: true,
+      });
+
+      console.log(`WebRTC data channel (${channelName}) established`);
+    };
+
+    // Monitor ICE connection state for debugging
+    peerConnection.oniceconnectionstatechange = () => {
+      console.log(`[StreamManager] ${channelName} ICE connection state: ${peerConnection.iceConnectionState}`);
+      if (peerConnection.iceConnectionState === 'failed') {
+        console.error(`[StreamManager] ${channelName} ICE connection FAILED!`);
+      }
+    };
+  }
+
+  /**
    * Create WebRTC data channel
    */
   private async createDataChannel(channelName: ChannelName): Promise<void> {
@@ -313,13 +463,23 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
-   * Send video chunk
+   * Send video chunk (EXACT copy from JS handleVideoChunk logic)
    */
   async sendVideoChunk(
     channelName: ChannelName,
     chunk: EncodedVideoChunk,
     _metadata?: EncodedVideoChunkMetadata,
   ): Promise<void> {
+    const streamData = this.streams.get(channelName);
+    if (!streamData) {
+      return; // ✅ Return early like JS, don't throw
+    }
+
+    // Skip if config not sent yet
+    if (!streamData.configSent) {
+      return;
+    }
+
     const chunkType: "key" | "delta" = chunk.type === "key" ? "key" : "delta";
     const frameType = FrameTypeHelper.getFrameType(channelName, chunkType);
 
@@ -338,13 +498,23 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
-   * Send audio chunk
+   * Send audio chunk (EXACT copy from JS handleAudioChunk logic)
    */
   async sendAudioChunk(
     channelName: ChannelName,
     audioData: Uint8Array,
     timestamp: number,
   ): Promise<void> {
+    const streamData = this.streams.get(channelName);
+    if (!streamData) {
+      return; // ✅ Return early like JS, don't throw
+    }
+
+    // Skip if config not sent yet
+    if (!streamData.configSent) {
+      return;
+    }
+
     const sequenceNumber = this.getAndIncrementSequence(channelName);
     const packet = PacketBuilder.createPacket(
       audioData,
@@ -357,7 +527,7 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
-   * Send configuration data
+   * Send configuration data (EXACT copy from JS handleVideoChunk logic)
    */
   async sendConfig(
     channelName: ChannelName,
@@ -366,7 +536,8 @@ export class StreamManager extends EventEmitter<{
   ): Promise<void> {
     const streamData = this.streams.get(channelName);
     if (!streamData) {
-      throw new Error(`Stream ${channelName} not found`);
+      console.warn(`[StreamManager] Stream ${channelName} not ready yet for config`);
+      return; // ✅ Return early like JS, don't throw
     }
 
     let configPacket: any;
@@ -553,7 +724,7 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
-   * Send via WebRTC data channel
+   * Send via WebRTC data channel with FEC encoding (EXACT copy from JS Publisher.sendOverDataChannel)
    */
   private async sendViaDataChannel(
     channelName: ChannelName,
@@ -561,25 +732,111 @@ export class StreamManager extends EventEmitter<{
     packet: Uint8Array,
     frameType: FrameType,
   ): Promise<void> {
-    if (!streamData.dataChannel || !streamData.dataChannelReady) {
-      throw new Error("Data channel not ready");
+    const dataChannel = streamData.dataChannel;
+    const dataChannelReady = streamData.dataChannelReady;
+
+    if (!dataChannelReady || !dataChannel || dataChannel.readyState !== "open") {
+      console.warn("DataChannel not ready");
+      return;
     }
 
-    const sequenceNumber = this.getAndIncrementSequence(channelName);
-    const transportPacketType =
-      FrameTypeHelper.getTransportPacketType(frameType);
-    const wrappedPacket = PacketBuilder.createRegularPacket(
-      packet,
-      sequenceNumber,
-      transportPacketType,
-    );
+    try {
+      const view = new DataView(packet.buffer, packet.byteOffset, packet.byteLength);
+      const sequenceNumber = view.getUint32(0, false);
 
-    // Use queue management instead of sending directly
-    this.sendOrQueue(channelName, streamData.dataChannel, wrappedPacket);
+      const needFecEncode = frameType !== FrameType.EVENT && frameType !== FrameType.AUDIO;
+
+      const transportPacketType = FrameTypeHelper.getTransportPacketType(frameType);
+
+      if (needFecEncode) {
+        if (!this.wasmInitialized) {
+          await this.initWasmEncoder();
+        }
+
+        if (!this.WasmEncoder) {
+          throw new Error("WASM encoder not initialized");
+        }
+
+        const MAX_MTU = 512;
+        const MIN_MTU = 100;
+        const MIN_CHUNKS = 5;
+        const MAX_REDUNDANCY = 10;
+        const MIN_REDUNDANCY = 1;
+        const REDUNDANCY_RATIO = 0.1;
+
+        let MTU = Math.ceil(packet.length / MIN_CHUNKS);
+
+        if (MTU < MIN_MTU) {
+          MTU = MIN_MTU;
+        } else if (MTU > MAX_MTU) {
+          MTU = MAX_MTU;
+        }
+
+        const totalPackets = Math.ceil(packet.length / (MTU - 20));
+        let redundancy = Math.ceil(totalPackets * REDUNDANCY_RATIO);
+
+        if (redundancy < MIN_REDUNDANCY) {
+          redundancy = MIN_REDUNDANCY;
+        } else if (redundancy > MAX_REDUNDANCY) {
+          redundancy = MAX_REDUNDANCY;
+        }
+
+        if (frameType === FrameType.CONFIG) {
+          redundancy = 3;
+        }
+
+        const HEADER_SIZE = 20;
+        const chunkSize = MTU - HEADER_SIZE;
+
+        const encoder = new this.WasmEncoder(packet, chunkSize);
+
+        const configBuf = encoder.getConfigBuffer();
+        const configView = new DataView(configBuf.buffer, configBuf.byteOffset, configBuf.byteLength);
+
+        const transferLength = configView.getBigUint64(0, false);
+        const symbolSize = configView.getUint16(8, false);
+        const sourceBlocks = configView.getUint8(10);
+        const subBlocks = configView.getUint16(11, false);
+        const alignment = configView.getUint8(13);
+
+        const fecPackets = encoder.encode(redundancy);
+
+        const raptorQConfig: RaptorQConfig = {
+          transferLength,
+          symbolSize,
+          sourceBlocks,
+          subBlocks,
+          alignment,
+        };
+
+        for (let i = 0; i < fecPackets.length; i++) {
+          const fecPacket = fecPackets[i];
+          const wrapper = PacketBuilder.createFECPacket(
+            fecPacket,
+            sequenceNumber,
+            transportPacketType,
+            raptorQConfig,
+          );
+          this.sendOrQueue(channelName, dataChannel, wrapper);
+        }
+
+        encoder.free();
+        return;
+      }
+
+      const wrapper = PacketBuilder.createRegularPacket(
+        packet,
+        sequenceNumber,
+        transportPacketType,
+      );
+      this.sendOrQueue(channelName, dataChannel, wrapper);
+    } catch (error) {
+      console.error("Failed to send over DataChannel:", error);
+    }
   }
 
   /**
-   * Send packet or add to queue if buffer is full
+   * Send packet or add to queue if buffer is full (EXACT copy from JS)
    */
   private sendOrQueue(
     channelName: ChannelName,
@@ -588,21 +845,19 @@ export class StreamManager extends EventEmitter<{
   ): void {
     const queue = this.getQueue(channelName);
 
-    // Send directly if buffer has space and queue is empty
     if (
       dataChannel.bufferedAmount <= dataChannel.bufferedAmountLowThreshold &&
       queue.length === 0
     ) {
-      dataChannel.send(packet.slice()); // Use slice() to avoid SharedArrayBuffer issues
-      this.dcPacketSendTime.set(channelName, performance.now());
+      // JS sends packet directly - TypeScript requires slice() for type safety
+      dataChannel.send(packet.slice());
     } else {
-      // Add to queue if buffer is full
       queue.push(packet);
     }
   }
 
   /**
-   * Get message queue for a channel
+   * Get message queue for a channel (EXACT copy from JS)
    */
   private getQueue(channelName: ChannelName): Uint8Array[] {
     if (!this.dcMsgQueues.has(channelName)) {

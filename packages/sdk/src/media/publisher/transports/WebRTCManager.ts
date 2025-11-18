@@ -33,7 +33,7 @@ import type {
 export class WebRTCManager extends EventEmitter<
   Record<keyof WebRTCManagerEvents, unknown>
 > {
-  private peerConnection: RTCPeerConnection | null = null;
+  private peerConnections: Map<string, RTCPeerConnection> = new Map(); // Multiple connections (same as JS)
   private config: WebRTCConfig;
   private serverUrl: string;
   private roomId: string;
@@ -68,277 +68,38 @@ export class WebRTCManager extends EventEmitter<
     };
   }
 
-  /**
-   * Initialize peer connection
-   */
-  async connect(): Promise<RTCPeerConnection> {
-    if (this.isConnected && this.peerConnection) {
-      console.log("[WebRTC] Already connected");
-      return this.peerConnection;
-    }
 
-    try {
-      console.log("[WebRTC] Creating peer connection...");
-
-      this.peerConnection = new RTCPeerConnection(this.config);
-
-      this.setupEventHandlers();
-
-      // Create and send offer
-      const offer = await this.peerConnection.createOffer();
-      await this.peerConnection.setLocalDescription(offer);
-
-      console.log("[WebRTC] Local offer created");
-
-      // Exchange SDP with server
-      const answer = await this.exchangeSDP(offer);
-      await this.peerConnection.setRemoteDescription(answer);
-
-      this.isConnected = true;
-      console.log("[WebRTC] Connection established");
-      this.emit("connected", this.peerConnection);
-
-      return this.peerConnection;
-    } catch (error) {
-      console.error("[WebRTC] Connection failed:", error);
-      this.emit("connectionError", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Exchange SDP with server
-   */
-  private async exchangeSDP(
-    offer: RTCSessionDescriptionInit,
-  ): Promise<RTCSessionDescriptionInit> {
-    try {
-      console.log("[WebRTC] Sending offer to server...");
-
-      const response = await fetch(
-        `https://${this.serverUrl}/meeting/sdp/answer`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            offer,
-            room_id: this.roomId,
-            stream_id: this.streamId,
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          `Server responded with ${response.status}: ${response.statusText}`,
-        );
-      }
-
-      const answer = await response.json();
-      console.log("[WebRTC] Received answer from server");
-
-      return answer;
-    } catch (error) {
-      console.error("[WebRTC] SDP exchange failed:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Setup event handlers
-   */
-  private setupEventHandlers(): void {
-    if (!this.peerConnection) return;
-
-    // ICE connection state changes
-    this.peerConnection.oniceconnectionstatechange = () => {
-      const state = this.peerConnection?.iceConnectionState;
-      console.log("[WebRTC] ICE connection state:", state);
-
-      if (state) {
-        this.emit("iceConnectionStateChange", state);
-
-        if (
-          state === "failed" ||
-          state === "disconnected" ||
-          state === "closed"
-        ) {
-          this.handleDisconnection(state);
-        }
-      }
-    };
-
-    // Connection state changes
-    this.peerConnection.onconnectionstatechange = () => {
-      const state = this.peerConnection?.connectionState;
-      console.log("[WebRTC] Connection state:", state);
-
-      if (state) {
-        this.emit("connectionStateChange", state);
-
-        if (
-          state === "failed" ||
-          state === "disconnected" ||
-          state === "closed"
-        ) {
-          this.handleDisconnection(state);
-        }
-      }
-    };
-
-    // ICE candidates
-    this.peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log("[WebRTC] ICE candidate:", event.candidate);
-        this.emit("iceCandidate", event.candidate);
-      }
-    };
-
-    // Signaling state changes
-    this.peerConnection.onsignalingstatechange = () => {
-      const state = this.peerConnection?.signalingState;
-      console.log("[WebRTC] Signaling state:", state);
-
-      if (state) {
-        this.emit("signalingStateChange", state);
-      }
-    };
-
-    // ICE gathering state changes
-    this.peerConnection.onicegatheringstatechange = () => {
-      const state = this.peerConnection?.iceGatheringState;
-      console.log("[WebRTC] ICE gathering state:", state);
-
-      if (state) {
-        this.emit("iceGatheringStateChange", state);
-      }
-    };
-
-    // Data channel events
-    this.peerConnection.ondatachannel = (event) => {
-      console.log("[WebRTC] Data channel received:", event.channel.label);
-      this.emit("dataChannel", event.channel);
-    };
-  }
-
-  /**
-   * Handle disconnection
-   */
-  private handleDisconnection(state: string): void {
-    console.warn("[WebRTC] Disconnected, state:", state);
-    this.isConnected = false;
-    this.emit("disconnected", state);
-  }
-
-  /**
-   * Create data channel
-   */
-  createDataChannel(
-    label: string,
-    options?: RTCDataChannelInit,
-  ): RTCDataChannel {
-    if (!this.peerConnection) {
-      throw new Error("Peer connection not initialized");
-    }
-
-    try {
-      const dataChannel = this.peerConnection.createDataChannel(label, options);
-
-      dataChannel.binaryType = "arraybuffer";
-
-      dataChannel.onopen = () => {
-        console.log(`[WebRTC] Data channel "${label}" opened`);
-        this.emit("dataChannelOpen", { label, channel: dataChannel });
-      };
-
-      dataChannel.onclose = () => {
-        console.log(`[WebRTC] Data channel "${label}" closed`);
-        this.emit("dataChannelClose", label);
-      };
-
-      dataChannel.onerror = (error) => {
-        console.error(`[WebRTC] Data channel "${label}" error:`, error);
-        this.emit("dataChannelError", { label, error });
-      };
-
-      return dataChannel;
-    } catch (error) {
-      console.error("[WebRTC] Failed to create data channel:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Add ICE candidate
-   */
-  async addIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
-    if (!this.peerConnection) {
-      throw new Error("Peer connection not initialized");
-    }
-
-    try {
-      await this.peerConnection.addIceCandidate(candidate);
-      console.log("[WebRTC] ICE candidate added");
-    } catch (error) {
-      console.error("[WebRTC] Failed to add ICE candidate:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get connection statistics
-   */
-  async getStats(): Promise<RTCStatsReport | null> {
-    if (!this.peerConnection) {
-      return null;
-    }
-
-    try {
-      const stats = await this.peerConnection.getStats();
-      return stats;
-    } catch (error) {
-      console.error("[WebRTC] Failed to get stats:", error);
-      return null;
-    }
-  }
 
   /**
    * Close connection
    */
-  close(): void {
-    if (!this.peerConnection) {
-      console.log("[WebRTC] No active connection to close");
-      return;
+  async close(): Promise<void> {
+    // Close all multiple connections (same as JS)
+    if (this.peerConnections.size > 0) {
+      for (const [channelName, connection] of this.peerConnections) {
+        console.log(`[WebRTCManager] Closing connection for ${channelName}`);
+        connection.close();
+      }
+      this.peerConnections.clear();
     }
 
-    try {
-      console.log("[WebRTC] Closing peer connection...");
-      this.peerConnection.close();
-      this.peerConnection = null;
-      this.isConnected = false;
-      this.emit("closed");
-      console.log("[WebRTC] Peer connection closed");
-    } catch (error) {
-      console.error("[WebRTC] Error closing peer connection:", error);
-    }
+    this.isConnected = false;
+    this.emit("closed", undefined);
+    console.log("[WebRTC] Connection closed");
   }
 
   /**
    * Check if connected
    */
   isRTCConnected(): boolean {
-    return (
-      this.isConnected &&
-      this.peerConnection !== null &&
-      this.peerConnection.connectionState === "connected"
-    );
+    return this.isConnected && this.peerConnections.size > 0;
   }
 
   /**
-   * Get peer connection
+   * Get all peer connections
    */
-  getPeerConnection(): RTCPeerConnection | null {
-    return this.peerConnection;
+  getPeerConnections(): Map<string, RTCPeerConnection> {
+    return this.peerConnections;
   }
 
   /**
@@ -349,61 +110,73 @@ export class WebRTCManager extends EventEmitter<
   }
 
   /**
-   * Restart ICE
+   * Connect multiple channels (EXACT copy from JS)
    */
-  async restartIce(): Promise<void> {
-    if (!this.peerConnection) {
-      throw new Error("Peer connection not initialized");
-    }
-
+  async connectMultipleChannels(
+    channelNames: string[],
+    streamManager: any
+  ): Promise<void> {
     try {
-      console.log("[WebRTC] Restarting ICE...");
-      const offer = await this.peerConnection.createOffer({ iceRestart: true });
-      await this.peerConnection.setLocalDescription(offer);
+      for (const channelName of channelNames) {
+        console.log(`[WebRTC] Setting up connection for: ${channelName}`);
 
-      const answer = await this.exchangeSDP(offer);
-      await this.peerConnection.setRemoteDescription(answer);
+        const webRtc = new RTCPeerConnection(this.config);
+        this.peerConnections.set(channelName, webRtc);
 
-      console.log("[WebRTC] ICE restart completed");
-      this.emit("iceRestart");
+        // Log ICE candidates for debugging
+        webRtc.onicecandidate = (event) => {
+          if (event.candidate) {
+            console.log(`[WebRTC] ${channelName} ICE candidate:`, event.candidate.candidate);
+          } else {
+            console.log(`[WebRTC] ${channelName} ICE gathering complete`);
+          }
+        };
+
+        console.log(`[WebRTC] Creating data channel for: ${channelName}`);
+        streamManager.createDataChannelDirect(channelName, webRtc);
+
+        console.log(`[WebRTC] Creating offer for: ${channelName}`);
+        const offer = await webRtc.createOffer();
+        await webRtc.setLocalDescription(offer);
+
+        console.log(`[WebRTC] Sending offer to server for: ${channelName}`);
+        const response = await fetch(
+          `https://${this.serverUrl}/meeting/sdp/answer`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              offer,
+              room_id: this.roomId,
+              stream_id: this.streamId,
+              action: channelName,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          console.error(`[WebRTC] Server error ${response.status} for ${channelName}`);
+          throw new Error(
+            `Server responded with ${response.status} for ${channelName}`
+          );
+        }
+
+        const answer = await response.json();
+        console.log(`[WebRTC] Got answer from server for: ${channelName}`);
+        console.log(`[WebRTC] Answer SDP for ${channelName}:`, answer.sdp);
+
+        await webRtc.setRemoteDescription(answer);
+        console.log(`[WebRTC] Set remote description for: ${channelName}`);
+
+        console.log(
+          `WebRTC connection established for channel: ${channelName}`
+        );
+      }
+
+      this.isConnected = true;
+      console.log(`[WebRTC] All ${channelNames.length} channels setup complete`);
     } catch (error) {
-      console.error("[WebRTC] ICE restart failed:", error);
-      throw error;
+      console.error("WebRTC setup error:", error);
     }
-  }
-
-  /**
-   * Get local description
-   */
-  getLocalDescription(): RTCSessionDescription | null {
-    return this.peerConnection?.localDescription || null;
-  }
-
-  /**
-   * Get remote description
-   */
-  getRemoteDescription(): RTCSessionDescription | null {
-    return this.peerConnection?.remoteDescription || null;
-  }
-
-  /**
-   * Get connection state
-   */
-  getConnectionState(): RTCPeerConnectionState | null {
-    return this.peerConnection?.connectionState || null;
-  }
-
-  /**
-   * Get ICE connection state
-   */
-  getIceConnectionState(): RTCIceConnectionState | null {
-    return this.peerConnection?.iceConnectionState || null;
-  }
-
-  /**
-   * Get signaling state
-   */
-  getSignalingState(): RTCSignalingState | null {
-    return this.peerConnection?.signalingState || null;
   }
 }

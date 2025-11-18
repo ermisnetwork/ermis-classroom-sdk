@@ -59,7 +59,7 @@ export interface PublisherConfig {
   bitrate?: number;
   hasCamera?: boolean;
   hasMic?: boolean;
-  webRtcServerUrl?: string;
+  webRtcHost?: string; // Changed from webRtcServerUrl to match JS version
   onStatusUpdate?: (message: string, isError?: boolean) => void;
   onStreamStart?: () => void;
   onStreamStop?: () => void;
