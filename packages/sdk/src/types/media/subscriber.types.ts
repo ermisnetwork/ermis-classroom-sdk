@@ -4,6 +4,9 @@
 
 import type { ConnectionStatus } from '../core/ermisClient.types';
 
+// Re-export ConnectionStatus for convenience
+export type { ConnectionStatus } from '../core/ermisClient.types';
+
 // Quality levels for bitrate switching
 export type QualityLevel = '360p' | '720p' | '1080p';
 

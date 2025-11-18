@@ -3,7 +3,7 @@ import {
   TransportPacketType,
   ChannelName,
 } from "../../../types/media/publisher.types";
-import { DATA_CHANNEL_IDS } from "../../../types/media/constants";
+import { DATA_CHANNEL_IDS } from "../../../constants/mediaConstants";
 
 /**
  * FrameTypeHelper - Utility class for frame type conversions and mappings

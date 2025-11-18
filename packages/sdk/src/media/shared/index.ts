@@ -9,12 +9,13 @@ export { FrameTypeHelper } from './utils/FrameTypeHelper';
 export { PacketBuilder } from './utils/PacketBuilder';
 export type { RaptorQConfig } from './utils/PacketBuilder';
 
+// Re-export config types from StreamManager
+export type { VideoConfig, AudioConfig } from '../publisher/transports/StreamManager';
+
 // Re-export commonly used types
 export type {
-  VideoConfig,
-  AudioConfig,
   StreamData,
-  SubStreamConfig,
+  SubStream,
   ServerEvent,
   MeetingEvent,
   StreamInfo,
@@ -25,13 +26,3 @@ export {
   FrameType,
   TransportPacketType,
 } from '../../types/media/publisher.types';
-
-// Re-export constants
-export {
-  PACKET_HEADER,
-  DATA_CHANNEL_IDS,
-  MEDIA_CONSTRAINTS,
-  TIMEOUTS,
-  AUDIO_ENCODER,
-  VIDEO_ENCODER,
-} from '../../types/media/constants';

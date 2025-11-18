@@ -2,7 +2,7 @@ import type {
   FrameType,
   TransportPacketType,
 } from "../../../types/media/publisher.types";
-import { PACKET_HEADER } from "../../../types/media/constants";
+import { PACKET_HEADER } from "../../../constants/mediaConstants";
 
 /**
  * RaptorQ FEC Configuration

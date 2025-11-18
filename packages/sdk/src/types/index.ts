@@ -14,7 +14,7 @@ export type {
   TransportPacketType,
   ChannelName,
   PublisherConfig,
-  SubStreamConfig,
+  SubStream,
   StreamData,
   EncoderData,
   MeetingEvent,

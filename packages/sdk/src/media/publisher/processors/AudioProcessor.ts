@@ -3,6 +3,7 @@ import type {
   AudioEncoderConfig,
   ChannelName,
 } from "../../../types/media/publisher.types";
+import { AudioConfig } from "../../subscriber";
 import { AudioEncoderManager } from "../managers/AudioEncoderManager";
 import { StreamManager } from "../transports/StreamManager";
 
@@ -78,7 +79,12 @@ export class AudioProcessor extends EventEmitter<{
       console.log("[AudioProcessor] Config ready:", data);
 
       // Wrap description in packet header.
-      const config = { ...data.config };
+      const config: AudioConfig = {
+        codec: data.config.codec!,
+        sampleRate: data.config.sampleRate,
+        numberOfChannels: data.config.numberOfChannels,
+        ...(data.config.description && { description: data.config.description }),
+      };
       if (config.description && config.description instanceof Uint8Array) {
         const packetWithHeader = this.streamManager.createAudioConfigPacket(
           this.channelName,

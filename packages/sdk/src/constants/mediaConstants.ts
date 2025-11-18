@@ -2,7 +2,7 @@
  * Constants for media streaming
  */
 
-import { ChannelName } from "./publisher.types";
+import { ChannelName } from "../types/media/publisher.types";
 
 /**
  * Packet header sizes

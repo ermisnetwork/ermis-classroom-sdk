@@ -17,10 +17,11 @@ export { AudioProcessor } from "./processors/AudioProcessor";
 export { FrameTypeHelper } from "../shared/utils/FrameTypeHelper";
 export { PacketBuilder } from "../shared/utils/PacketBuilder";
 
+// Re-export config types from StreamManager
+export type { VideoConfig, AudioConfig } from "../publisher/transports/StreamManager";
+
 // Re-export publisher types
 export type {
-  VideoConfig,
-  AudioConfig,
   StreamData,
   ServerEvent,
   StreamInfo,

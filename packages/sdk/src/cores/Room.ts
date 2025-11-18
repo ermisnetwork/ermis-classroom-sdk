@@ -9,7 +9,7 @@ import { SubRoom } from "./SubRoom";
 import { Publisher } from "../media/publisher/Publisher";
 import { Subscriber } from "../media/subscriber/Subscriber";
 import { AudioMixer } from "../media/audioMixer/AudioMixer";
-import { STREAM_TYPE } from "../constants/streamTypes";
+import { StreamTypes } from "../types/media/publisher.types";
 import type {
   RoomConfig,
   RoomType,
@@ -1054,7 +1054,7 @@ export class Room extends EventEmitter {
       streamOutputEnabled: true,
       host: this.mediaConfig.hostNode,
       protocol: this.mediaConfig.subscribeProtocol as any,
-      subscribeType: STREAM_TYPE.CAMERA,
+      subscribeType: StreamTypes.CAMERA,
 
       onStatus: (_msg, isError) => {
         participant.setConnectionStatus(isError ? "failed" : "connected");

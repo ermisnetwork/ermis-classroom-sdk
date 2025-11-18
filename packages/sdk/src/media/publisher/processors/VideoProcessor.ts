@@ -1,8 +1,8 @@
 import EventEmitter from "../../../events/EventEmitter";
 import type {
   VideoEncoderConfig,
-  SubStreamConfig,
   ChannelName,
+  SubStream,
 } from "../../../types/media/publisher.types";
 import { VideoEncoderManager } from "../managers/VideoEncoderManager";
 import { StreamManager } from "../transports/StreamManager";
@@ -31,7 +31,7 @@ import { StreamManager } from "../transports/StreamManager";
  * - processingError: When frame processing error occurs
  */
 export class VideoProcessor extends EventEmitter<{
-  initialized: { subStreams: SubStreamConfig[] };
+  initialized: { subStreams: SubStream[] };
   started: undefined;
   stopped: undefined;
   chunkSent: {
@@ -59,12 +59,12 @@ export class VideoProcessor extends EventEmitter<{
   private frameCounter = 0;
 
   // Sub-stream configurations
-  private subStreams: SubStreamConfig[] = [];
+  private subStreams: SubStream[] = [];
 
   constructor(
     videoEncoderManager: VideoEncoderManager,
     streamManager: StreamManager,
-    subStreams: SubStreamConfig[],
+    subStreams: SubStream[],
   ) {
     super();
     this.videoEncoderManager = videoEncoderManager;
@@ -488,7 +488,7 @@ export class VideoProcessor extends EventEmitter<{
    *
    * @returns Array of sub-stream configs
    */
-  getSubStreams(): SubStreamConfig[] {
+  getSubStreams(): SubStream[] {
     return this.subStreams;
   }
 }

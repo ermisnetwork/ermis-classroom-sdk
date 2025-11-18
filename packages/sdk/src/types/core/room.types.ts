@@ -6,9 +6,19 @@
 import type { Participant } from '../../cores/Participant';
 
 /**
+ * Room type constants
+ */
+export const RoomTypes = {
+  MAIN: "main",
+  SUB: "sub",
+  BREAKOUT: "breakout",
+  PRIVATE: "private",
+} as const;
+
+/**
  * Room type identifier
  */
-export type RoomType = 'main' | 'sub' | 'breakout';
+export type RoomType = (typeof RoomTypes)[keyof typeof RoomTypes];
 
 /**
  * Configuration for creating a Room

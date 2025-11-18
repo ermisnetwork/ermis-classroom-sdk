@@ -4,6 +4,7 @@
 
 export { Publisher } from "./Publisher";
 export { StreamManager } from "./transports/StreamManager";
+export type { VideoConfig, AudioConfig } from "./transports/StreamManager";
 export { WebTransportManager } from "./transports/WebTransportManager";
 export { WebRTCManager } from "./transports/WebRTCManager";
 export { VideoEncoderManager } from "./managers/VideoEncoderManager";
@@ -29,10 +30,8 @@ export type {
 // Re-export types
 export type {
   PublisherConfig,
-  VideoConfig,
-  AudioConfig,
   AudioEncoderConfig,
-  SubStreamConfig,
+  SubStream,
   StreamData,
   ServerEvent,
   MeetingEvent,

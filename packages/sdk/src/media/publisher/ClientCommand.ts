@@ -3,31 +3,7 @@
  * ✅ PORT FROM ermis-classroom-sdk/src/media/ClientCommand.js
  */
 
-// Frame types
-const FRAME_TYPE = {
-    KEY: 0,
-    DELTA: 1,
-    CONFIG: 2,
-    MIC_AUDIO: 3,
-    EVENT: 4,
-} as const;
-
-// Channel names
-const CHANNEL_NAME = {
-    MEETING_CONTROL: 'meeting-control',
-    MIC_AUDIO: 'mic-audio',
-    VIDEO_360P: 'cam_360p',
-    VIDEO_720P: 'cam_720p',
-    VIDEO_1080P: 'cam_1080p',
-} as const;
-
-// Client commands
-const CLIENT_COMMANDS = {
-    START_STREAM: 'start_stream',
-    STOP_STREAM: 'stop_stream',
-    PAUSE_STREAM: 'pause_stream',
-    RESUME_STREAM: 'resume_stream',
-} as const;
+import { FrameType, ChannelName, CLIENT_COMMANDS } from "../../constants/publisherConstants";
 
 export interface CommandSenderConfig {
     sendDataFn: (channelName: string, bytes: Uint8Array, frameType?: number) => Promise<void>;
@@ -76,7 +52,7 @@ export class CommandSender {
         const bytes = new TextEncoder().encode(json);
 
         if (this.protocol === 'webrtc') {
-            const frameType = type === 'media_config' ? FRAME_TYPE.CONFIG : FRAME_TYPE.EVENT;
+            const frameType = type === 'media_config' ? FrameType.CONFIG : FrameType.EVENT;
             await this.sendData(channelName, bytes, frameType);
         } else {
             await this.sendData(channelName, bytes);
@@ -111,7 +87,7 @@ export class CommandSender {
      * ✅ PORT FROM ClientCommand.js:43-45
      */
     async sendEvent(eventData: any = null): Promise<void> {
-        await this._sendPublisherCommand(CHANNEL_NAME.MEETING_CONTROL, 'event', eventData);
+        await this._sendPublisherCommand(ChannelName.MEETING_CONTROL, 'event', eventData);
     }
 
     /**
@@ -155,7 +131,7 @@ export class CommandSender {
             stream_type: subscriberType,
             audio: true,
             video: true,
-            quality: CHANNEL_NAME.VIDEO_720P,
+            quality: ChannelName.VIDEO_720P,
         });
     }
 

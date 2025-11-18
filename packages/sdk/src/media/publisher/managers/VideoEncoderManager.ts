@@ -1,5 +1,5 @@
 import EventEmitter from "../../../events/EventEmitter";
-import { VIDEO_CONFIG } from "../../../types/media/constants";
+import { VIDEO_CONFIG } from "../../../constants/mediaConstants";
 import type {
   ChannelName,
   VideoEncoderConfig,
@@ -120,8 +120,8 @@ export class VideoEncoderManager extends EventEmitter<{
   async encodeFrame(frame: VideoFrame, encoderNames?: string[]): Promise<void> {
     const targetEncoders = encoderNames
       ? Array.from(this.encoders.entries()).filter(([name]) =>
-          encoderNames.includes(name),
-        )
+        encoderNames.includes(name),
+      )
       : Array.from(this.encoders.entries());
 
     if (targetEncoders.length === 0) {

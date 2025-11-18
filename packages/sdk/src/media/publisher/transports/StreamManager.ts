@@ -2,13 +2,14 @@ import EventEmitter from "../../../events/EventEmitter";
 import { ChannelName, FrameType } from "../../../types/media/publisher.types";
 import type {
   StreamData,
+  ServerEvent,
 } from "../../../types/media/publisher.types";
 import { PacketBuilder } from "../../shared/utils/PacketBuilder";
 import { FrameTypeHelper } from "../../shared/utils/FrameTypeHelper";
 import { LengthDelimitedReader } from "../../shared/utils/LengthDelimitedReader";
 
-// Temporary type definitions
-interface VideoConfig {
+// StreamManager-specific config types
+export interface VideoConfig {
   codec: string;
   codedWidth: number;
   codedHeight: number;
@@ -17,7 +18,7 @@ interface VideoConfig {
   description?: AllowSharedBufferSource;
 }
 
-interface AudioConfig {
+export interface AudioConfig {
   codec: string;
   sampleRate: number;
   numberOfChannels: number;
@@ -37,7 +38,7 @@ export class StreamManager extends EventEmitter<{
   sendError: { channelName: ChannelName; error: unknown };
   streamReady: { channelName: ChannelName };
   configSent: { channelName: ChannelName };
-  serverEvent: unknown; // Events received from server
+  serverEvent: ServerEvent; // Events received from server
 }> {
   private streams = new Map<ChannelName, StreamData>();
   private isWebRTC: boolean;
@@ -185,6 +186,7 @@ export class StreamManager extends EventEmitter<{
 
         while (true) {
           const message = await delimitedReader.readMessage();
+          console.log("[StreamManager] Message from server event stream:", message);
 
           if (message === null) {
             console.log(`[StreamManager] Event stream ${channelName} ended`);

@@ -2,6 +2,14 @@
  * Publisher Types and Interfaces
  */
 
+// Stream type constants (for Publisher/Subscriber)
+export const StreamTypes = {
+  CAMERA: "camera",
+  SCREEN_SHARE: "screen_share",
+} as const;
+
+export type StreamType = (typeof StreamTypes)[keyof typeof StreamTypes];
+
 // Frame type constants
 export enum FrameType {
   CAM_360P_KEY = 0,
@@ -59,7 +67,7 @@ export interface PublisherConfig {
 }
 
 // Sub-stream configuration
-export interface SubStreamConfig {
+export interface SubStream {
   name: string;
   channelName: ChannelName;
   width?: number;

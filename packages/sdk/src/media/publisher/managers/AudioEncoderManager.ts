@@ -1,5 +1,5 @@
 import EventEmitter from "../../../events/EventEmitter";
-import { AUDIO_CONFIG } from "../../../types/media/constants";
+import { AUDIO_CONFIG } from "../../../constants/mediaConstants";
 import type {
   ChannelName,
   AudioEncoderConfig,

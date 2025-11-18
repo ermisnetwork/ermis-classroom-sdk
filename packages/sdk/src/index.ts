@@ -19,7 +19,9 @@ export { Subscriber } from "./media/subscriber/Subscriber";
 export { MediaDeviceManager } from "./media/devices/MediaDeviceManager";
 
 // Export constants
-export { RoomTypes } from "./constants/roomTypes";
+export { RoomTypes } from "./types/core/room.types";
+export { StreamTypes } from "./types/media/publisher.types";
+export { MEETING_EVENTS } from "./constants/publisherConstants";
 export { ConnectionStatus } from "./constants/connectionStatus";
 export { ParticipantRoles } from "./constants/participantRoles";
 export { VERSION } from "./constants/version";

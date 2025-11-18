@@ -2,9 +2,8 @@ import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
 import { CHANNEL_NAME, STREAM_TYPE } from "./publisherConstants.js";
-// import { CHANNEL_NAME, SUBSCRIBE_TYPE } from new URL("./publisherConstants.js", import.meta.url);
 
-import CommandSender from "./ClientCommandDev.js";
+import CommandSender from "./ClientCommand.js";
 
 let subscribeType = STREAM_TYPE.CAMERA;
 
@@ -769,14 +768,14 @@ function stopAll() {
     try {
       reader.cancel();
       writer.close();
-    } catch {}
+    } catch { }
   }
   channelStreams.clear();
 
   mediaDecoders.forEach((decoder) => {
     try {
       decoder.close();
-    } catch {}
+    } catch { }
   });
   mediaDecoders.clear();
   mediaConfigs.clear();

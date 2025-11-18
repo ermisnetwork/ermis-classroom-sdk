@@ -18,7 +18,7 @@ import type {
 } from '../types/core/ermisClient.types';
 import type { MediaConfig, RoomType } from '../types/core/room.types';
 import { MediaDeviceManager } from '../media/devices/MediaDeviceManager';
-import { RoomTypes } from '../constants/roomTypes';
+import { RoomTypes } from '../types/core/room.types';
 import { ConnectionStatus as ConnectionStatusConst } from '../constants/connectionStatus';
 import { ParticipantRoles } from '../constants/participantRoles';
 import { BrowserDetection } from '../utils/browserDetection';

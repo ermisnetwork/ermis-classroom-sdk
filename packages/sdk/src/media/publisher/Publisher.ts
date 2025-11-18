@@ -10,13 +10,10 @@ import type {
   PublisherConfig,
   StreamInfo,
   ServerEvent,
+  SubStream,
 } from "../../types/media/publisher.types";
 import { ChannelName } from "../../types/media/publisher.types";
-import {
-  CHANNEL_NAME,
-  type SubStream,
-  getSubStreams,
-} from "../../constants/publisherConstants";
+import { getSubStreams, MEETING_EVENTS } from "../../constants/publisherConstants";
 import { WebTransportManager } from "./transports/WebTransportManager";
 import { WebRTCManager } from "./transports/WebRTCManager";
 import { StreamManager } from "./transports/StreamManager";
@@ -259,7 +256,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     ];
 
     if (this.hasAudio) {
-      channelNames.push(CHANNEL_NAME.MIC_AUDIO as ChannelName);
+      channelNames.push(ChannelName.MICROPHONE);
     }
 
     await this.streamManager.initWebTransportStreams(webTransport, channelNames);
@@ -289,7 +286,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     ];
 
     if (this.hasAudio) {
-      channelNames.push(CHANNEL_NAME.MIC_AUDIO as ChannelName);
+      channelNames.push(ChannelName.MICROPHONE);
     }
 
     await this.streamManager.initWebRTCChannels(peerConnection, channelNames);
@@ -335,7 +332,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       }
 
       this.audioEncoderManager = new AudioEncoderManager(
-        CHANNEL_NAME.MIC_AUDIO as ChannelName,
+        ChannelName.MICROPHONE,
         audioConfig,
         this.InitAudioRecorder
       );
@@ -343,7 +340,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       this.audioProcessor = new AudioProcessor(
         this.audioEncoderManager,
         this.streamManager,
-        CHANNEL_NAME.MIC_AUDIO as ChannelName
+        ChannelName.MICROPHONE
       );
 
       this.audioProcessor.on("encoderError", (error) => {
@@ -402,7 +399,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.videoProcessor.setCameraEnabled(false);
     this.videoEnabled = false;
 
-    const eventType = this.options.streamType === "display" ? "screenshare_off" : "camera_off";
+    const eventType = this.options.streamType === "display" ? MEETING_EVENTS.STOP_SCREEN_SHARE : MEETING_EVENTS.CAMERA_OFF;
     await this.sendMeetingEvent(eventType);
 
     console.log("[Publisher] Video turned off");
@@ -414,7 +411,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.videoProcessor.setCameraEnabled(true);
     this.videoEnabled = true;
 
-    const eventType = this.options.streamType === "display" ? "screenshare_on" : "camera_on";
+    const eventType = this.options.streamType === "display" ? MEETING_EVENTS.START_SCREEN_SHARE : MEETING_EVENTS.CAMERA_ON;
     await this.sendMeetingEvent(eventType);
 
     console.log("[Publisher] Video turned on");
@@ -433,7 +430,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     this.audioProcessor.setMicEnabled(false);
     this.audioEnabled = false;
-    await this.sendMeetingEvent("mic_off");
+    await this.sendMeetingEvent(MEETING_EVENTS.MIC_OFF);
 
     console.log("[Publisher] Audio turned off");
   }
@@ -443,7 +440,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     this.audioProcessor.setMicEnabled(true);
     this.audioEnabled = true;
-    await this.sendMeetingEvent("mic_on");
+    await this.sendMeetingEvent(MEETING_EVENTS.MIC_ON);
 
     console.log("[Publisher] Audio turned on");
   }
@@ -523,7 +520,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (this.isHandRaised) return;
 
     this.isHandRaised = true;
-    await this.sendMeetingEvent("raise_hand");
+    await this.sendMeetingEvent(MEETING_EVENTS.RAISE_HAND);
     console.log("[Publisher] Hand raised");
   }
 
@@ -531,7 +528,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (!this.isHandRaised) return;
 
     this.isHandRaised = false;
-    await this.sendMeetingEvent("lower_hand");
+    await this.sendMeetingEvent(MEETING_EVENTS.LOWER_HAND);
     console.log("[Publisher] Hand lowered");
   }
 
@@ -550,7 +547,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       };
 
       await this.streamManager.sendData(
-        CHANNEL_NAME.MEETING_CONTROL as any,
+        ChannelName.MEETING_CONTROL,
         event
       );
     } catch (error: any) {

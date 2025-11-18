@@ -19,8 +19,12 @@ export const DEFAULT_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   autoGainControl: true,
 };
 
-// Export all publisher constants
+// Export all constants
 export * from './publisherConstants';
+export * from './mediaConstants';
+export * from './connectionStatus';
+export * from './participantRoles';
+export * from './version';
 
 export const DEFAULT_VIDEO_CONSTRAINTS: MediaTrackConstraints = {
   width: { ideal: 1280 },
