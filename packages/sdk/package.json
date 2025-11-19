@@ -9,13 +9,26 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
-    }
+    },
+    "./vite-plugin": {
+      "types": "./vite-plugin.ts",
+      "import": "./vite-plugin.ts"
+    },
+    "./workers/*": "./src/workers/*",
+    "./raptorQ/*": "./src/raptorQ/*",
+    "./polyfills/*": "./src/polyfills/*",
+    "./opus_decoder/*": "./src/opus_decoder/*"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "src/workers",
+    "src/raptorQ",
+    "src/polyfills",
+    "src/opus_decoder",
+    "vite-plugin.ts",
     "README.md",
     "LICENSE"
   ],

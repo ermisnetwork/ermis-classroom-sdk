@@ -1,8 +1,3 @@
-/**
- * ClientCommand - Command sender for Publisher/Subscriber
- * ✅ PORT FROM ermis-classroom-sdk/src/media/ClientCommand.js
- */
-
 import { FrameType, ChannelName, CLIENT_COMMANDS } from "../../constants/publisherConstants";
 
 export interface CommandSenderConfig {
@@ -18,10 +13,6 @@ export interface PublisherState {
     isCameraOn: boolean;
 }
 
-/**
- * CommandSender class for sending commands to server
- * ✅ PORT FROM ClientCommand.js
- */
 export class CommandSender {
     private sendData: (channelName: string, bytes: Uint8Array, frameType?: number) => Promise<void>;
     private protocol: string;
@@ -34,10 +25,6 @@ export class CommandSender {
         this.commandType = config.commandType || 'publisher_command';
     }
 
-    /**
-     * Send publisher command
-     * ✅ PORT FROM ClientCommand.js:10-23
-     */
     private async _sendPublisherCommand(
         channelName: string,
         type: string,
@@ -59,10 +46,6 @@ export class CommandSender {
         }
     }
 
-    /**
-     * Send subscriber command
-     * ✅ PORT FROM ClientCommand.js:25-41
-     */
     private async _sendSubscriberCommand(type: string, data: any = null): Promise<void> {
         const command: any = { type };
         if (data !== null) {
@@ -82,28 +65,16 @@ export class CommandSender {
         }
     }
 
-    /**
-     * Send event to server
-     * ✅ PORT FROM ClientCommand.js:43-45
-     */
     async sendEvent(eventData: any = null): Promise<void> {
         await this._sendPublisherCommand(ChannelName.MEETING_CONTROL, 'event', eventData);
     }
 
-    /**
-     * Initialize channel stream
-     * ✅ PORT FROM ClientCommand.js:47-51
-     */
     async initChannelStream(channelName: string): Promise<void> {
         await this._sendPublisherCommand(channelName, 'init_channel_stream', {
             channel: channelName,
         });
     }
 
-    /**
-     * Send publisher state
-     * ✅ PORT FROM ClientCommand.js:53-60
-     */
     async sendPublisherState(channelName: string, state: PublisherState): Promise<void> {
         await this._sendPublisherCommand(channelName, 'publisher_state', {
             has_mic: state.hasMic,
@@ -113,19 +84,11 @@ export class CommandSender {
         });
     }
 
-    /**
-     * Send media config
-     * ✅ PORT FROM ClientCommand.js:62-65
-     */
     async sendMediaConfig(channelName: string, config: any): Promise<void> {
         console.warn('[Client Command]Sending media config to server:', 'channel name:', channelName, 'config:', config);
         await this._sendPublisherCommand(channelName, 'media_config', config);
     }
 
-    /**
-     * Initialize subscribe channel stream
-     * ✅ PORT FROM ClientCommand.js:67-74
-     */
     async initSubscribeChannelStream(subscriberType: string): Promise<void> {
         await this._sendSubscriberCommand('init_channel_stream', {
             stream_type: subscriberType,
@@ -135,34 +98,18 @@ export class CommandSender {
         });
     }
 
-    /**
-     * Start stream
-     * ✅ PORT FROM ClientCommand.js:76-78
-     */
     async startStream(): Promise<void> {
         await this._sendSubscriberCommand(CLIENT_COMMANDS.START_STREAM);
     }
 
-    /**
-     * Stop stream
-     * ✅ PORT FROM ClientCommand.js:80-82
-     */
     async stopStream(): Promise<void> {
         await this._sendSubscriberCommand(CLIENT_COMMANDS.STOP_STREAM);
     }
 
-    /**
-     * Pause stream
-     * ✅ PORT FROM ClientCommand.js:84-86
-     */
     async pauseStream(): Promise<void> {
         await this._sendSubscriberCommand(CLIENT_COMMANDS.PAUSE_STREAM);
     }
 
-    /**
-     * Resume stream
-     * ✅ PORT FROM ClientCommand.js:88-90
-     */
     async resumeStream(): Promise<void> {
         await this._sendSubscriberCommand(CLIENT_COMMANDS.RESUME_STREAM);
     }

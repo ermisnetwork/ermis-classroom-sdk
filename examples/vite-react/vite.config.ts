@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { copySDKStaticFiles } from '../../shared/vite-plugin-sdk-files';
+import { copySDKStaticFiles } from '@ermisnetwork/ermis-classroom-sdk/vite-plugin';
 
 export default defineConfig({
   plugins: [react(), copySDKStaticFiles({ verbose: true })],
