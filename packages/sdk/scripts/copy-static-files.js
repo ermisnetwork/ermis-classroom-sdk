@@ -59,37 +59,6 @@ STATIC_DIRS.forEach((dir) => {
 
 console.log(`\n✨ Successfully copied ${totalFiles} static files to dist/\n`);
 
-// Extra step: Explicitly copy .d.ts files that might have been missed
-console.log('📝 Ensuring .d.ts files are copied...\n');
-
-STATIC_DIRS.forEach((dir) => {
-    const srcPath = join(SRC_DIR, dir);
-    const destPath = join(DIST_DIR, dir);
-
-    if (!existsSync(srcPath)) {
-        return;
-    }
-
-    try {
-        // Find all .d.ts files in the source directory
-        const entries = readdirSync(srcPath);
-        const dtsFiles = entries.filter(file => file.endsWith('.d.ts'));
-
-        if (dtsFiles.length > 0) {
-            dtsFiles.forEach(file => {
-                const srcFile = join(srcPath, file);
-                const destFile = join(destPath, file);
-                copyFileSync(srcFile, destFile);
-                console.log(`  ✅ Copied ${dir}/${file}`);
-            });
-        }
-    } catch (error) {
-        console.error(`❌ Error copying .d.ts files from ${dir}/:`, error.message);
-    }
-});
-
-console.log('\n✨ All static files copied successfully!\n');
-
 /**
  * Recursively count files in a directory
  */
