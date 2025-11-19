@@ -2,27 +2,30 @@
 import styled from "styled-components";
 
 export const Container = styled.div`
-  padding: 30px;
+  padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: #f5f5f5;
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
 `;
 export const LoginSection = styled.div`
   background: white;
   padding: 20px;
   border-radius: 8px;
-  margin-bottom: 20px;
+  margin: 20px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 `;
 export const VideoContainer = styled.div`
   background: white;
-  border-radius: 8px;
+  border-radius: 0;
   overflow: hidden;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   position: relative;
   width: 100%;
   height: 100%;
+  display: flex;
+  flex-direction: column;
 `;
 export const MainVideoStyled = styled.div<{ $totalParticipants: number; $hasPinned: boolean }>`
   width: 100%;

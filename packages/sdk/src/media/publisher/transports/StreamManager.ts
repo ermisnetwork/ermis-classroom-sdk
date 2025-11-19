@@ -154,6 +154,23 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
+   * Add additional stream (e.g., for screen sharing)
+   * Public method to create streams dynamically
+   */
+  async addStream(channelName: ChannelName): Promise<void> {
+    if (this.streams.has(channelName)) {
+      console.log(`[StreamManager] Stream ${channelName} already exists`);
+      return;
+    }
+
+    if (this.isWebRTC) {
+      await this.createDataChannel(channelName);
+    } else {
+      await this.createBidirectionalStream(channelName);
+    }
+  }
+
+  /**
    * Create WebTransport bidirectional stream
    */
   private async createBidirectionalStream(
@@ -357,7 +374,7 @@ export class StreamManager extends EventEmitter<{
       if (channelName === ChannelName.MEETING_CONTROL) {
         // TODO: Send publisher state (needs commandSender)
       }
-      
+
       console.log(`WebRTC data channel (${channelName}) established`);
     };
 

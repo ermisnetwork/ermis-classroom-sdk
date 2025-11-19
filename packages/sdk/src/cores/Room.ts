@@ -1026,6 +1026,25 @@ export class Room extends EventEmitter {
       });
     });
 
+    // Listen for local screen share ready event
+    publisher.on("localScreenShareReady", (data: any) => {
+      console.log("[Room] Received localScreenShareReady from publisher:", data);
+      console.log("[Room] Local participant info:", this.localParticipant?.getInfo());
+
+      const eventData = {
+        ...data,
+        participant: this.localParticipant?.getInfo(),
+        roomId: this.id,
+      };
+
+      console.log("[Room] About to emit localScreenShareReady with data:", eventData);
+      console.log("[Room] EventEmitter listeners count:", this.listenerCount("localScreenShareReady"));
+
+      this.emit("localScreenShareReady", eventData);
+
+      console.log("[Room] localScreenShareReady event emitted to client");
+    });
+
     // Listen for screen share stopped event
     publisher.on("screenShareStopped", (data: any) => {
       if (this.localParticipant) {

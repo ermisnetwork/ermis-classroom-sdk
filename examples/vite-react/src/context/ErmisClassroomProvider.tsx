@@ -100,11 +100,24 @@ export const ErmisClassroomProvider = ({
     }
   }, [initialVideoRef, localStream]);
 
+  // Debug: Log screenShareStreams changes
+  useEffect(() => {
+    console.log("[Provider] screenShareStreams changed:", screenShareStreams);
+    console.log("[Provider] screenShareStreams size:", screenShareStreams.size);
+    if (screenShareStreams.size > 0) {
+      console.log("[Provider] screenShareStreams entries:", Array.from(screenShareStreams.entries()));
+    }
+  }, [screenShareStreams]);
+
   const setupEventListeners = useCallback((client: any) => {
     const events = ErmisClassroom.events;
     const unsubs: (() => void)[] = [];
 
+    console.log("[Provider] Setting up event listeners...");
+    console.log("[Provider] Available events:", events);
+
     const on = (evt: string, handler: (...args: any[]) => void) => {
+      console.log(`[Provider] Registering listener for: ${evt}`);
       client.on(evt, handler);
       if (typeof client.off === "function") {
         unsubs.push(() => client.off(evt, handler));
@@ -112,10 +125,32 @@ export const ErmisClassroomProvider = ({
         unsubs.push(() => client.removeListener(evt, handler));
       }
     };
+
     // TODO! Define proper types for events
     on(events.LOCAL_STREAM_READY, (event: any) => {
       if (event.videoOnlyStream) {
         setLocalStream(event.videoOnlyStream);
+      }
+    });
+
+    // Listen for local screen share ready - use both event name and constant
+    on("localScreenShareReady", (event: any) => {
+      console.log("LOCAL_SCREEN_SHARE_READY (direct)", event);
+      if (event.videoOnlyStream && event.participant) {
+        console.log("Adding local screen share to map for:", event.participant.userId);
+        setIsScreenSharing(true);
+        setScreenShareStreams((prev) => {
+          const updated = new Map(prev);
+          updated.set(event.participant.userId, {
+            stream: event.videoOnlyStream,
+            userName: event.participant.name || event.participant.userId,
+          });
+          console.log("Local screen share map updated:", updated);
+          console.log("Map size:", updated.size);
+          return updated;
+        });
+      } else {
+        console.warn("localScreenShareReady missing data:", event);
       }
     });
 
@@ -224,20 +259,39 @@ export const ErmisClassroomProvider = ({
     });
 
     on(events.SCREEN_SHARE_STARTED, (data: any) => {
-      console.log("SCREEN_SHARE_STARTED", data);
+      console.log("[Provider] SCREEN_SHARE_STARTED received:", data);
       setIsScreenSharing(true);
-      if (data.stream && data.participant) {
-        console.log("Screen share started for:", data.participant.userId);
+
+      // Handle both formats: direct from Room or forwarded
+      const stream = data.stream;
+      const participant = data.participant;
+
+      if (stream && participant) {
+        console.log("[Provider] Screen share started for:", participant.userId);
+        console.log("[Provider] Screen share stream:", stream);
+        console.log("[Provider] Stream tracks:", stream.getTracks());
+
+        // Create video-only stream for display
+        const videoOnlyStream = new MediaStream();
+        const videoTracks = stream.getVideoTracks();
+        if (videoTracks.length > 0) {
+          videoOnlyStream.addTrack(videoTracks[0]);
+          console.log("[Provider] Added video track to videoOnlyStream");
+        }
+
         setScreenShareStreams((prev) => {
           const updated = new Map(prev);
-          updated.set(data.participant.userId, {
-            stream: data.stream,
-            userName: data.participant.name,
+          updated.set(participant.userId, {
+            stream: videoOnlyStream.getTracks().length > 0 ? videoOnlyStream : stream,
+            userName: participant.name || participant.userId,
           });
+          console.log("[Provider] Updated screenShareStreams map:", updated);
+          console.log("[Provider] screenShareStreams size:", updated.size);
+          console.log("[Provider] User added:", participant.userId);
           return updated;
         });
       } else {
-        console.warn("SCREEN_SHARE_STARTED event missing stream or participant data:", data);
+        console.warn("[Provider] SCREEN_SHARE_STARTED event missing stream or participant data:", data);
       }
     });
 
@@ -775,6 +829,8 @@ export const ErmisClassroomProvider = ({
 
   const toggleScreenShare = useCallback(async () => {
     console.log("Toggling screen share");
+    console.log("Current isScreenSharing:", isScreenSharing);
+    console.log("Current screenShareStreams:", screenShareStreams);
     if (!currentRoom) return;
 
     try {
@@ -787,7 +843,7 @@ export const ErmisClassroomProvider = ({
       console.error("Failed to toggle screen share:", error);
       setIsScreenSharing(false);
     }
-  }, [currentRoom, isScreenSharing]);
+  }, [currentRoom, isScreenSharing, screenShareStreams]);
 
   const value = useMemo(
     () => ({

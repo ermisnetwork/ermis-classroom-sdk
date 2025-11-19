@@ -62,6 +62,7 @@ export class ErmisClient extends EventEmitter {
     PARTICIPANT_ADDED: 'participantAdded',
     PARTICIPANT_REMOVED: 'participantRemoved',
     LOCAL_STREAM_READY: 'localStreamReady',
+    LOCAL_SCREEN_SHARE_READY: 'localScreenShareReady',
     REMOTE_STREAM_READY: 'remoteStreamReady',
     REMOTE_AUDIO_STATUS_CHANGED: 'remoteAudioStatusChanged',
     REMOTE_VIDEO_STATUS_CHANGED: 'remoteVideoStatusChanged',
@@ -869,6 +870,7 @@ export class ErmisClient extends EventEmitter {
       'participantUnpinnedForEveryone',
       'subRoomCreated',
       'localStreamReady',
+      'localScreenShareReady',
       'remoteStreamReady',
       'streamRemoved',
       'audioToggled',
@@ -895,6 +897,7 @@ export class ErmisClient extends EventEmitter {
 
     eventsToForward.forEach((event) => {
       room.on(event, (data: any) => {
+        console.log(`[MeetingClient] Forwarding event: ${event}`, data);
         this.emit(event, data);
       });
     });

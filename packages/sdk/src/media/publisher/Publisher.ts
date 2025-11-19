@@ -41,6 +41,26 @@ interface PublisherEvents extends Record<string, unknown> {
     hasAudio: boolean;
     hasVideo: boolean;
   };
+  localScreenShareReady: {
+    stream: MediaStream;
+    videoOnlyStream: MediaStream;
+    streamId?: string;
+    config: {
+      codec: string;
+      width: number;
+      height: number;
+      framerate: number;
+      bitrate: number;
+    };
+    hasAudio: boolean;
+    hasVideo: boolean;
+  };
+  screenShareStarted: {
+    stream: MediaStream;
+    hasVideo: boolean;
+    hasAudio: boolean;
+  };
+  screenShareStopped: undefined;
   serverEvent: ServerEvent;
   connected: undefined;
   disconnected: { reason?: string };
@@ -626,16 +646,240 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     await this.streamManager.sendData(ChannelName.MEETING_CONTROL, new TextEncoder().encode(eventJson));
   }
 
-  async startShareScreen(_screenMediaStream: MediaStream): Promise<void> {
-    // Screen sharing should be handled by creating a new Publisher instance with streamType: "display"
-    // This is a legacy compatibility method
-    throw new Error("Screen sharing should use a separate Publisher instance with streamType: 'display'");
+  // ========== Screen Sharing Methods ==========
+
+  private screenStream: MediaStream | null = null;
+  private screenVideoProcessor: VideoProcessor | null = null;
+  private screenAudioProcessor: AudioProcessor | null = null;
+  private screenVideoEncoderManager: VideoEncoderManager | null = null;
+  private isScreenSharing = false;
+
+  async startShareScreen(screenMediaStream: MediaStream): Promise<void> {
+    console.log("[Publisher] Starting screen sharing with provided MediaStream:", screenMediaStream);
+
+    if (this.isScreenSharing) {
+      this.updateStatus("Already sharing screen", true);
+      return;
+    }
+
+    if (!this.streamManager) {
+      throw new Error("Connection not established. Start publishing first.");
+    }
+
+    if (!screenMediaStream || !(screenMediaStream instanceof MediaStream)) {
+      throw new Error("Invalid screen MediaStream provided");
+    }
+
+    try {
+      this.screenStream = screenMediaStream;
+
+      // Validate stream has tracks
+      const hasVideo = this.screenStream.getVideoTracks().length > 0;
+      const hasAudio = this.screenStream.getAudioTracks().length > 0;
+
+      if (!hasVideo) {
+        throw new Error("Screen stream must have at least a video track");
+      }
+
+      console.warn(`[Publisher] Screen share stream - Video: ${hasVideo}, Audio: ${hasAudio}`);
+
+      // Handle screen share stop when user stops from browser UI
+      const videoTrack = this.screenStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          console.log("[Publisher] Screen share stopped by user");
+          this.stopShareScreen();
+        };
+      }
+
+      this.isScreenSharing = true;
+
+      // Send START_SCREEN_SHARE event
+      await this.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE);
+
+      // Create streams for screen share BEFORE starting encoding
+      // This ensures streams are ready when processors try to send config
+      console.log(`[Publisher] Creating screen share streams...`);
+      await this.streamManager.addStream(ChannelName.SCREEN_SHARE_720P);
+      if (hasAudio) {
+        await this.streamManager.addStream(ChannelName.SCREEN_SHARE_AUDIO);
+      }
+      console.log(`[Publisher] Screen share streams created successfully`);
+
+      // Start video encoding
+      await this.startScreenVideoCapture();
+
+      // Start audio if available
+      if (hasAudio) {
+        await this.startScreenAudioStreaming();
+      }
+
+      this.updateStatus(`Screen sharing started (Video: ${hasVideo}, Audio: ${hasAudio})`);
+
+      // Create video-only stream for UI (similar to localStreamReady)
+      const videoOnlyStream = new MediaStream();
+      const videoTracks = this.screenStream.getVideoTracks();
+      if (videoTracks.length > 0) {
+        videoOnlyStream.addTrack(videoTracks[0]);
+      }
+
+      console.log("[Publisher] Emitting localScreenShareReady event");
+      // Emit localScreenShareReady for UI to display the screen share locally
+      this.emit("localScreenShareReady", {
+        stream: this.screenStream,
+        videoOnlyStream,
+        streamId: this.options.streamId,
+        config: {
+          codec: "avc1.640c34",
+          width: 1280,
+          height: 720,
+          framerate: 20,
+          bitrate: 1000000,
+        },
+        hasAudio,
+        hasVideo,
+      });
+      console.log("[Publisher] localScreenShareReady event emitted");
+
+      // Also emit screenShareStarted for backward compatibility
+      this.emit("screenShareStarted", {
+        stream: this.screenStream,
+        hasVideo,
+        hasAudio,
+      });
+
+    } catch (error) {
+      this.updateStatus(`Failed to start screen sharing: ${error}`, true);
+      throw error;
+    }
+  }
+
+  private async startScreenVideoCapture(): Promise<void> {
+    if (!this.screenStream || !this.streamManager) return;
+
+    const videoTrack = this.screenStream.getVideoTracks()[0];
+    if (!videoTrack) return;
+
+    // Initialize video encoder manager for screen share
+    const screenSubStreams = getSubStreams("screen_share");
+    this.screenVideoEncoderManager = new VideoEncoderManager();
+
+    // Create video processor for screen share
+    this.screenVideoProcessor = new VideoProcessor(
+      this.screenVideoEncoderManager,
+      this.streamManager,
+      screenSubStreams as any
+    );
+
+    this.screenVideoProcessor.on("encoderError", (error) => {
+      console.error("[Publisher] Screen video encoder error:", error);
+      this.updateStatus("Screen video encoder error", true);
+    });
+
+    this.screenVideoProcessor.on("processingError", (error) => {
+      console.error("[Publisher] Screen video processing error:", error);
+      this.updateStatus("Screen video processing error", true);
+    });
+
+    // Initialize and start video processing
+    const baseConfig = {
+      codec: "avc1.640c34",
+      width: 1280,
+      height: 720,
+      framerate: 20, // Lower framerate for screen share
+      bitrate: 1000000, // 1 Mbps for screen share
+    };
+
+    await this.screenVideoProcessor.initialize(videoTrack, baseConfig);
+    await this.screenVideoProcessor.start();
+
+    console.log("[Publisher] Screen video processing started");
+  }
+
+  private async startScreenAudioStreaming(): Promise<void> {
+    if (!this.screenStream || !this.streamManager) return;
+
+    const audioTrack = this.screenStream.getAudioTracks()[0];
+    if (!audioTrack) return;
+
+    if (!this.InitAudioRecorder || typeof this.InitAudioRecorder !== 'function') {
+      throw new Error(`InitAudioRecorder is not available for screen audio`);
+    }
+
+    const audioConfig = {
+      sampleRate: 48000,
+      numberOfChannels: 1,
+    };
+
+    // Create audio encoder manager for screen share audio
+    const screenAudioEncoderManager = new AudioEncoderManager(
+      ChannelName.SCREEN_SHARE_AUDIO,
+      audioConfig,
+      this.InitAudioRecorder
+    );
+
+    // Create audio processor for screen share
+    this.screenAudioProcessor = new AudioProcessor(
+      screenAudioEncoderManager,
+      this.streamManager,
+      ChannelName.SCREEN_SHARE_AUDIO
+    );
+
+    this.screenAudioProcessor.on("encoderError", (error) => {
+      console.error("[Publisher] Screen audio encoder error:", error);
+      this.updateStatus("Screen audio encoder error", true);
+    });
+
+    // Initialize with screen audio stream
+    const screenAudioStream = new MediaStream([audioTrack]);
+    await this.screenAudioProcessor.initialize(screenAudioStream);
+    await this.screenAudioProcessor.start();
+
+    console.log("[Publisher] Screen audio processing started");
   }
 
   async stopShareScreen(): Promise<void> {
-    // Screen sharing should be handled by stopping the screen Publisher instance
-    // This is a legacy compatibility method
-    throw new Error("Screen sharing should stop the screen Publisher instance");
+    if (!this.isScreenSharing) return;
+
+    try {
+      this.isScreenSharing = false;
+
+      // Stop video processor
+      if (this.screenVideoProcessor) {
+        await this.screenVideoProcessor.stop();
+        this.screenVideoProcessor = null;
+      }
+
+      // Close video encoder manager
+      if (this.screenVideoEncoderManager) {
+        await this.screenVideoEncoderManager.closeAll();
+        this.screenVideoEncoderManager = null;
+      }
+
+      // Stop audio processor
+      if (this.screenAudioProcessor) {
+        await this.screenAudioProcessor.stop();
+        this.screenAudioProcessor = null;
+      }
+
+      // Stop stream tracks
+      if (this.screenStream) {
+        this.screenStream.getTracks().forEach((track) => track.stop());
+        this.screenStream = null;
+      }
+
+      // Send STOP_SCREEN_SHARE event
+      await this.sendMeetingEvent(MEETING_EVENTS.STOP_SCREEN_SHARE);
+
+      this.updateStatus("Screen sharing stopped");
+
+      // Emit event
+      this.emit("screenShareStopped");
+
+    } catch (error) {
+      this.updateStatus(`Error stopping screen share: ${error}`, true);
+      throw error;
+    }
   }
 
   async replaceMediaStream(newStream: MediaStream): Promise<{
