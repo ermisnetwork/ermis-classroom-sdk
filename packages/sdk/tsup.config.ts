@@ -1,20 +1,35 @@
 import { defineConfig } from 'tsup';
 
-export default defineConfig({
-  entry: ['src/index.ts'],
-  format: ['cjs', 'esm'],
-  dts: {
-    resolve: true,
-    compilerOptions: {
-      skipLibCheck: true,
+export default defineConfig([
+  // Main SDK bundle
+  {
+    entry: ['src/index.ts'],
+    format: ['cjs', 'esm'],
+    dts: {
+      resolve: true,
+      compilerOptions: {
+        skipLibCheck: true,
+      },
     },
+    splitting: false,
+    sourcemap: true,
+    clean: true,
+    target: 'es2020',
+    outDir: 'dist',
+    // Copy static files (workers, WASM, polyfills) after build
+    onSuccess: 'node scripts/copy-static-files.js',
   },
-  splitting: false,
-  sourcemap: true,
-  clean: true,
-  target: 'es2020',
-  outDir: 'dist',
-  // Copy static files (workers, WASM, polyfills) after build
-  onSuccess: 'node scripts/copy-static-files.js',
-});
+  // Vite plugin (separate bundle)
+  {
+    entry: ['vite-plugin.ts'],
+    format: ['esm'],
+    dts: false, // Skip DTS generation to avoid rootDir issues
+    splitting: false,
+    sourcemap: false,
+    clean: false,
+    target: 'es2020',
+    outDir: '.',
+    outExtension: () => ({ js: '.js' }),
+  },
+]);
 

@@ -11,8 +11,8 @@
       "require": "./dist/index.cjs"
     },
     "./vite-plugin": {
-      "types": "./vite-plugin.ts",
-      "import": "./vite-plugin.ts"
+      "types": "./vite-plugin.d.ts",
+      "import": "./vite-plugin.js"
     },
     "./workers/*": "./src/workers/*",
     "./raptorQ/*": "./src/raptorQ/*",
@@ -28,7 +28,8 @@
     "src/raptorQ",
     "src/polyfills",
     "src/opus_decoder",
-    "vite-plugin.ts",
+    "vite-plugin.js",
+    "vite-plugin.d.ts",
     "README.md",
     "LICENSE"
   ],
