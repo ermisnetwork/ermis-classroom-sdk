@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - 'packages/**'
+      - 'examples/**'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/release.yml'
       - '!packages/**.md'
 
 permissions:
@@ -39,8 +42,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump version
-        id: version
+      - name: Bump vcr-sdk version
+        id: version_sdk
         run: |
           cd packages/vcr-sdk
           OLD_VERSION=$(node -p "require('./package.json').version")
@@ -49,38 +52,68 @@ jobs:
           echo "old=$OLD_VERSION" >> $GITHUB_OUTPUT
           echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Commit version
+      - name: Bump vcr-client version
+        id: version_client
         run: |
-          git add packages/vcr-sdk/package.json
-          git commit -m "chore: bump vcr-sdk to ${{ steps.version.outputs.new }} [skip ci]"
+          cd packages/vcr-client
+          OLD_VERSION=$(node -p "require('./package.json').version")
+          npm version patch --no-git-tag-version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "old=$OLD_VERSION" >> $GITHUB_OUTPUT
+          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Commit versions
+        run: |
+          git add packages/vcr-sdk/package.json packages/vcr-client/package.json
+          git commit -m "chore: bump vcr-sdk to ${{ steps.version_sdk.outputs.new }} and vcr-client to ${{ steps.version_client.outputs.new }} [skip ci]"
           git push
 
-      - name: Build
-        run: pnpm build:sdk
+      - name: Build vcr-sdk
+        run: pnpm build --filter=@ermisnetwork/vcr-sdk...
 
-      - name: Create archive
+      - name: Build vcr-client
+        run: pnpm build --filter=@ermisnetwork/vcr-client...
+
+      - name: Create vcr-sdk archive
         run: |
           cd packages/vcr-sdk/dist
-          tar -czf ../../../vcr-sdk-${{ steps.version.outputs.new }}.tar.gz .
+          tar -czf ../../../vcr-sdk-${{ steps.version_sdk.outputs.new }}.tar.gz .
+
+      - name: Create vcr-client archive
+        run: |
+          cd packages/vcr-client/dist
+          tar -czf ../../../vcr-client-${{ steps.version_client.outputs.new }}.tar.gz .
 
       - name: Create Release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v${{ steps.version.outputs.new }}
-          release_name: v${{ steps.version.outputs.new }}
+          tag_name: v${{ steps.version_sdk.outputs.new }}
+          release_name: v${{ steps.version_sdk.outputs.new }}
           body: |
-            ## VCR SDK v${{ steps.version.outputs.new }}
-            
-            ### Installation
+            ## Release v${{ steps.version_sdk.outputs.new }}
+
+            ### VCR SDK v${{ steps.version_sdk.outputs.new }}
             ```bash
-            pnpm add @ermisnetwork/vcr-sdk@${{ steps.version.outputs.new }}
+            pnpm add @ermisnetwork/vcr-sdk@${{ steps.version_sdk.outputs.new }}
             ```
 
-      - name: Publish to GitHub Packages
+            ### VCR Client v${{ steps.version_client.outputs.new }}
+            ```bash
+            pnpm add @ermisnetwork/vcr-client@${{ steps.version_client.outputs.new }}
+            ```
+
+      - name: Publish vcr-sdk to GitHub Packages
         run: |
           cd packages/vcr-sdk
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish vcr-client to GitHub Packages
+        run: |
+          cd packages/vcr-client
           npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
