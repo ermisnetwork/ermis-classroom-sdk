@@ -1,13 +1,13 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { copySDKStaticFiles } from '@ermisnetwork/ermis-classroom-sdk/vite-plugin';
+import { copyPatchFiles } from '@ermisnetwork/ermis-classroom-patch-files';
 
 export default defineConfig({
-  plugins: [react(), copySDKStaticFiles({ verbose: true })],
+  plugins: [react(), copyPatchFiles({ verbose: true })],
   server: {
     port: 4000,
     open: true,
-    allowedHosts: ['meet.xoithit.lol', 'admin.bandia.vn', '4000.bandia.vn', 'xoithit.lol'],
+    allowedHosts: true,
   },
   base: '/',
   build: {

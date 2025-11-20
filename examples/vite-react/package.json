@@ -12,11 +12,11 @@
   },
   "dependencies": {
     "@ermisnetwork/vcr-sdk": "workspace:*",
-    "@ermisnetwork/ermis-classroom-patch-files": "workspace:*",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
+    "@ermisnetwork/ermis-classroom-patch-files": "workspace:*",
     "@eslint/js": "^9.36.0",
     "@tailwindcss/postcss": "^4.1.14",
     "@types/node": "^24.6.0",
