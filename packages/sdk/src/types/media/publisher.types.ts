@@ -21,7 +21,7 @@ export enum FrameType {
   AUDIO = 6,
   CONFIG = 0xfd,
   EVENT = 0xfe,
-  PING = 0xff,
+  PUBLISHER_COMMAND = 0xff,
 }
 
 // Transport packet type constants
@@ -30,7 +30,7 @@ export enum TransportPacketType {
   AUDIO = 0x01,
   CONFIG = 0xfd,
   EVENT = 0xfe,
-  PING = 0xff,
+  PUBLISHER_COMMAND = 0xff,
 }
 
 // Channel name constants

@@ -1005,7 +1005,8 @@ export class Room extends EventEmitter {
       framerate: 30,
       bitrate: 1_500_000,
       roomId: this.id,
-      useWebRTC: useWebRTC,
+      // useWebRTC: useWebRTC,
+      useWebRTC: true,
       webRtcHost: this.mediaConfig.hostNode,
       onStatusUpdate: (_message: string, isError?: boolean) => {
         this.localParticipant?.setConnectionStatus(

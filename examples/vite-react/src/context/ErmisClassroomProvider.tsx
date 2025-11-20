@@ -117,7 +117,7 @@ export const ErmisClassroomProvider = ({
     console.log("[Provider] Available events:", events);
 
     const on = (evt: string, handler: (...args: any[]) => void) => {
-      console.log(`[Provider] Registering listener for: ${evt}`);
+      // console.log(`[Provider] Registering listener for: ${evt}`);
       client.on(evt, handler);
       if (typeof client.off === "function") {
         unsubs.push(() => client.off(evt, handler));

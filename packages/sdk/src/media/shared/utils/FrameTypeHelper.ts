@@ -64,33 +64,20 @@ export class FrameTypeHelper {
    * getTransportPacketType(FrameType.CAM_720P_KEY) // Returns TransportPacketType.VIDEO
    * getTransportPacketType(FrameType.AUDIO) // Returns TransportPacketType.AUDIO
    */
-  static getTransportPacketType(frameType: FrameType): TransportPacketType {
+  
+
+  static  getTransportPacketType(frameType: FrameType): number {
     switch (frameType) {
-      case FrameType.PING:
-        return TransportPacketType.PING;
-
-      case FrameType.EVENT:
-        return TransportPacketType.EVENT;
-
-      case FrameType.CONFIG:
-        return TransportPacketType.CONFIG;
-
-      case FrameType.AUDIO:
-        return TransportPacketType.AUDIO;
-
-      // All video frame types map to VIDEO transport type
-      case FrameType.CAM_360P_KEY:
-      case FrameType.CAM_360P_DELTA:
-      case FrameType.CAM_720P_KEY:
-      case FrameType.CAM_720P_DELTA:
-      case FrameType.SCREEN_SHARE_KEY:
-      case FrameType.SCREEN_SHARE_DELTA:
-        return TransportPacketType.VIDEO;
-
-      default:
-        return TransportPacketType.VIDEO;
+        case FrameType.PUBLISHER_COMMAND:
+        case FrameType.EVENT:
+        case FrameType.CONFIG:
+            return TransportPacketType.PUBLISHER_COMMAND; 
+        case FrameType.AUDIO:
+            return TransportPacketType.AUDIO;
+        default:
+            return TransportPacketType.VIDEO;
     }
-  }
+}
 
   /**
    * Get WebRTC data channel ID for a given channel name
@@ -157,7 +144,7 @@ export class FrameTypeHelper {
     return (
       frameType === FrameType.CONFIG ||
       frameType === FrameType.EVENT ||
-      frameType === FrameType.PING
+      frameType === FrameType.PUBLISHER_COMMAND
     );
   }
 
@@ -186,8 +173,8 @@ export class FrameTypeHelper {
         return "Configuration message";
       case FrameType.EVENT:
         return "Event message";
-      case FrameType.PING:
-        return "Ping message";
+      case FrameType.PUBLISHER_COMMAND:
+        return "Publisher command message";
       default:
         return "Unknown frame type";
     }

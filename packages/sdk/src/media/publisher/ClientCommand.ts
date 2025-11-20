@@ -1,10 +1,38 @@
-import { FrameType, ChannelName, CLIENT_COMMANDS } from "../../constants/publisherConstants";
 
-export interface CommandSenderConfig {
-    sendDataFn: (channelName: string, bytes: Uint8Array, frameType?: number) => Promise<void>;
-    protocol?: 'webrtc' | 'webtransport' | 'websocket';
+
+
+import { FrameType, ChannelName, CLIENT_COMMANDS } from "../../constants/publisherConstants";
+import { StreamData } from "../../types/media/publisher.types";
+
+// Define separate config types for each protocol
+type WebRTCConfig = {
+    protocol: 'webrtc';
+    sendDataFn: (
+        channelName: ChannelName,
+        streamData: StreamData,
+        packet: Uint8Array,
+        frameType: FrameType
+    ) => Promise<void>;
     commandType?: 'publisher_command' | 'subscriber_command';
-}
+};
+
+type WebTransportConfig = {
+    protocol: 'webtransport';
+    sendDataFn: (
+        streamData: StreamData,
+        packet: Uint8Array
+    ) => Promise<void>;
+    commandType?: 'publisher_command' | 'subscriber_command';
+};
+
+type WebSocketConfig = {
+    protocol: 'websocket';
+    sendDataFn: (data: Uint8Array) => Promise<void>;
+    commandType?: 'publisher_command' | 'subscriber_command';
+};
+
+// Union type for all configs
+export type CommandSenderConfig = WebRTCConfig | WebTransportConfig | WebSocketConfig;
 
 export interface PublisherState {
     hasMic: boolean;
@@ -14,19 +42,19 @@ export interface PublisherState {
 }
 
 export class CommandSender {
-    private sendData: (channelName: string, bytes: Uint8Array, frameType?: number) => Promise<void>;
-    private protocol: string;
-    // @ts-expect-error - May be used in future
+    private sendData: CommandSenderConfig['sendDataFn'];
+    private protocol: CommandSenderConfig['protocol'];
     private commandType: string;
 
     constructor(config: CommandSenderConfig) {
         this.sendData = config.sendDataFn;
-        this.protocol = config.protocol || 'websocket';
+        this.protocol = config.protocol;
         this.commandType = config.commandType || 'publisher_command';
     }
 
     private async _sendPublisherCommand(
         channelName: string,
+        streamData: StreamData,
         type: string,
         data: any = null
     ): Promise<void> {
@@ -39,44 +67,65 @@ export class CommandSender {
         const bytes = new TextEncoder().encode(json);
 
         if (this.protocol === 'webrtc') {
-            const frameType = type === 'media_config' ? FrameType.CONFIG : FrameType.EVENT;
-            await this.sendData(channelName, bytes, frameType);
+            const frameType = type === 'media_config' ? FrameType.PUBLISHER_COMMAND : FrameType.EVENT;
+            console.warn('[Client Command]Sending publisher command via WebRTC:', 'channel name:', channelName, 'command:', command, 'frame type:', frameType);
+            await (this.sendData as WebRTCConfig['sendDataFn'])(
+                channelName as ChannelName,
+                streamData,
+                bytes,
+                frameType
+            );
+        } else if (this.protocol === 'webtransport') {
+            console.warn('[Client Command]Sending publisher command via WebTransport:', 'command:', command);
+            await (this.sendData as WebTransportConfig['sendDataFn'])(streamData, bytes);
         } else {
-            await this.sendData(channelName, bytes);
+            console.warn('[Client Command]Sending publisher command via WebSocket:', 'command:', command);
+            await (this.sendData as WebSocketConfig['sendDataFn'])(bytes);
         }
     }
 
-    private async _sendSubscriberCommand(type: string, data: any = null): Promise<void> {
+    private async _sendSubscriberCommand(
+        streamData: StreamData,
+        type: string,
+        data: any = null
+    ): Promise<void> {
         const command: any = { type };
         if (data !== null) {
             command.data = data;
         }
 
         const json = JSON.stringify(command);
+        const bytes = new TextEncoder().encode(json);
+
         if (this.protocol === 'webtransport') {
             console.warn('[Client Command]Sending subscriber command via WebTransport:', 'command:', command);
-            const bytes = new TextEncoder().encode(json);
-            await this.sendData('', bytes); // Subscriber uses single data stream
-        } else {
+            await (this.sendData as WebTransportConfig['sendDataFn'])(streamData, bytes);
+        } else if (this.protocol === 'websocket') {
             console.warn('[Client Command]Sending subscriber command via WebSocket:', 'command:', command);
-            // For WebSocket, might need to handle differently
-            const bytes = new TextEncoder().encode(json);
-            await this.sendData('', bytes);
+            await (this.sendData as WebSocketConfig['sendDataFn'])(bytes);
+        } else {
+            console.warn('[Client Command]Sending subscriber command via WebRTC:', 'command:', command);
+            await (this.sendData as WebRTCConfig['sendDataFn'])(
+                ChannelName.MEETING_CONTROL,
+                streamData,
+                bytes,
+                FrameType.EVENT
+            );
         }
     }
 
-    async sendEvent(eventData: any = null): Promise<void> {
-        await this._sendPublisherCommand(ChannelName.MEETING_CONTROL, 'event', eventData);
+    async sendEvent(streamData: StreamData, eventData: any = null): Promise<void> {
+        await this._sendPublisherCommand(ChannelName.MEETING_CONTROL, streamData, 'event', eventData);
     }
 
-    async initChannelStream(channelName: string): Promise<void> {
-        await this._sendPublisherCommand(channelName, 'init_channel_stream', {
+    async initChannelStream(channelName: string, streamData: StreamData): Promise<void> {
+        await this._sendPublisherCommand(channelName, streamData, 'init_channel_stream', {
             channel: channelName,
         });
     }
 
-    async sendPublisherState(channelName: string, state: PublisherState): Promise<void> {
-        await this._sendPublisherCommand(channelName, 'publisher_state', {
+    async sendPublisherState(channelName: string, streamData: StreamData, state: PublisherState): Promise<void> {
+        await this._sendPublisherCommand(channelName, streamData, 'publisher_state', {
             has_mic: state.hasMic,
             has_camera: state.hasCamera,
             is_mic_on: state.isMicOn,
@@ -84,13 +133,13 @@ export class CommandSender {
         });
     }
 
-    async sendMediaConfig(channelName: string, config: any): Promise<void> {
+    async sendMediaConfig(channelName: string, streamData: StreamData, config: any): Promise<void> {
         console.warn('[Client Command]Sending media config to server:', 'channel name:', channelName, 'config:', config);
-        await this._sendPublisherCommand(channelName, 'media_config', config);
+        await this._sendPublisherCommand(channelName, streamData, 'media_config', config);
     }
 
-    async initSubscribeChannelStream(subscriberType: string): Promise<void> {
-        await this._sendSubscriberCommand('init_channel_stream', {
+    async initSubscribeChannelStream(streamData: StreamData, subscriberType: string): Promise<void> {
+        await this._sendSubscriberCommand(streamData, 'init_channel_stream', {
             stream_type: subscriberType,
             audio: true,
             video: true,
@@ -98,20 +147,20 @@ export class CommandSender {
         });
     }
 
-    async startStream(): Promise<void> {
-        await this._sendSubscriberCommand(CLIENT_COMMANDS.START_STREAM);
+    async startStream(streamData: StreamData): Promise<void> {
+        await this._sendSubscriberCommand(streamData, CLIENT_COMMANDS.START_STREAM);
     }
 
-    async stopStream(): Promise<void> {
-        await this._sendSubscriberCommand(CLIENT_COMMANDS.STOP_STREAM);
+    async stopStream(streamData: StreamData): Promise<void> {
+        await this._sendSubscriberCommand(streamData, CLIENT_COMMANDS.STOP_STREAM);
     }
 
-    async pauseStream(): Promise<void> {
-        await this._sendSubscriberCommand(CLIENT_COMMANDS.PAUSE_STREAM);
+    async pauseStream(streamData: StreamData): Promise<void> {
+        await this._sendSubscriberCommand(streamData, CLIENT_COMMANDS.PAUSE_STREAM);
     }
 
-    async resumeStream(): Promise<void> {
-        await this._sendSubscriberCommand(CLIENT_COMMANDS.RESUME_STREAM);
+    async resumeStream(streamData: StreamData): Promise<void> {
+        await this._sendSubscriberCommand(streamData, CLIENT_COMMANDS.RESUME_STREAM);
     }
 }
 

@@ -8,6 +8,7 @@ import { PacketBuilder } from "../../shared/utils/PacketBuilder";
 import type { RaptorQConfig } from "../../shared/utils/PacketBuilder";
 import { FrameTypeHelper } from "../../shared/utils/FrameTypeHelper";
 import { LengthDelimitedReader } from "../../shared/utils/LengthDelimitedReader";
+import CommandSender from "../ClientCommand";
 
 // WasmEncoder type from RaptorQ
 interface WasmEncoderType {
@@ -66,10 +67,26 @@ export class StreamManager extends EventEmitter<{
   private wasmInitialized = false;
   private wasmInitializing = false;
   private wasmInitPromise: Promise<void> | null = null;
+  private commandSender: CommandSender | null;
 
   constructor(isWebRTC: boolean = false) {
     super();
     this.isWebRTC = isWebRTC;
+
+    
+    if (isWebRTC) {
+      (async () => {
+        await this.initWasmEncoder();
+      })();
+    };
+
+    this.commandSender = isWebRTC ? new CommandSender( {
+      protocol: "webrtc",
+      sendDataFn: this.sendViaDataChannel.bind(this),
+    }) : new CommandSender( {
+      protocol: "webtransport",
+      sendDataFn: this.sendViaWebTransport.bind(this),
+    });
   }
 
   /**
@@ -605,35 +622,14 @@ export class StreamManager extends EventEmitter<{
       };
     }
 
-    // Send config wrapped in command format
-    //  JSON.stringify(configPacket) before sending to sendMediaConfig
-    // Then sendMediaConfig wraps it: { type: "media_config", data: stringifiedConfig }
-    const command = {
-      type: "media_config",
-      data: JSON.stringify(configPacket),
-    };
+    this.commandSender?.sendMediaConfig(channelName, streamData ,JSON.stringify(configPacket));
 
-    const configJson = JSON.stringify(command);
-    const configData = new TextEncoder().encode(configJson);
-
-    // ⚠️ CRITICAL: Send directly without PacketBuilder header!
-    //  sends config via commandSender which does NOT use packet headers
-    // Config is sent as raw command bytes, not as a media packet
-    if (this.isWebRTC) {
-      // For WebRTC, send with CONFIG frame type
-      await this.sendViaDataChannel(channelName, streamData, configData, FrameType.CONFIG);
-    } else {
-      // For WebTransport, send directly to stream
-      await this.sendViaWebTransport(streamData, configData);
-    }
 
     streamData.configSent = true;
     streamData.config = config as any;
 
     console.log(`[StreamManager] ✅ Config sent for ${channelName}`);
     console.log(`[StreamManager] Config packet:`, configPacket);
-    console.log(`[StreamManager] Command wrapper:`, command);
-    console.log(`[StreamManager] Final JSON:`, configJson);
     this.emit("configSent", { channelName });
   }
 
@@ -641,18 +637,24 @@ export class StreamManager extends EventEmitter<{
    * Send event message
    */
   async sendEvent(channelName: ChannelName, eventData: object): Promise<void> {
-    const eventJson = JSON.stringify(eventData);
-    const eventBytes = new TextEncoder().encode(eventJson);
+    // const eventJson = JSON.stringify(eventData);
+    // const eventBytes = new TextEncoder().encode(eventJson);
 
-    const sequenceNumber = this.getAndIncrementSequence(channelName);
-    const packet = PacketBuilder.createPacket(
-      eventBytes,
-      Date.now(),
-      FrameType.EVENT,
-      sequenceNumber,
-    );
+    // const sequenceNumber = this.getAndIncrementSequence(channelName);
+    // const packet = PacketBuilder.createPacket(
+    //   eventBytes,
+    //   Date.now(),
+    //   FrameType.EVENT,
+    //   sequenceNumber,
+    // );
 
-    await this.sendPacket(channelName, packet, FrameType.EVENT);
+    // await this.sendPacket(channelName, packet, FrameType.EVENT);
+    const streamData = this.streams.get(channelName);
+    if (!streamData) {
+      console.warn(`[StreamManager] Stream ${channelName} not ready yet for event`);
+      return; // ✅ Return early like JS, don't throw
+    }
+    this.commandSender?.sendEvent(streamData, eventData);
   }
 
   /**

@@ -52,7 +52,7 @@ export function getFrameType(channelName: string, chunkType: "key" | "delta"): n
  */
 export function getTransportPacketType(frameType: number): number {
     switch (frameType) {
-        case FrameType.PING:
+        case FrameType.PUBLISHER_COMMAND:
         case FrameType.EVENT:
         case FrameType.CONFIG:
             return TransportPacketType.PING; // PUBLISHER_COMMAND
