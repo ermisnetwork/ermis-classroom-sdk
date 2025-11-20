@@ -186,25 +186,25 @@ export class WebTransportManager extends EventEmitter<
   /**
    * Create unidirectional stream
    */
-  async createUnidirectionalStream(): Promise<WritableStream> {
-    if (!this.transport || !this.isConnected) {
-      throw new Error("WebTransport not connected");
-    }
+  // async createUnidirectionalStream(): Promise<WritableStream> {
+  //   if (!this.transport || !this.isConnected) {
+  //     throw new Error("WebTransport not connected");
+  //   }
 
-    try {
-      const stream = await this.transport.createUnidirectionalStream();
-      this.emit("streamCreated", "unidirectional");
-      console.log("[WebTransport] Unidirectional stream created");
-      return stream;
-    } catch (error) {
-      console.error(
-        "[WebTransport] Failed to create unidirectional stream:",
-        error,
-      );
-      this.emit("streamError", error);
-      throw error;
-    }
-  }
+  //   try {
+  //     const stream = await this.transport.createUnidirectionalStream();
+  //     this.emit("streamCreated", "unidirectional");
+  //     console.log("[WebTransport] Unidirectional stream created");
+  //     return stream;
+  //   } catch (error) {
+  //     console.error(
+  //       "[WebTransport] Failed to create unidirectional stream:",
+  //       error,
+  //     );
+  //     this.emit("streamError", error);
+  //     throw error;
+  //   }
+  // }
 
   /**
    * Get connection statistics

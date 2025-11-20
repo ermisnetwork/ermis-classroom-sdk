@@ -229,7 +229,7 @@ export class StreamManager extends EventEmitter<{
             isCameraOn: true,
           });
         }
-        this.setupEventStreamReader(reader, channelName);
+        this.setupEventStreamReader(reader);
       }
 
       console.log(
@@ -281,21 +281,20 @@ export class StreamManager extends EventEmitter<{
    */
   private setupEventStreamReader(
     reader: ReadableStreamDefaultReader<Uint8Array>,
-    channelName: ChannelName,
   ): void {
     const delimitedReader = new LengthDelimitedReader(reader);
 
     // Start reading loop in background
     (async () => {
       try {
-        console.log(`[StreamManager] Starting event reader for ${channelName}`);
+        console.log(`[StreamManager] Starting event reader`);
 
         while (true) {
           const message = await delimitedReader.readMessage();
           console.log("[StreamManager] Message from server event stream:", message);
 
           if (message === null) {
-            console.log(`[StreamManager] Event stream ${channelName} ended`);
+            console.log(`[StreamManager] Event stream ended`);
             break;
           }
 
@@ -317,7 +316,7 @@ export class StreamManager extends EventEmitter<{
         }
       } catch (err) {
         console.error(
-          `[StreamManager] Error reading event stream ${channelName}:`,
+          `[StreamManager] Error reading event stream:`,
           err,
         );
       }
@@ -399,6 +398,8 @@ export class StreamManager extends EventEmitter<{
       } as any);
 
       if (channelName === ChannelName.MEETING_CONTROL) {
+
+
         // TODO: Send publisher state need get state from outside
       const streamData = this.streams.get(channelName);
       if (streamData) {
@@ -408,10 +409,26 @@ export class StreamManager extends EventEmitter<{
           isMicOn: true,
           isCameraOn: true,
         });
-      }}
+      }
+
+      dataChannel.onmessage = (event) => {
+        const data = event.data;
+        try {
+          const messageStr = new TextDecoder().decode(data);
+          const event = JSON.parse(messageStr);
+          console.log(`[StreamManager] Received server event via data channel:`, event);
+          this.emit("serverEvent", event);
+        } catch (e) {
+          console.log(`[StreamManager] Error parsing server event:`, e);
+        }
+      };
+    
+    }
 
       console.log(`WebRTC data channel (${channelName}) established`);
     };
+
+
 
     // Monitor ICE connection state for debugging
     peerConnection.oniceconnectionstatechange = () => {

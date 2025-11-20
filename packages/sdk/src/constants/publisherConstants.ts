@@ -50,18 +50,18 @@ export function getFrameType(channelName: string, chunkType: "key" | "delta"): n
 /**
  * Helper function to get transport packet type from frame type
  */
-export function getTransportPacketType(frameType: number): number {
-    switch (frameType) {
-        case FrameType.PUBLISHER_COMMAND:
-        case FrameType.EVENT:
-        case FrameType.CONFIG:
-            return TransportPacketType.PING; // PUBLISHER_COMMAND
-        case FrameType.AUDIO:
-            return TransportPacketType.AUDIO;
-        default:
-            return TransportPacketType.VIDEO;
-    }
-}
+// export function getTransportPacketType(frameType: number): number {
+//     switch (frameType) {
+//         case FrameType.PUBLISHER_COMMAND:
+//         case FrameType.EVENT:
+//         case FrameType.CONFIG:
+//             return TransportPacketType.PUBLISHER_COMMAND; // PUBLISHER_COMMAND
+//         case FrameType.AUDIO:
+//             return TransportPacketType.AUDIO;
+//         default:
+//             return TransportPacketType.VIDEO;
+//     }
+// }
 
 /**
  * Helper function to get data channel ID from channel name
