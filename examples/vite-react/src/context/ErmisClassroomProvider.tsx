@@ -1,0 +1,929 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ErmisClassroomContext } from "./ErmisClassroomContext";
+import ErmisClassroom, {
+  type Participant,
+  type Room,
+  // TODO: MediaDeviceManager not yet migrated to TypeScript SDK
+  // MediaDeviceManager,
+} from "@ermisnetwork/ermis-classroom-sdk";
+
+interface ErmisClassroomConfig {
+  host: string;
+  debug?: boolean;
+  webtpUrl: string;
+  apiUrl?: string;
+  reconnectAttempts?: number;
+  reconnectDelay?: number;
+  // for testing only
+  publishProtocol?: string
+  subscribeProtocol?: string
+  hostNode?: string
+  apiHost?: string
+
+}
+
+interface ErmisClassroomProviderProps {
+  config: ErmisClassroomConfig;
+  videoRef?: React.RefObject<HTMLVideoElement | null>;
+  children: React.ReactNode;
+}
+export interface ScreenShareData {
+  userName: string;
+  stream: MediaStream | null; // adjust based on your actual stream type
+}
+export const ErmisClassroomProvider = ({
+  config,
+  videoRef: initialVideoRef,
+  children,
+}: ErmisClassroomProviderProps) => {
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
+
+  const cfg = useMemo(
+    () => ({
+      host: config.host,
+      debug: config.debug,
+      webtpUrl: config.webtpUrl,
+      apiUrl: config.apiUrl,
+      reconnectAttempts: config.reconnectAttempts,
+      reconnectDelay: config.reconnectDelay,
+      publishProtocol: config.publishProtocol,
+      subscribeProtocol: config.subscribeProtocol,
+      hostNode: config.hostNode,
+      apiHost: config.apiHost,
+    }),
+    [
+      config.host,
+      config.debug,
+      config.webtpUrl,
+      config.apiUrl,
+      config.reconnectAttempts,
+      config.reconnectDelay,
+      config.publishProtocol,
+      config.subscribeProtocol,
+      config.hostNode,
+      config.apiHost,
+    ]
+  );
+  const cfgKey = useMemo(() => JSON.stringify(cfg), [cfg]);
+
+  const [roomCode, setRoomCode] = useState<string>();
+  const [userId, setUserId] = useState<string>();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [participants, setParticipants] = useState<Map<string, Participant>>(
+    new Map()
+  );
+  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(
+    new Map()
+  );
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [handRaised, setHandRaised] = useState(false);
+  const [pinType, setPinType] = useState<"local" | "everyone" | null>(null);
+  const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
+  const [inRoom, setInRoom] = useState(false);
+  const [videoEnabled, setVideoEnabled] = useState(true);
+  // TODO: Re-enable setters when MediaDeviceManager is migrated
+  const [devices] = useState<any>(null);
+  const [selectedDevices] = useState<any>(null);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [screenShareStreams, setScreenShareStreams] = useState<Map<string, ScreenShareData>>(new Map());
+
+  const clientRef = useRef<any>(null);
+  // TODO: MediaDeviceManager not yet migrated to TypeScript SDK
+  // const deviceManagerRef = useRef<MediaDeviceManager | null>(null);
+  const deviceManagerRef = useRef<any>(null);
+  const unsubRef = useRef<(() => void)[]>([]);
+
+  useEffect(() => {
+    if (initialVideoRef?.current && localStream) {
+      initialVideoRef.current.srcObject = localStream;
+    }
+  }, [initialVideoRef, localStream]);
+
+  // Debug: Log screenShareStreams changes
+  useEffect(() => {
+    console.log("[Provider] screenShareStreams changed:", screenShareStreams);
+    console.log("[Provider] screenShareStreams size:", screenShareStreams.size);
+    if (screenShareStreams.size > 0) {
+      console.log("[Provider] screenShareStreams entries:", Array.from(screenShareStreams.entries()));
+    }
+  }, [screenShareStreams]);
+
+  const setupEventListeners = useCallback((client: any) => {
+    const events = ErmisClassroom.events;
+    const unsubs: (() => void)[] = [];
+
+    console.log("[Provider] Setting up event listeners...");
+    console.log("[Provider] Available events:", events);
+
+    const on = (evt: string, handler: (...args: any[]) => void) => {
+      // console.log(`[Provider] Registering listener for: ${evt}`);
+      client.on(evt, handler);
+      if (typeof client.off === "function") {
+        unsubs.push(() => client.off(evt, handler));
+      } else if (typeof client.removeListener === "function") {
+        unsubs.push(() => client.removeListener(evt, handler));
+      }
+    };
+
+    // TODO! Define proper types for events
+    on(events.LOCAL_STREAM_READY, (event: any) => {
+      if (event.videoOnlyStream) {
+        setLocalStream(event.videoOnlyStream);
+      }
+    });
+
+    // Listen for local screen share ready - use both event name and constant
+    on("localScreenShareReady", (event: any) => {
+      console.log("LOCAL_SCREEN_SHARE_READY (direct)", event);
+      if (event.videoOnlyStream && event.participant) {
+        console.log("Adding local screen share to map for:", event.participant.userId);
+        setIsScreenSharing(true);
+        setScreenShareStreams((prev) => {
+          const updated = new Map(prev);
+          updated.set(event.participant.userId, {
+            stream: event.videoOnlyStream,
+            userName: event.participant.name || event.participant.userId,
+          });
+          console.log("Local screen share map updated:", updated);
+          console.log("Map size:", updated.size);
+          return updated;
+        });
+      } else {
+        console.warn("localScreenShareReady missing data:", event);
+      }
+    });
+
+    on(events.REMOTE_STREAM_READY, (event: any) => {
+      setRemoteStreams((prev) => {
+        const updated = new Map(prev);
+        updated.set(event.participant.userId, event.stream);
+        return updated;
+      });
+    });
+
+    on(events.ROOM_JOINED, (data: any) => {
+      console.log("ROOM_JOINED", data);
+    });
+
+    on(events.PARTICIPANT_ADDED, (data: any) => {
+      setParticipants(
+        (prev) => new Map(prev.set(data.participant.userId, data.participant))
+      );
+    });
+
+    on(events.PARTICIPANT_REMOVED, (data: any) => {
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        updated.delete(data.participant.userId);
+        return updated;
+      });
+      setRemoteStreams((prev) => {
+        const updated = new Map(prev);
+        updated.delete(data.participant.userId);
+        return updated;
+      });
+    });
+
+    on(events.ROOM_LEFT, (data: any) => {
+      console.log("ROOM_LEFT", data);
+    });
+
+    on(events.REMOTE_AUDIO_STATUS_CHANGED, (data: any) => {
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        const p = updated.get(data.participant.userId);
+        if (p) {
+          p.isAudioEnabled = data.enabled;
+          updated.set(data.participant.userId, p);
+        }
+        return updated;
+      });
+    });
+
+    on(events.REMOTE_VIDEO_STATUS_CHANGED, (data: any) => {
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        const p = updated.get(data.participant.userId);
+        if (p) {
+          p.isVideoEnabled = data.enabled;
+          updated.set(data.participant.userId, p);
+        }
+        return updated;
+      });
+    });
+
+    on("audioToggled", (data: any) => {
+      if (data.participant.isLocal) {
+        setMicEnabled(data.enabled);
+        setParticipants((prev) => {
+          const updated = new Map(prev);
+          const p = updated.get(data.participant.userId);
+          if (p) {
+            p.isAudioEnabled = data.enabled;
+            updated.set(data.participant.userId, p);
+          }
+          return updated;
+        });
+      }
+    });
+
+    on("videoToggled", (data: any) => {
+      if (data.participant.isLocal) {
+        setVideoEnabled(data.enabled);
+        setParticipants((prev) => {
+          const updated = new Map(prev);
+          const p = updated.get(data.participant.userId);
+          if (p) {
+            p.isVideoEnabled = data.enabled;
+            updated.set(data.participant.userId, p);
+          }
+          return updated;
+        });
+      }
+    });
+
+    on("handRaiseToggled", (data: any) => {
+      if (data.participant.isLocal) {
+        setHandRaised(data.enabled);
+        setParticipants((prev) => {
+          const updated = new Map(prev);
+          const p = updated.get(data.participant.userId);
+          if (p) {
+            p.isHandRaised = data.enabled;
+            updated.set(data.participant.userId, p);
+          }
+          return updated;
+        });
+      }
+    });
+
+    on(events.SCREEN_SHARE_STARTED, (data: any) => {
+      console.log("[Provider] SCREEN_SHARE_STARTED received:", data);
+      setIsScreenSharing(true);
+
+      // Handle both formats: direct from Room or forwarded
+      const stream = data.stream;
+      const participant = data.participant;
+
+      if (stream && participant) {
+        console.log("[Provider] Screen share started for:", participant.userId);
+        console.log("[Provider] Screen share stream:", stream);
+        console.log("[Provider] Stream tracks:", stream.getTracks());
+
+        // Create video-only stream for display
+        const videoOnlyStream = new MediaStream();
+        const videoTracks = stream.getVideoTracks();
+        if (videoTracks.length > 0) {
+          videoOnlyStream.addTrack(videoTracks[0]);
+          console.log("[Provider] Added video track to videoOnlyStream");
+        }
+
+        setScreenShareStreams((prev) => {
+          const updated = new Map(prev);
+          updated.set(participant.userId, {
+            stream: videoOnlyStream.getTracks().length > 0 ? videoOnlyStream : stream,
+            userName: participant.name || participant.userId,
+          });
+          console.log("[Provider] Updated screenShareStreams map:", updated);
+          console.log("[Provider] screenShareStreams size:", updated.size);
+          console.log("[Provider] User added:", participant.userId);
+          return updated;
+        });
+      } else {
+        console.warn("[Provider] SCREEN_SHARE_STARTED event missing stream or participant data:", data);
+      }
+    });
+
+    on(events.SCREEN_SHARE_STOPPED, (data: any) => {
+      console.log("SCREEN_SHARE_STOPPED", data);
+      setIsScreenSharing(false);
+      // Use data.room to get local participant's userId
+      if (data.room && data.room.localParticipant) {
+        const localUserId = data.room.localParticipant.userId;
+        setScreenShareStreams((prev) => {
+          const updated = new Map(prev);
+          updated.delete(localUserId);
+          return updated;
+        });
+      }
+    });
+
+    on(events.REMOTE_SCREEN_SHARE_STARTED, (data: any) => {
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        const p = updated.get(data.participant.userId);
+        if (p) {
+          (p as any).isScreenSharing = true;
+          updated.set(data.participant.userId, p);
+        }
+        return updated;
+      });
+    });
+
+    on(events.REMOTE_SCREEN_SHARE_STOPPED, (data: any) => {
+      console.log("REMOTE_SCREEN_SHARE_STOPPED", data);
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        const p = updated.get(data.participant.userId);
+        if (p) {
+          (p as any).isScreenSharing = false;
+          updated.set(data.participant.userId, p);
+        }
+        return updated;
+      });
+      setScreenShareStreams((prev) => {
+        const updated = new Map(prev);
+        updated.delete(data.participant.userId);
+        return updated;
+      });
+    });
+
+    // Listen for remote screen share stream ready
+    on(events.REMOTE_SCREEN_SHARE_STREAM_READY, (data: any) => {
+      console.log("REMOTE_SCREEN_SHARE_STREAM_READY", data);
+      if (data.stream && data.participant) {
+        setScreenShareStreams((prev) => {
+          const updated = new Map(prev);
+          updated.set(data.participant.userId, {
+            stream: data.stream,
+            userName: data.participant.name || data.participant.userId,
+          });
+          console.log("Remote screen share map after add: ", updated);
+          return updated;
+        });
+      } else {
+        console.warn("REMOTE_SCREEN_SHARE_STREAM_READY missing data:", data);
+      }
+    });
+
+    on(events.PARTICIPANT_PINNED_FOR_EVERYONE, () => {
+      setPinType("everyone");
+      setParticipants((prev) => new Map(prev));
+    });
+
+    on(events.PARTICIPANT_UNPINNED_FOR_EVERYONE, () => {
+      setPinType(null);
+      setParticipants((prev) => new Map(prev));
+    });
+
+    on(events.REMOTE_HAND_RAISING_STATUS_CHANGED, (data: any) => {
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        const p = updated.get(data.participant.userId);
+        if (p) {
+          p.isHandRaised = data.raised;
+          updated.set(data.participant.userId, p);
+        }
+        return updated;
+      });
+    });
+
+    // SubRoom event handlers
+    on("subRoomCreated", (data: any) => {
+      console.log("-----Sub room created:----", data);
+      setCurrentRoom(data.room);
+      setParticipants(data.room.participants);
+      // You might want to update some state here if needed
+    });
+
+    on("subRoomJoined", (data: any) => {
+      console.log("✅ subroom (legacy):", data);
+      // setCurrentRoom(data.subRoom.room);
+      // setParticipants(data.participants.reduce((map: any, p: Participant) => {
+      //   map.set(p.userId, p);
+      //   return map;
+      // }, new Map()));
+
+      setCurrentRoom(data.room);
+      setParticipants(data.room.currentSubRoom?.participants || new Map());
+    });
+
+    on("subRoomLeft", (data: any) => {
+      setCurrentRoom(data.room);
+      setParticipants(data.room.participants);
+    });
+
+    on(events.ERROR, (data: any) => {
+      console.error(`SDK Error in ${data.action}:`, data.error?.message);
+    });
+
+    return unsubs;
+  }, []);
+
+  useEffect(() => {
+    if (clientRef.current) {
+      if (typeof clientRef.current.updateConfig === "function") {
+        try {
+          clientRef.current.updateConfig(cfg);
+          console.log("Updated client config without recreating:", cfg);
+          return;
+        } catch (e) {
+          console.warn("updateConfig failed, will recreate client:", e);
+        }
+      }
+
+      // Only recreate client if in room state would be preserved
+      if (inRoom) {
+        console.warn("Cannot recreate client while in room - config change ignored");
+        return;
+      }
+
+      try {
+        unsubRef.current.forEach((fn) => fn());
+      } catch { }
+      unsubRef.current = [];
+      try {
+        clientRef.current.destroy?.();
+      } catch { }
+      clientRef.current = null;
+    }
+
+    const client = ErmisClassroom.create(cfg);
+    clientRef.current = client;
+
+    const off = setupEventListeners(client);
+    unsubRef.current = off;
+
+    // Re-authenticate if user was previously authenticated
+    if (isAuthenticated && userId) {
+      console.log("Re-authenticating user after client recreation:", userId);
+      client.authenticate(userId).catch((e: any) => {
+        console.error("Re-authentication failed:", e);
+        setIsAuthenticated(false);
+      });
+    }
+
+    return () => {
+      try {
+        unsubRef.current.forEach((fn) => fn());
+      } catch { }
+      unsubRef.current = [];
+      try {
+        clientRef.current?.destroy?.();
+      } catch { }
+      clientRef.current = null;
+    };
+  }, [cfgKey, setupEventListeners, inRoom, isAuthenticated, userId]);
+
+  useEffect(() => {
+    // TODO: MediaDeviceManager not yet migrated to TypeScript SDK
+    // Commenting out device manager initialization for now
+    /*
+    const initDeviceManager = async () => {
+      try {
+        const manager = new MediaDeviceManager();
+        await manager.initialize();
+
+        deviceManagerRef.current = manager;
+        setDevices(manager.getDevices());
+        setSelectedDevices(manager.getSelectedDevices());
+
+        manager.on("devicesChanged", (newDevices: any) => {
+          setDevices(newDevices);
+        });
+
+        manager.on("deviceSelected", () => {
+          setSelectedDevices(manager.getSelectedDevices());
+        });
+      } catch (error) {
+        console.error("Failed to initialize device manager:", error);
+      }
+    };
+
+    initDeviceManager();
+
+    return () => {
+      deviceManagerRef.current?.destroy();
+      deviceManagerRef.current = null;
+    };
+    */
+  }, []);
+  // Auto-pin/unpin screen shares when they appear/disappear
+  useEffect(() => {
+    if (!currentRoom) return;
+
+    // If there's a screen share, pin the first one
+    if (screenShareStreams.size > 0) {
+      const firstScreenShareUserId = Array.from(screenShareStreams.keys())[0];
+      const screenShareId = `${firstScreenShareUserId}-screenshare`;
+
+      // Only pin if not already pinned
+      if (currentRoom.pinnedParticipant?.userId !== screenShareId) {
+        console.log(`Auto-pinning screen share: ${screenShareId}`);
+        currentRoom.pinParticipant(screenShareId);
+        setPinType('local');
+        setParticipants(prev => new Map(prev)); // Force re-render
+      }
+    } else {
+      // No screen shares, unpin if currently pinned to a screen share
+      const pinnedId = currentRoom.pinnedParticipant?.userId;
+      if (pinnedId && pinnedId.endsWith('-screenshare') && pinType === 'local') {
+        console.log(`Auto-unpinning screen share: ${pinnedId}`);
+        currentRoom.unpinParticipant();
+        setPinType(null);
+        setParticipants(prev => new Map(prev)); // Force re-render
+      }
+    }
+  }, [screenShareStreams, currentRoom]);
+  const authenticate = useCallback(async (userIdToAuth: string) => {
+    const client = clientRef.current;
+    if (!client) throw new Error("Client not initialized");
+    setUserId(userIdToAuth);
+    await client.authenticate(userIdToAuth);
+    setIsAuthenticated(true);
+    console.log("[Provider] User authenticated successfully:", userIdToAuth);
+  }, []);
+
+  const joinRoom = useCallback(
+    async (code: string, customStream?: MediaStream) => {
+      const client = clientRef.current;
+      if (!client) throw new Error("Client not initialized");
+
+      try {
+        const result = await client.joinRoom(code, customStream);
+        setCurrentRoom(result.room);
+        setRoomCode(code);
+        setInRoom(true);
+
+        setParticipants((prev) => {
+          const map = new Map(prev);
+          result.participants.forEach((p: Participant) => {
+            map.set(p.userId, p);
+            if (p.isLocal) {
+              setMicEnabled(p.isAudioEnabled);
+              setVideoEnabled(p.isVideoEnabled);
+              setHandRaised((p as any).isHandRaised || false);
+            }
+          });
+          return map;
+        });
+
+        if (previewStream) {
+          setPreviewStream(null);
+        }
+      } catch (error: any) {
+        // If authentication error, reset auth state
+        if (error.message?.includes("authenticated")) {
+          console.warn("Authentication required, resetting auth state");
+          setIsAuthenticated(false);
+        }
+        throw error;
+      }
+    },
+    [previewStream]
+  );
+
+  const leaveRoom = useCallback(async () => {
+    const client = clientRef.current;
+    if (!client || !inRoom) return;
+    await client.leaveRoom();
+    setInRoom(false);
+    setCurrentRoom(null);
+    setParticipants(new Map());
+    setRemoteStreams(new Map());
+    setMicEnabled(true);
+    setVideoEnabled(true);
+    setHandRaised(false);
+    setPinType(null);
+    setRoomCode(undefined);
+  }, [inRoom]);
+
+  const toggleMicrophone = useCallback(async () => {
+    if (!userId) return;
+    const p = participants.get(userId);
+    if (!p) return;
+    await p.toggleMicrophone();
+    setMicEnabled(p.isAudioEnabled);
+    setParticipants((prev) => {
+      const updated = new Map(prev);
+      updated.set(userId, p);
+      return updated;
+    });
+  }, [participants, userId]);
+
+  const toggleCamera = useCallback(async () => {
+    if (!userId) return;
+    const p = participants.get(userId);
+    if (!p) return;
+    await p.toggleCamera();
+    setVideoEnabled(p.isVideoEnabled);
+    setParticipants((prev) => {
+      const updated = new Map(prev);
+      updated.set(userId, p);
+      return updated;
+    });
+  }, [participants, userId]);
+
+  const toggleRaiseHand = useCallback(async () => {
+    if (!userId) return;
+    const p = participants.get(userId);
+    if (!p) return;
+    await p.toggleRaiseHand();
+    setHandRaised(p.isHandRaised);
+    setParticipants((prev) => {
+      const updated = new Map(prev);
+      updated.set(userId, p);
+      return updated;
+    });
+  }, [participants, userId]);
+
+  const togglePin = useCallback(
+    async (participantId: string, pinFor: "local" | "everyone") => {
+      if (!currentRoom) return;
+      const target = currentRoom.getParticipant(participantId);
+      if (!target) return;
+
+      const local = currentRoom.localParticipant as any;
+      if (!local?.publisher) return;
+
+      const isPinned = currentRoom.pinnedParticipant?.userId === participantId;
+
+      setParticipants((prev) => {
+        const updated = new Map(prev);
+        updated.set(participantId, target);
+        return updated;
+      });
+
+      if (pinFor === "everyone") {
+        if (isPinned) {
+          await local.publisher.unpinForEveryone(target.streamId);
+        } else {
+          await local.publisher.pinForEveryone(target.streamId);
+        }
+      }
+    },
+    [currentRoom]
+  );
+
+  const switchCamera = useCallback(
+    async (deviceId: string) => {
+      if (!deviceManagerRef.current || !currentRoom) return;
+
+      try {
+        deviceManagerRef.current.selectCamera(deviceId);
+        const local = currentRoom.localParticipant as any;
+        if (local?.publisher) {
+          const result = await local.publisher.switchCamera(deviceId);
+          console.log("switchCamera result", result);
+          if (result?.videoOnlyStream) {
+            setLocalStream(result.videoOnlyStream);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to switch camera:", error);
+      }
+    },
+    [currentRoom]
+  );
+
+  const switchMicrophone = useCallback(
+    async (deviceId: string) => {
+      if (!deviceManagerRef.current || !currentRoom) return;
+
+      try {
+        deviceManagerRef.current.selectMicrophone(deviceId);
+        const local = currentRoom.localParticipant as any;
+        if (local?.publisher) {
+          const result = await local.publisher.switchMicrophone(deviceId);
+
+          if (result?.videoOnlyStream) {
+            setLocalStream(result.videoOnlyStream);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to switch microphone:", error);
+      }
+    },
+    [currentRoom]
+  );
+
+  const getPreviewStream = useCallback(
+    async (cameraId?: string, micId?: string) => {
+      try {
+        const constraints: any = {};
+
+        if (cameraId || selectedDevices?.camera) {
+          constraints.video = {
+            deviceId: { exact: cameraId || selectedDevices?.camera },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 },
+          };
+        } else {
+          constraints.video = true;
+        }
+
+        if (micId || selectedDevices?.microphone) {
+          constraints.audio = {
+            deviceId: { exact: micId || selectedDevices?.microphone },
+            echoCancellation: true,
+            noiseSuppression: true,
+          };
+        } else {
+          constraints.audio = true;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        setPreviewStream(stream);
+        return stream;
+      } catch (error) {
+        console.error("Failed to get preview stream:", error);
+        throw error;
+      }
+    },
+    [selectedDevices]
+  );
+
+  const stopPreviewStream = useCallback(() => {
+    if (previewStream) {
+      previewStream.getTracks().forEach((track) => track.stop());
+      setPreviewStream(null);
+    }
+  }, [previewStream]);
+
+  const replaceMediaStream = useCallback(
+    async (newStream: MediaStream) => {
+      if (!currentRoom) return;
+
+      try {
+        const local = currentRoom.localParticipant as any;
+        if (local?.publisher) {
+          const result = await local.replaceMediaStream(newStream);
+
+          if (result?.videoOnlyStream) {
+            setLocalStream(result.videoOnlyStream);
+          }
+
+          setMicEnabled(result.hasAudio);
+          setVideoEnabled(result.hasVideo);
+        }
+      } catch (error) {
+        console.error("Failed to replace media stream:", error);
+        throw error;
+      }
+    },
+    [currentRoom]
+  );
+
+  // SubRoom methods
+  const createSubRoom = useCallback(async (config: any) => {
+    const client = clientRef.current;
+    if (!client || !currentRoom) {
+      throw new Error("Client or current room not available");
+    }
+
+    try {
+      const result = await currentRoom.createSubRoom(config);
+      return result;
+    } catch (error) {
+      console.error("Failed to create sub room:", error);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  const joinSubRoom = useCallback(async (subRoomId: string) => {
+    const client = clientRef.current;
+    if (!client || !currentRoom) {
+      throw new Error("Client or current room not available");
+    }
+
+    try {
+      const result = await currentRoom.joinSubRoom(subRoomId);
+      return result;
+    } catch (error) {
+      console.error("Failed to join sub room:", error);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  const closeSubRoom = useCallback(async () => {
+    const client = clientRef.current;
+    if (!client || !currentRoom) {
+      throw new Error("Client or current room not available");
+    }
+
+    try {
+      const result = await currentRoom.closeSubRoom();
+      return result;
+    } catch (error) {
+      console.error("Failed to close sub room:", error);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  const leaveSubRoom = useCallback(async (subRoomId: string) => {
+    const client = clientRef.current;
+    if (!client || !currentRoom) {
+      throw new Error("Client or current room not available");
+    }
+
+    try {
+      const result = await currentRoom.leaveSubRoom(subRoomId);
+      return result;
+    } catch (error) {
+      console.error("Failed to leave sub room:", error);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  const toggleScreenShare = useCallback(async () => {
+    console.log("Toggling screen share");
+    console.log("Current isScreenSharing:", isScreenSharing);
+    console.log("Current screenShareStreams:", screenShareStreams);
+    if (!currentRoom) return;
+
+    try {
+      if (isScreenSharing) {
+        await currentRoom.stopScreenShare();
+      } else {
+        await currentRoom.startScreenShare();
+      }
+    } catch (error) {
+      console.error("Failed to toggle screen share:", error);
+      setIsScreenSharing(false);
+    }
+  }, [currentRoom, isScreenSharing, screenShareStreams]);
+
+  const value = useMemo(
+    () => ({
+      client: clientRef.current,
+      participants,
+      remoteStreams,
+      localStream,
+      previewStream,
+      micEnabled,
+      handRaised,
+      pinType,
+      authenticate,
+      isAuthenticated,
+      joinRoom,
+      currentRoom,
+      inRoom,
+      videoEnabled,
+      leaveRoom,
+      roomCode,
+      userId,
+      toggleMicrophone,
+      toggleCamera,
+      toggleRaiseHand,
+      togglePin,
+      devices,
+      selectedDevices,
+      switchCamera,
+      switchMicrophone,
+      getPreviewStream,
+      stopPreviewStream,
+      replaceMediaStream,
+      createSubRoom,
+      joinSubRoom,
+      leaveSubRoom,
+      // Screen share
+      screenShareStreams,
+      isScreenSharing,
+      toggleScreenShare,
+      closeSubRoom,
+    }),
+    [
+      participants,
+      remoteStreams,
+      localStream,
+      previewStream,
+      micEnabled,
+      handRaised,
+      pinType,
+      screenShareStreams,
+      isScreenSharing,
+      authenticate,
+      joinRoom,
+      currentRoom,
+      inRoom,
+      videoEnabled,
+      leaveRoom,
+      roomCode,
+      userId,
+      toggleMicrophone,
+      toggleCamera,
+      toggleRaiseHand,
+      togglePin,
+      devices,
+      selectedDevices,
+      switchCamera,
+      switchMicrophone,
+      getPreviewStream,
+      stopPreviewStream,
+      replaceMediaStream,
+      createSubRoom,
+      joinSubRoom,
+      leaveSubRoom,
+      toggleScreenShare,
+      closeSubRoom,
+    ]
+  );
+
+  return (
+    <ErmisClassroomContext.Provider value={value}>
+      {children}
+    </ErmisClassroomContext.Provider>
+  );
+};
