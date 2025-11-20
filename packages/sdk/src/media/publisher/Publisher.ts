@@ -699,6 +699,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       // Create streams for screen share BEFORE starting encoding
       // This ensures streams are ready when processors try to send config
+
+       
       console.log(`[Publisher] Creating screen share streams...`);
       await this.streamManager.addStream(ChannelName.SCREEN_SHARE_720P);
       if (hasAudio) {

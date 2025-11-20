@@ -499,8 +499,6 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     try {
       if (this.protocol === "webtransport") {
         await this.attachWebTransportStreams();
-      } else if (this.protocol === "webrtc") {
-        await this.attachWebRTCChannels();
       } else if (this.protocol === "websocket") {
         await this.attachWebSocketConnection();
       }
@@ -548,101 +546,101 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
    * - "cam_360p" for 360p video (even though it's wrong, it matches JS version)
    * - "cam_720p" for 720p video (even though it's wrong, it matches JS version)
    */
-  private async attachWebRTCChannels(): Promise<void> {
-    if (!this.workerManager) {
-      throw new Error("Worker manager not initialized");
-    }
+  // private async attachWebRTCChannels(): Promise<void> {
+  //   if (!this.workerManager) {
+  //     throw new Error("Worker manager not initialized");
+  //   }
 
-    console.log("Using WebRTC for media transport");
+  //   console.log("Using WebRTC for media transport");
 
-    try {
-      this.webRtc = new RTCPeerConnection();
+  //   try {
+  //     this.webRtc = new RTCPeerConnection();
 
-      // ✅ MATCH EXACT LOGIC FROM SubscriberDev.js
-      // Create data channels with EXACT same channel names
-      const streamAudioChannel = await this.createWrtcDataChannel("mic_48k", this.webRtc);
-      console.log("Audio data channel created, id:", streamAudioChannel.id);
+  //     // ✅ MATCH EXACT LOGIC FROM SubscriberDev.js
+  //     // Create data channels with EXACT same channel names
+  //     const streamAudioChannel = await this.createWrtcDataChannel("mic_48k", this.webRtc);
+  //     console.log("Audio data channel created, id:", streamAudioChannel.id);
 
-      const stream360pChannel = await this.createWrtcDataChannel("cam_360p", this.webRtc);
-      console.log("360p data channel created, id:", stream360pChannel.id);
+  //     const stream360pChannel = await this.createWrtcDataChannel("cam_360p", this.webRtc);
+  //     console.log("360p data channel created, id:", stream360pChannel.id);
 
-      const stream720pChannel = await this.createWrtcDataChannel("cam_720p", this.webRtc);
-      console.log("cam_720p data channel created, id:", stream720pChannel.id);
+  //     const stream720pChannel = await this.createWrtcDataChannel("cam_720p", this.webRtc);
+  //     console.log("cam_720p data channel created, id:", stream720pChannel.id);
 
-      // ✅ ATTACH EXACT SAME CHANNELS AS JS VERSION
-      // JS version attaches: mic_48k and cam_720p
-      this.workerManager.attachDataChannel("mic_48k", streamAudioChannel);
-      this.workerManager.attachDataChannel("cam_720p", stream720pChannel);
+  //     // ✅ ATTACH EXACT SAME CHANNELS AS JS VERSION
+  //     // JS version attaches: mic_48k and cam_720p
+  //     this.workerManager.attachDataChannel("mic_48k", streamAudioChannel);
+  //     this.workerManager.attachDataChannel("cam_720p", stream720pChannel);
 
-      // Create and send offer
-      const offer = await this.webRtc.createOffer();
-      await this.webRtc.setLocalDescription(offer);
+  //     // Create and send offer
+  //     const offer = await this.webRtc.createOffer();
+  //     await this.webRtc.setLocalDescription(offer);
 
-      console.log("[WebRTC subscriber] Created offer, sending to server...");
+  //     console.log("[WebRTC subscriber] Created offer, sending to server...");
 
-      const response = await fetch(
-        `https://${this.config.host}/meeting/sdp/answer`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            offer,
-            room_id: this.config.roomId,
-            stream_id: this.config.streamId,
-            action: "subscribe",
-          }),
-        }
-      );
+  //     const response = await fetch(
+  //       `https://${this.config.host}/meeting/sdp/answer`,
+  //       {
+  //         method: "POST",
+  //         headers: { "Content-Type": "application/json" },
+  //         body: JSON.stringify({
+  //           offer,
+  //           room_id: this.config.roomId,
+  //           stream_id: this.config.streamId,
+  //           action: "subscribe",
+  //         }),
+  //       }
+  //     );
 
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
-      }
+  //     if (!response.ok) {
+  //       throw new Error(`Server responded with ${response.status}`);
+  //     }
 
-      const answer = await response.json();
-      await this.webRtc.setRemoteDescription(answer);
+  //     const answer = await response.json();
+  //     await this.webRtc.setRemoteDescription(answer);
 
-      console.log("[WebRTC] Data channels attached to worker successfully");
-    } catch (error) {
-      console.error("[WebRTC] Setup error:", error);
-      throw new Error(`WebRTC setup failed: ${error instanceof Error ? error.message : "Unknown"}`);
-    }
-  }
+  //     console.log("[WebRTC] Data channels attached to worker successfully");
+  //   } catch (error) {
+  //     console.error("[WebRTC] Setup error:", error);
+  //     throw new Error(`WebRTC setup failed: ${error instanceof Error ? error.message : "Unknown"}`);
+  //   }
+  // }
 
   /**
    * Create WebRTC data channel
    */
-  private async createWrtcDataChannel(
-    channelName: "cam_360p" | "cam_720p" | "mic_48k",
-    webRtcConnection: RTCPeerConnection
-  ): Promise<RTCDataChannel> {
-    const id = this.getDataChannelId(channelName);
+  // private async createWrtcDataChannel(
+  //   channelName: "cam_360p" | "cam_720p" | "mic_48k",
+  //   webRtcConnection: RTCPeerConnection
+  // ): Promise<RTCDataChannel> {
+  //   const id = this.getDataChannelId(channelName);
 
-    const dataChannel = webRtcConnection.createDataChannel(channelName, {
-      ordered: false,
-      id,
-      negotiated: true,
-    });
+  //   const dataChannel = webRtcConnection.createDataChannel(channelName, {
+  //     ordered: false,
+  //     id,
+  //     negotiated: true,
+  //   });
 
-    return dataChannel;
-  }
+  //   return dataChannel;
+  // }
 
   /**
    * Get data channel ID based on channel name
    */
-  private getDataChannelId(channelName: string): number {
-    const channelMap: Record<string, number> = {
-      "meeting_control": 0,
-      "mic_48k": 1,
-      "cam_360p": 2,
-      "cam_720p": 3,
-      "cam_1080p": 4,
-      "screen_360p": 5,
-      "screen_720p": 6,
-      "screen_audio": 7,
-    };
+  // private getDataChannelId(channelName: string): number {
+  //   const channelMap: Record<string, number> = {
+  //     "meeting_control": 0,
+  //     "mic_48k": 1,
+  //     "cam_360p": 2,
+  //     "cam_720p": 3,
+  //     "cam_1080p": 4,
+  //     "screen_360p": 5,
+  //     "screen_720p": 6,
+  //     "screen_audio": 7,
+  //   };
 
-    return channelMap[channelName] || 0;
-  }
+  //   return channelMap[channelName] || 0;
+  // }
 
   /**
    * Attach WebSocket connection to worker

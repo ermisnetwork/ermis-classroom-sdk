@@ -60,7 +60,7 @@ export class StreamManager extends EventEmitter<{
   private dcPacketSendTime = new Map<ChannelName, number>(); // Per-channel send timing
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private webTransport: any | null = null;
-  private peerConnection: RTCPeerConnection | null = null;
+  // private peerConnection: RTCPeerConnection | null = null;
 
   // FEC/RaptorQ WASM encoder (same as JS)
   private WasmEncoder: WasmEncoderType | null = null;
@@ -155,20 +155,20 @@ export class StreamManager extends EventEmitter<{
   /**
    * Initialize WebRTC data channels
    */
-  async initWebRTCChannels(
-    peerConnection: RTCPeerConnection,
-    channelNames: ChannelName[],
-  ): Promise<void> {
-    this.peerConnection = peerConnection;
+  // async initWebRTCChannels(
+  //   peerConnection: RTCPeerConnection,
+  //   channelNames: ChannelName[],
+  // ): Promise<void> {
+  //   this.peerConnection = peerConnection;
 
-    for (const channelName of channelNames) {
-      await this.createDataChannel(channelName);
-    }
+  //   for (const channelName of channelNames) {
+  //     await this.createDataChannel(channelName);
+  //   }
 
-    console.log(
-      `[StreamManager] Initialized ${channelNames.length} WebRTC data channels`,
-    );
-  }
+  //   console.log(
+  //     `[StreamManager] Initialized ${channelNames.length} WebRTC data channels`,
+  //   );
+  // }
 
   /**
    * Add additional stream (e.g., for screen sharing)
@@ -180,11 +180,11 @@ export class StreamManager extends EventEmitter<{
       return;
     }
 
-    if (this.isWebRTC) {
-      await this.createDataChannel(channelName);
-    } else {
+    // if (this.isWebRTC) {
+    //   await this.createDataChannelDirect(channelName);
+    // } else {
       await this.createBidirectionalStream(channelName);
-    }
+    // }
   }
 
   /**
@@ -219,6 +219,16 @@ export class StreamManager extends EventEmitter<{
 
       // Setup event reader for MEETING_CONTROL channel
       if (channelName === ChannelName.MEETING_CONTROL) {
+        const streamData = this.streams.get(channelName);
+        // todo: get state from outside, check when sendpublisherstate call here or not
+        if (streamData) {
+          this.commandSender?.sendPublisherState(channelName, streamData, {
+            hasMic: true,
+            hasCamera: true,
+            isMicOn: true,
+            isCameraOn: true,
+          });
+        }
         this.setupEventStreamReader(reader, channelName);
       }
 
@@ -389,8 +399,16 @@ export class StreamManager extends EventEmitter<{
       } as any);
 
       if (channelName === ChannelName.MEETING_CONTROL) {
-        // TODO: Send publisher state (needs commandSender)
-      }
+        // TODO: Send publisher state need get state from outside
+      const streamData = this.streams.get(channelName);
+      if (streamData) {
+        await this.commandSender?.sendPublisherState(channelName, streamData, {
+          hasMic: true,
+          hasCamera: true,
+          isMicOn: true,
+          isCameraOn: true,
+        });
+      }}
 
       console.log(`WebRTC data channel (${channelName}) established`);
     };
@@ -407,96 +425,96 @@ export class StreamManager extends EventEmitter<{
   /**
    * Create WebRTC data channel
    */
-  private async createDataChannel(channelName: ChannelName): Promise<void> {
-    if (!this.peerConnection) {
-      throw new Error("PeerConnection not initialized");
-    }
+  // private async createDataChannel(channelName: ChannelName): Promise<void> {
+  //   if (!this.peerConnection) {
+  //     throw new Error("PeerConnection not initialized");
+  //   }
 
-    const channelId = FrameTypeHelper.getDataChannelId(channelName);
+  //   const channelId = FrameTypeHelper.getDataChannelId(channelName);
 
-    const dataChannel = this.peerConnection.createDataChannel(channelName, {
-      ordered: false,
-      id: channelId,
-      negotiated: true,
-    });
+  //   const dataChannel = this.peerConnection.createDataChannel(channelName, {
+  //     ordered: false,
+  //     id: channelId,
+  //     negotiated: true,
+  //   });
 
-    dataChannel.binaryType = "arraybuffer";
+  //   dataChannel.binaryType = "arraybuffer";
 
-    // Set buffer threshold based on channel type
-    const bufferAmounts = {
-      SMALL: 8192,
-      LOW: 16384,
-      MEDIUM: 32768,
-      HIGH: 65536,
-    };
+  //   // Set buffer threshold based on channel type
+  //   const bufferAmounts = {
+  //     SMALL: 8192,
+  //     LOW: 16384,
+  //     MEDIUM: 32768,
+  //     HIGH: 65536,
+  //   };
 
-    if (channelName.includes("1080p")) {
-      dataChannel.bufferedAmountLowThreshold = bufferAmounts.HIGH;
-    } else if (channelName.includes("720p")) {
-      dataChannel.bufferedAmountLowThreshold = bufferAmounts.MEDIUM;
-    } else if (channelName.includes("360p") || channelName === ChannelName.MICROPHONE) {
-      dataChannel.bufferedAmountLowThreshold = bufferAmounts.LOW;
-    } else {
-      dataChannel.bufferedAmountLowThreshold = bufferAmounts.MEDIUM;
-    }
+  //   if (channelName.includes("1080p")) {
+  //     dataChannel.bufferedAmountLowThreshold = bufferAmounts.HIGH;
+  //   } else if (channelName.includes("720p")) {
+  //     dataChannel.bufferedAmountLowThreshold = bufferAmounts.MEDIUM;
+  //   } else if (channelName.includes("360p") || channelName === ChannelName.MICROPHONE) {
+  //     dataChannel.bufferedAmountLowThreshold = bufferAmounts.LOW;
+  //   } else {
+  //     dataChannel.bufferedAmountLowThreshold = bufferAmounts.MEDIUM;
+  //   }
 
-    // Setup queue drain handler
-    dataChannel.onbufferedamountlow = () => {
-      const queue = this.getQueue(channelName);
+  //   // Setup queue drain handler
+  //   dataChannel.onbufferedamountlow = () => {
+  //     const queue = this.getQueue(channelName);
 
-      while (
-        queue.length > 0 &&
-        dataChannel.bufferedAmount <= dataChannel.bufferedAmountLowThreshold
-      ) {
-        const packet = queue.shift();
-        if (packet) {
-          dataChannel.send(packet.slice()); // Use slice() to avoid SharedArrayBuffer issues
-          this.dcPacketSendTime.set(channelName, performance.now());
-        }
-      }
-    };
+  //     while (
+  //       queue.length > 0 &&
+  //       dataChannel.bufferedAmount <= dataChannel.bufferedAmountLowThreshold
+  //     ) {
+  //       const packet = queue.shift();
+  //       if (packet) {
+  //         dataChannel.send(packet.slice()); // Use slice() to avoid SharedArrayBuffer issues
+  //         this.dcPacketSendTime.set(channelName, performance.now());
+  //       }
+  //     }
+  //   };
 
-    // Initialize queue and timing for this channel
-    this.dcMsgQueues.set(channelName, []);
-    this.dcPacketSendTime.set(channelName, performance.now());
+  //   // Initialize queue and timing for this channel
+  //   this.dcMsgQueues.set(channelName, []);
+  //   this.dcPacketSendTime.set(channelName, performance.now());
 
-    // Wait for channel to open
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error(`Data channel ${channelName} open timeout`));
-      }, 5000);
+  //   // Wait for channel to open
+  //   await new Promise<void>((resolve, reject) => {
+  //     const timeout = setTimeout(() => {
+  //       reject(new Error(`Data channel ${channelName} open timeout`));
+  //     }, 5000);
 
-      dataChannel.onopen = () => {
-        clearTimeout(timeout);
-        console.log(
-          `[StreamManager] Data channel ${channelName} opened (ID: ${channelId})`,
-        );
-        resolve();
-      };
+  //     dataChannel.onopen = () => {
+  //       clearTimeout(timeout);
+  //       console.log(
+  //         `[StreamManager] Data channel ${channelName} opened (ID: ${channelId})`,
+  //       );
+  //       resolve();
+  //     };
 
-      dataChannel.onerror = (error) => {
-        clearTimeout(timeout);
-        console.error(
-          `[StreamManager] Data channel ${channelName} error:`,
-          error,
-        );
-        reject(error);
-      };
-    });
+  //     dataChannel.onerror = (error) => {
+  //       clearTimeout(timeout);
+  //       console.error(
+  //         `[StreamManager] Data channel ${channelName} error:`,
+  //         error,
+  //       );
+  //       reject(error);
+  //     };
+  //   });
 
-    this.streams.set(channelName, {
-      writer: null as any, // eslint-disable-line @typescript-eslint/no-explicit-any
-      reader: null as any, // eslint-disable-line @typescript-eslint/no-explicit-any
-      configSent: false,
-      config: null,
-      metadataReady: false,
-      videoDecoderConfig: null,
-      dataChannel,
-      dataChannelReady: true,
-    });
+  //   this.streams.set(channelName, {
+  //     writer: null as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+  //     reader: null as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+  //     configSent: false,
+  //     config: null,
+  //     metadataReady: false,
+  //     videoDecoderConfig: null,
+  //     dataChannel,
+  //     dataChannelReady: true,
+  //   });
 
-    this.emit("streamReady", { channelName });
-  }
+  //   this.emit("streamReady", { channelName });
+  // }
 
   /**
    * Send video chunk (EXACT copy from JS handleVideoChunk logic)
