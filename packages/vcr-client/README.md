@@ -5,11 +5,11 @@ A comprehensive TypeScript SDK for the Virtual Classroom API with full TypeScrip
 ## Installation
 
 ```bash
-npm install @ermisnetwork/vcr-sdk
+npm install @ermisnetwork/vcr-client
 # or
-pnpm add @ermisnetwork/vcr-sdk
+pnpm add @ermisnetwork/vcr-client
 # or
-yarn add @ermisnetwork/vcr-sdk
+yarn add @ermisnetwork/vcr-client
 ```
 
 ## Quick Start
@@ -17,9 +17,9 @@ yarn add @ermisnetwork/vcr-sdk
 ### Using API Key Authentication (Server-to-Server)
 
 ```typescript
-import { createVCRSDK } from '@ermisnetwork/vcr-sdk';
+import { createVCRClient } from '@ermisnetwork/vcr-client';
 
-const sdk = createVCRSDK({
+const sdk = createVCRClient({
   baseUrl: 'http://localhost:3000/api',
   apiKey: 'your-api-key-here',
 });
@@ -32,9 +32,9 @@ console.log(events);
 ### Using Bearer Token Authentication (User Authentication)
 
 ```typescript
-import { createVCRSDK } from '@ermisnetwork/vcr-sdk';
+import { createVCRClient } from '@ermisnetwork/vcr-client';
 
-const sdk = createVCRSDK({
+const sdk = createVCRClient({
   baseUrl: 'http://localhost:3000/api',
 });
 
@@ -389,7 +389,7 @@ import type {
   EventResponseDto,
   UserRole,
   ScoreGrade,
-} from '@ermisnetwork/vcr-sdk';
+} from '@ermisnetwork/vcr-client';
 
 // All types are exported and can be used in your application
 const eventData: CreateEventDto = {
@@ -404,7 +404,7 @@ const eventData: CreateEventDto = {
 ## Error Handling
 
 ```typescript
-import { VCRError } from '@ermisnetwork/vcr-sdk';
+import { VCRError } from '@ermisnetwork/vcr-client';
 
 try {
   const event = await sdk.events.get('invalid-id');

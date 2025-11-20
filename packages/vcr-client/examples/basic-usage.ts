@@ -4,11 +4,11 @@
  * This example demonstrates how to use the VCR SDK with API key authentication
  */
 
-import { createVCRSDK } from '../src';
+import { createVCRClient } from '../src';
 
 async function main() {
   // Initialize SDK with API key
-  const sdk = createVCRSDK({
+  const sdk = createVCRClient({
     baseUrl: 'http://localhost:3000/api',
     apiKey: 'your-api-key-here', // Replace with your actual API key
     debug: true,

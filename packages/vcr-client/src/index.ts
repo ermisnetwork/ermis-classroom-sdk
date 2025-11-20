@@ -12,7 +12,7 @@ import { TemplatesAPI } from './api/templates';
 import { ScoresAPI } from './api/scores';
 import { EventLogsAPI } from './api/event-logs';
 
-export interface VCRSDKConfig {
+export interface VCRClientConfig {
   /**
    * Base URL of the VCR API
    * @example "http://localhost:3000/api"
@@ -49,7 +49,7 @@ export interface VCRSDKConfig {
   debug?: boolean;
 }
 
-export class VCRSDK {
+export class VCRSDKClient {
   private client: VCRClient;
 
   // API modules
@@ -61,7 +61,7 @@ export class VCRSDK {
   public readonly scores: ScoresAPI;
   public readonly eventLogs: EventLogsAPI;
 
-  constructor(config: VCRSDKConfig) {
+  constructor(config: VCRClientConfig) {
     // Initialize HTTP client
     this.client = new VCRClient({
       baseUrl: config.baseUrl,
@@ -116,8 +116,8 @@ export class VCRSDK {
 /**
  * Factory function to create a new VCR SDK instance
  */
-export const createVCRSDK = (config: VCRSDKConfig): VCRSDK => {
-  return new VCRSDK(config);
+export const createVCRClient = (config: VCRClientConfig): VCRSDKClient => {
+  return new VCRSDKClient(config);
 };
 
 // Export all types

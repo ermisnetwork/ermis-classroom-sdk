@@ -4,11 +4,11 @@
  * This example demonstrates how to use the VCR SDK with user authentication (bearer token)
  */
 
-import { createVCRSDK } from '../src';
+import { createVCRClient } from '../src';
 
 async function main() {
   // Initialize SDK without authentication
-  const sdk = createVCRSDK({
+  const sdk = createVCRClient({
     baseUrl: 'http://localhost:3000/api',
     debug: true,
   });
