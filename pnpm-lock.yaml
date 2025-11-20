@@ -23,9 +23,6 @@ importers:
 
   examples/vite-react:
     dependencies:
-      '@ermisnetwork/ermis-classroom-patch-files':
-        specifier: workspace:*
-        version: link:../../packages/patch-files
       '@ermisnetwork/vcr-sdk':
         specifier: workspace:*
         version: link:../../packages/vcr-sdk
@@ -36,6 +33,9 @@ importers:
         specifier: ^19.1.1
         version: 19.2.0(react@19.2.0)
     devDependencies:
+      '@ermisnetwork/ermis-classroom-patch-files':
+        specifier: workspace:*
+        version: link:../../packages/patch-files
       '@eslint/js':
         specifier: ^9.36.0
         version: 9.38.0
