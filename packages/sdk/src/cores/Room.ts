@@ -684,6 +684,12 @@ export class Room extends EventEmitter {
   addParticipant(memberData: ParticipantApiData, userId: string): Participant {
     const isLocal = memberData.user_id === userId;
 
+    console.log("[Room] Creating participant:", {
+      userId: memberData.user_id,
+      streamId: memberData.stream_id,
+      isLocal,
+    });
+
     const participant = new Participant({
       userId: memberData.user_id,
       streamId: memberData.stream_id,
@@ -704,6 +710,7 @@ export class Room extends EventEmitter {
       this.localParticipant = participant;
     }
 
+    console.log("[Room] 📢 Emitting participantAdded event for:", participant.userId);
     this.emit("participantAdded", { room: this, participant });
 
     return participant;
@@ -839,6 +846,7 @@ export class Room extends EventEmitter {
         stream: screenStream,
         participant: this.localParticipant.getInfo(),
       });
+      console.log("[Room] screenStream: ", screenStream);
 
       return screenStream;
     } catch (error) {
@@ -1005,17 +1013,19 @@ export class Room extends EventEmitter {
       framerate: 30,
       bitrate: 1_500_000,
       roomId: this.id,
-      // useWebRTC: useWebRTC,
-      useWebRTC: true,
+      useWebRTC: useWebRTC,
       webRtcHost: this.mediaConfig.hostNode,
       onStatusUpdate: (_message: string, isError?: boolean) => {
         this.localParticipant?.setConnectionStatus(
           isError ? "failed" : "connected",
         );
       },
-      onServerEvent: async (event: any) => {
-        await this._handleServerEvent(event);
-      },
+    });
+
+    // Listen for server events from Publisher (using EventEmitter)
+    publisher.on("serverEvent", async (event: any) => {
+      console.log("[Room] Received serverEvent from Publisher:", event);
+      await this._handleServerEvent(event);
     });
 
     // Setup stream event forwarding
@@ -1068,6 +1078,12 @@ export class Room extends EventEmitter {
   private async _setupRemoteSubscriber(
     participant: Participant,
   ): Promise<void> {
+    console.log("[Room] Setting up remote subscriber for:", {
+      userId: participant.userId,
+      streamId: participant.streamId,
+      roomId: this.id,
+    });
+
     const subscriber = new Subscriber({
       subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
       streamId: participant.streamId,
@@ -1078,6 +1094,7 @@ export class Room extends EventEmitter {
       subscribeType: StreamTypes.CAMERA,
 
       onStatus: (_msg, isError) => {
+        console.log("[Room] Subscriber status for", participant.userId, ":", isError ? "FAILED" : "CONNECTED");
         participant.setConnectionStatus(isError ? "failed" : "connected");
       },
       audioWorkletUrl: "/workers/audio-worklet.js",
@@ -1091,6 +1108,7 @@ export class Room extends EventEmitter {
 
     // Setup stream event forwarding
     subscriber.on("remoteStreamReady", (data: any) => {
+      console.log("[Room] 📢 Emitting remoteStreamReady event for:", participant.userId);
       this.emit("remoteStreamReady", {
         ...data,
         participant: participant.getInfo(),
@@ -1098,8 +1116,10 @@ export class Room extends EventEmitter {
       });
     });
 
+    console.log("[Room] Starting subscriber for:", participant.userId);
     await subscriber.start();
     participant.setSubscriber(subscriber);
+    console.log("[Room] Subscriber started successfully for:", participant.userId);
 
     if (participant.isScreenSharing) {
       await this.handleRemoteScreenShare(
@@ -1119,8 +1139,14 @@ export class Room extends EventEmitter {
     if (event.type === "join") {
       const joinEvent = event as any;
       const joinedParticipant = joinEvent.participant;
-      if (joinedParticipant.user_id === this.localParticipant?.userId) return;
+      console.log("[Room] Processing join event for:", joinedParticipant.user_id);
 
+      if (joinedParticipant.user_id === this.localParticipant?.userId) {
+        console.log("[Room] Skipping join event for local participant");
+        return;
+      }
+
+      console.log("[Room] Adding new participant:", joinedParticipant.user_id);
       const participant = this.addParticipant(
         {
           user_id: joinedParticipant.user_id,
@@ -1132,7 +1158,9 @@ export class Room extends EventEmitter {
         this.localParticipant?.userId || "",
       );
 
+      console.log("[Room] Setting up remote subscriber for:", participant.userId);
       await this._setupRemoteSubscriber(participant);
+      console.log("[Room] Remote subscriber setup complete for:", participant.userId);
     }
 
     if (event.type === "leave") {
@@ -1157,101 +1185,6 @@ export class Room extends EventEmitter {
     if (event.type === "leave_sub_room") {
       this.currentSubRoom = null;
       this.emit("subRoomLeft", { room: this });
-    }
-
-    if (event.type === "message") {
-      const msgEvent = event as any;
-      const message: ChatMessage = {
-        id: msgEvent.id,
-        text: msgEvent.text,
-        senderId: msgEvent.senderId,
-        senderName: msgEvent.senderName,
-        roomId: msgEvent.roomId,
-        timestamp: msgEvent.timestamp,
-        metadata: msgEvent.metadata || {},
-      };
-
-      this.messages.push(message);
-
-      const sender = this.getParticipant(msgEvent.senderId);
-
-      this.emit("messageReceived", {
-        room: this,
-        message,
-        sender: sender ? sender.getInfo() : null,
-      });
-    }
-
-    if (event.type === "messageDelete") {
-      const deleteEvent = event as any;
-      this.messages = this.messages.filter(
-        (m) => m.id !== deleteEvent.messageId,
-      );
-
-      this.emit("messageDeleted", {
-        room: this,
-        messageId: deleteEvent.messageId,
-        senderId: deleteEvent.senderId,
-      });
-    }
-
-    if (event.type === "messageUpdate") {
-      const updateEvent = event as any;
-      const messageIndex = this.messages.findIndex(
-        (m) => m.id === updateEvent.messageId,
-      );
-      if (messageIndex !== -1) {
-        this.messages[messageIndex].text = updateEvent.text;
-        this.messages[messageIndex].updatedAt = updateEvent.timestamp;
-        this.messages[messageIndex].metadata = {
-          ...this.messages[messageIndex].metadata,
-          ...updateEvent.metadata,
-        };
-      }
-
-      this.emit("messageUpdated", {
-        room: this,
-        messageId: updateEvent.messageId,
-        text: updateEvent.text,
-        senderId: updateEvent.senderId,
-      });
-    }
-
-    if (event.type === "typingStart") {
-      const typingEvent = event as any;
-      if (typingEvent.userId !== this.localParticipant?.userId) {
-        this.typingUsers.set(typingEvent.userId, {
-          userId: typingEvent.userId,
-          timestamp: typingEvent.timestamp,
-        });
-
-        this.emit("typingStarted", {
-          room: this,
-          userId: typingEvent.userId,
-          user: this.getParticipant(typingEvent.userId)?.getInfo(),
-        });
-
-        setTimeout(() => {
-          this.typingUsers.delete(typingEvent.userId);
-          this.emit("typingStopped", {
-            room: this,
-            userId: typingEvent.userId,
-          });
-        }, 5000);
-      }
-    }
-
-    if (event.type === "typingStop") {
-      const typingEvent = event as any;
-      if (typingEvent.userId !== this.localParticipant?.userId) {
-        this.typingUsers.delete(typingEvent.userId);
-
-        this.emit("typingStopped", {
-          room: this,
-          userId: typingEvent.userId,
-          user: this.getParticipant(typingEvent.userId)?.getInfo(),
-        });
-      }
     }
 
     if (event.type === "start_share_screen") {
@@ -1392,6 +1325,56 @@ export class Room extends EventEmitter {
           room: this,
           participant,
           raised: false,
+        });
+      }
+    }
+
+    if (event.type === "request_share_screen") {
+      const requestEvent = event as any;
+      const participant = this.participants.get(requestEvent.participant.user_id);
+      this.emit("screenShareRequested", {
+        room: this,
+        participant,
+      });
+    }
+
+    if (event.type === "break_out_room") {
+      const breakoutEvent = event as any;
+      this.emit("breakoutRoomCreated", {
+        room: this,
+        mainRoomId: breakoutEvent.main_room_id,
+        subRoomMap: breakoutEvent.sub_room_map,
+        participantMap: breakoutEvent.participant_map,
+      });
+    }
+
+    if (event.type === "close_breakout_room") {
+      const closeEvent = event as any;
+      this.emit("breakoutRoomClosed", {
+        room: this,
+        mainRoomId: closeEvent.main_room_id,
+        participantMap: closeEvent.participant_map,
+      });
+    }
+
+    if (event.type === "disconnected") {
+      const disconnectEvent = event as any;
+      const participant = this.participants.get(disconnectEvent.participant.user_id);
+      if (participant) {
+        this.emit("participantDisconnected", {
+          room: this,
+          participant,
+        });
+      }
+    }
+
+    if (event.type === "reconnected") {
+      const reconnectEvent = event as any;
+      const participant = this.participants.get(reconnectEvent.participant.user_id);
+      if (participant) {
+        this.emit("participantReconnected", {
+          room: this,
+          participant,
         });
       }
     }

@@ -22,6 +22,7 @@ export { MediaDeviceManager } from "./media/devices/MediaDeviceManager";
 export { RoomTypes } from "./types/core/room.types";
 export { StreamTypes } from "./types/media/publisher.types";
 export { MEETING_EVENTS } from "./constants/publisherConstants";
+export { ROOM_EVENTS } from "./constants/roomEvents";
 export { ConnectionStatus } from "./constants/connectionStatus";
 export { ParticipantRoles } from "./constants/participantRoles";
 export { VERSION } from "./constants/version";

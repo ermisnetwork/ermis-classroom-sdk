@@ -143,7 +143,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         const script = document.createElement("script");
         script.src = "/polyfills/MSTP_polyfill.js";
         script.onload = () => {
-          console.log("[Publisher] ✅ Polyfill loaded successfully");
+          console.log("[Publisher] Polyfill loaded successfully");
           resolve();
         };
         script.onerror = () => reject(new Error("Failed to load MSTP polyfill"));
@@ -279,6 +279,12 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     const webTransport = await this.webTransportManager.connect();
     this.streamManager = new StreamManager(false);
 
+    // Listen for server events from StreamManager
+    this.streamManager.on("serverEvent", (event) => {
+      console.log("[Publisher] Received server event:", event);
+      this.emit("serverEvent", event);
+    });
+
     const channelNames: ChannelName[] = [
       ...this.subStreams.map(s => s.channelName as ChannelName),
     ];
@@ -297,10 +303,16 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.updateStatus("Connecting via WebRTC...");
 
     // Use provided webRtcHost or fallback to default (same as JS version)
-    const webRtcHost = this.options.webRtcHost || "admin.bandia.vn:9995";
+    const webRtcHost = this.options.webRtcHost || "daibo.ermis.network:9996";
 
     // Initialize StreamManager first
     this.streamManager = new StreamManager(true);
+
+    // Listen for server events from StreamManager
+    this.streamManager.on("serverEvent", (event) => {
+      console.log("[Publisher] Received server event:", event);
+      this.emit("serverEvent", event);
+    });
 
     // Initialize WebRTCManager to handle multiple connections
     this.webRtcManager = new WebRTCManager(
@@ -700,7 +712,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Create streams for screen share BEFORE starting encoding
       // This ensures streams are ready when processors try to send config
 
-       
+
       console.log(`[Publisher] Creating screen share streams...`);
       // todo: createdatachanneldirect
       await this.streamManager.addStream(ChannelName.SCREEN_SHARE_720P);

@@ -73,17 +73,17 @@ export class StreamManager extends EventEmitter<{
     super();
     this.isWebRTC = isWebRTC;
 
-    
+
     if (isWebRTC) {
       (async () => {
         await this.initWasmEncoder();
       })();
     };
 
-    this.commandSender = isWebRTC ? new CommandSender( {
+    this.commandSender = isWebRTC ? new CommandSender({
       protocol: "webrtc",
       sendDataFn: this.sendViaDataChannel.bind(this),
-    }) : new CommandSender( {
+    }) : new CommandSender({
       protocol: "webtransport",
       sendDataFn: this.sendViaWebTransport.bind(this),
     });
@@ -183,7 +183,7 @@ export class StreamManager extends EventEmitter<{
     // if (this.isWebRTC) {
     //   await this.createDataChannelDirect(channelName);
     // } else {
-      await this.createBidirectionalStream(channelName);
+    await this.createBidirectionalStream(channelName);
     // }
   }
 
@@ -276,7 +276,7 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
-   * Setup event stream reader for receiving server events
+   * Setup event stream reader for receiving server events (WebTransport)
    * Only for MEETING_CONTROL channel
    */
   private setupEventStreamReader(
@@ -321,6 +321,35 @@ export class StreamManager extends EventEmitter<{
         );
       }
     })();
+  }
+
+  /**
+   * Setup event data channel listener for receiving server events (WebRTC)
+   * Only for MEETING_CONTROL channel
+   * Uses StreamManager's streams map to get data channel by channel name
+   */
+  private setupEventDataChannelListener(channelName: ChannelName): void {
+    const streamData = this.streams.get(channelName);
+    if (!streamData || !streamData.dataChannel) {
+      console.error(`[StreamManager] Cannot setup event listener: data channel not found for ${channelName}`);
+      return;
+    }
+
+    const dataChannel = streamData.dataChannel;
+
+    dataChannel.onmessage = (event) => {
+      const data = event.data;
+      try {
+        const messageStr = new TextDecoder().decode(data);
+        const serverEvent = JSON.parse(messageStr);
+        console.log(`[StreamManager] Received server event via data channel (${channelName}):`, serverEvent);
+        this.emit("serverEvent", serverEvent);
+      } catch (e) {
+        console.log(`[StreamManager] Error parsing server event from ${channelName}:`, e);
+      }
+    };
+
+    console.log(`[StreamManager] Setup event listener for data channel ${channelName}`);
   }
 
   /**
@@ -386,7 +415,7 @@ export class StreamManager extends EventEmitter<{
     };
 
     dataChannel.onopen = async () => {
-      console.log(`[StreamManager] ✅ Data channel ${channelName} OPENED! readyState: ${dataChannel.readyState}`);
+      console.log(`[StreamManager] Data channel ${channelName} OPENED! readyState: ${dataChannel.readyState}`);
 
       // Match JS Publisher exactly
       this.streams.set(channelName, {
@@ -398,32 +427,20 @@ export class StreamManager extends EventEmitter<{
       } as any);
 
       if (channelName === ChannelName.MEETING_CONTROL) {
-
-
         // TODO: Send publisher state need get state from outside
-      const streamData = this.streams.get(channelName);
-      if (streamData) {
-        await this.commandSender?.sendPublisherState(channelName, streamData, {
-          hasMic: true,
-          hasCamera: true,
-          isMicOn: true,
-          isCameraOn: true,
-        });
-      }
-
-      dataChannel.onmessage = (event) => {
-        const data = event.data;
-        try {
-          const messageStr = new TextDecoder().decode(data);
-          const event = JSON.parse(messageStr);
-          console.log(`[StreamManager] Received server event via data channel:`, event);
-          this.emit("serverEvent", event);
-        } catch (e) {
-          console.log(`[StreamManager] Error parsing server event:`, e);
+        const streamData = this.streams.get(channelName);
+        if (streamData) {
+          await this.commandSender?.sendPublisherState(channelName, streamData, {
+            hasMic: true,
+            hasCamera: true,
+            isMicOn: true,
+            isCameraOn: true,
+          });
         }
-      };
-    
-    }
+
+        // Setup event listener using channel name from streams map
+        this.setupEventDataChannelListener(channelName);
+      }
 
       console.log(`WebRTC data channel (${channelName}) established`);
     };
@@ -543,7 +560,7 @@ export class StreamManager extends EventEmitter<{
   ): Promise<void> {
     const streamData = this.streams.get(channelName);
     if (!streamData) {
-      return; // ✅ Return early like JS, don't throw
+      return;
     }
 
     // Skip if config not sent yet
@@ -578,7 +595,7 @@ export class StreamManager extends EventEmitter<{
   ): Promise<void> {
     const streamData = this.streams.get(channelName);
     if (!streamData) {
-      return; // ✅ Return early like JS, don't throw
+      return;
     }
 
     // Skip if config not sent yet
@@ -608,7 +625,7 @@ export class StreamManager extends EventEmitter<{
     const streamData = this.streams.get(channelName);
     if (!streamData) {
       console.warn(`[StreamManager] Stream ${channelName} not ready yet for config`);
-      return; // ✅ Return early like JS, don't throw
+      return;
     }
 
     let configPacket: any;
@@ -657,13 +674,13 @@ export class StreamManager extends EventEmitter<{
       };
     }
 
-    this.commandSender?.sendMediaConfig(channelName, streamData ,JSON.stringify(configPacket));
+    this.commandSender?.sendMediaConfig(channelName, streamData, JSON.stringify(configPacket));
 
 
     streamData.configSent = true;
     streamData.config = config as any;
 
-    console.log(`[StreamManager] ✅ Config sent for ${channelName}`);
+    console.log(`[StreamManager] Config sent for ${channelName}`);
     console.log(`[StreamManager] Config packet:`, configPacket);
     this.emit("configSent", { channelName });
   }
@@ -687,7 +704,7 @@ export class StreamManager extends EventEmitter<{
     const streamData = this.streams.get(channelName);
     if (!streamData) {
       console.warn(`[StreamManager] Stream ${channelName} not ready yet for event`);
-      return; // ✅ Return early like JS, don't throw
+      return;
     }
     this.commandSender?.sendEvent(streamData, eventData);
   }

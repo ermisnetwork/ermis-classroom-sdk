@@ -63,7 +63,7 @@ export interface PublisherConfig {
   onStatusUpdate?: (message: string, isError?: boolean) => void;
   onStreamStart?: () => void;
   onStreamStop?: () => void;
-  onServerEvent?: (event: ServerEvent) => void;
+  // Note: onServerEvent removed - use EventEmitter pattern: publisher.on("serverEvent", handler)
 }
 
 // Sub-stream configuration
@@ -81,16 +81,16 @@ export interface StreamData {
   // WebTransport fields
   writer?: WritableStreamDefaultWriter | null;
   reader?: ReadableStreamDefaultReader | null;
-  
+
   // WebRTC fields (match JS Publisher)
   id?: number;
   dataChannel?: RTCDataChannel;
   dataChannelReady?: boolean;
-  
+
   // Common fields
   configSent: boolean;
   config: VideoEncoderConfig | AudioEncoderConfig | null;
-  
+
   // Video-specific fields (for encoders)
   metadataReady?: boolean;
   videoDecoderConfig?: VideoDecoderConfig | null;

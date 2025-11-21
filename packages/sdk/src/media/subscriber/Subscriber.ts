@@ -116,7 +116,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
   // State
   private isStarted = false;
-  private isAudioEnabled = true; // ✅ MATCH SubscriberDev.js
+  private isAudioEnabled = true; // MATCH SubscriberDev.js
   private connectionStatus: ConnectionStatus = "disconnected";
   private mediaStream: MediaStream | null = null;
 
@@ -127,7 +127,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     this.config = {
       streamId: config.streamId || "",
       roomId: config.roomId || "",
-      host: config.host || "admin.bandia.vn:9995",
+      host: config.host || "daibo.ermis.network:9996",
       userMediaWorker:
         config.userMediaWorker ||
         "sfu-adaptive-trung.ermis-network.workers.dev",
@@ -333,7 +333,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       }
 
       // Initialize video system if needed (not for screen sharing streams)
-      // ✅ MATCH SubscriberDev.js: _initVideoSystem() is NOT awaited
+      // MATCH SubscriberDev.js: _initVideoSystem() is NOT awaited
       if (this.videoProcessor) {
         this.videoProcessor.init(); // ❗ NO await
       }
@@ -356,7 +356,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
   /**
    * Stop the subscriber
-   * ✅ MATCH EXACT LOGIC FROM SubscriberDev.js
+   * MATCH EXACT LOGIC FROM SubscriberDev.js
    */
   stop(): void {
     if (!this.isStarted) {
@@ -394,7 +394,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
   /**
    * Toggle audio on/off
-   * ✅ MATCH EXACT LOGIC FROM SubscriberDev.js
+   * MATCH EXACT LOGIC FROM SubscriberDev.js
    */
   toggleAudio(): boolean {
     if (!this.isStarted || !this.workerManager) {
@@ -450,7 +450,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
   /**
    * Get subscriber info
-   * ✅ MATCH EXACT STRUCTURE FROM SubscriberDev.js
+   * MATCH EXACT STRUCTURE FROM SubscriberDev.js
    */
   getInfo(): SubscriberInfo {
     return {
@@ -521,7 +521,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
     console.log("Attaching WebTransport streams...");
 
-    // ✅ MATCH EXACT LOGIC FROM SubscriberDev.js
+    // MATCH EXACT LOGIC FROM SubscriberDev.js
     // Create WebTransport connection
     const webTpUrl = `https://${this.config.host}/meeting/wt/subscribe/${this.config.roomId}/${this.config.streamId}`;
     console.log("Trying to connect to WebTransport to subscribe:", webTpUrl);
@@ -529,7 +529,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     const wt = new WebTransport(webTpUrl);
     await wt.ready;
 
-    // ✅ SINGLE bidirectional stream (no channelName - worker doesn't use it)
+    // SINGLE bidirectional stream (no channelName - worker doesn't use it)
     const mediaStream = await wt.createBidirectionalStream();
     this.workerManager.attachStream(
       "media",  // channelName not used by worker, just for logging
@@ -556,7 +556,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   //   try {
   //     this.webRtc = new RTCPeerConnection();
 
-  //     // ✅ MATCH EXACT LOGIC FROM SubscriberDev.js
+  //     // MATCH EXACT LOGIC FROM SubscriberDev.js
   //     // Create data channels with EXACT same channel names
   //     const streamAudioChannel = await this.createWrtcDataChannel("mic_48k", this.webRtc);
   //     console.log("Audio data channel created, id:", streamAudioChannel.id);
@@ -567,7 +567,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   //     const stream720pChannel = await this.createWrtcDataChannel("cam_720p", this.webRtc);
   //     console.log("cam_720p data channel created, id:", stream720pChannel.id);
 
-  //     // ✅ ATTACH EXACT SAME CHANNELS AS JS VERSION
+  //     // ATTACH EXACT SAME CHANNELS AS JS VERSION
   //     // JS version attaches: mic_48k and cam_720p
   //     this.workerManager.attachDataChannel("mic_48k", streamAudioChannel);
   //     this.workerManager.attachDataChannel("cam_720p", stream720pChannel);

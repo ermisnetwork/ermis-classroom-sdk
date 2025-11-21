@@ -254,19 +254,11 @@ export interface RoomApiData {
 
 /**
  * Server event types
+ * Must match ServerMeetingEvent enum from Rust server
  */
 export type ServerEventType =
   | 'join'
   | 'leave'
-  | 'join_sub_room'
-  | 'leave_sub_room'
-  | 'message'
-  | 'messageDelete'
-  | 'messageUpdate'
-  | 'typingStart'
-  | 'typingStop'
-  | 'start_share_screen'
-  | 'stop_share_screen'
   | 'mic_on'
   | 'mic_off'
   | 'camera_on'
@@ -274,7 +266,16 @@ export type ServerEventType =
   | 'pin_for_everyone'
   | 'unpin_for_everyone'
   | 'raise_hand'
-  | 'lower_hand';
+  | 'lower_hand'
+  | 'request_share_screen'
+  | 'start_share_screen'
+  | 'stop_share_screen'
+  | 'break_out_room'
+  | 'close_breakout_room'
+  | 'join_sub_room'
+  | 'leave_sub_room'
+  | 'disconnected'
+  | 'reconnected';
 
 /**
  * Server event base
@@ -311,9 +312,16 @@ export interface LeaveEvent extends ServerEventBase {
 }
 
 /**
- * Message event
+ * Server event union type
+ * Only includes events from ServerMeetingEvent (Rust server)
+ * Note: Chat/message events are handled separately via API/WebSocket
  */
-export interface MessageEvent extends ServerEventBase {
+export type ServerEvent = JoinEvent | LeaveEvent | ServerEventBase;
+
+/**
+ * Chat message event (handled separately, not part of ServerMeetingEvent)
+ */
+export interface MessageEvent {
   type: 'message';
   id: string;
   text: string;
@@ -322,11 +330,6 @@ export interface MessageEvent extends ServerEventBase {
   roomId: string;
   metadata?: Record<string, any>;
 }
-
-/**
- * Server event union type
- */
-export type ServerEvent = JoinEvent | LeaveEvent | MessageEvent | ServerEventBase;
 
 /**
  * Room event payloads
@@ -411,6 +414,18 @@ export interface RoomEventMap {
     participant: Participant;
   };
 
+  /** Participant disconnected */
+  participantDisconnected: {
+    room: any;
+    participant: Participant;
+  };
+
+  /** Participant reconnected */
+  participantReconnected: {
+    room: any;
+    participant: Participant;
+  };
+
   /** Local stream ready */
   localStreamReady: {
     stream: MediaStream;
@@ -465,6 +480,27 @@ export interface RoomEventMap {
     stream: MediaStream;
     participant: any;
     roomId: string;
+  };
+
+  /** Screen share requested */
+  screenShareRequested: {
+    room: any;
+    participant?: Participant;
+  };
+
+  /** Breakout room created */
+  breakoutRoomCreated: {
+    room: any;
+    mainRoomId?: string;
+    subRoomMap?: any;
+    participantMap?: any;
+  };
+
+  /** Breakout room closed */
+  breakoutRoomClosed: {
+    room: any;
+    mainRoomId?: string;
+    participantMap?: any;
   };
 
   /** Message sent */
