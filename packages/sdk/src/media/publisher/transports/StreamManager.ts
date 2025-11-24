@@ -747,7 +747,7 @@ export class StreamManager extends EventEmitter<{
   async sendEvent( eventData: object): Promise<void> {
     const streamData = this.streams.get(ChannelName.MEETING_CONTROL);
     if (!streamData) {
-      console.warn(`[StreamManager] Stream ${channelName} not ready yet for event`);
+      console.warn(`[StreamManager] Stream ${ChannelName.MEETING_CONTROL} not ready yet for event`);
       return;
     }
     this.commandSender?.sendEvent(streamData, eventData);
