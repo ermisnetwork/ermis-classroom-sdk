@@ -845,6 +845,22 @@ export const ErmisClassroomProvider = ({
     }
   }, [currentRoom, isScreenSharing, screenShareStreams]);
 
+  const sendCustomEvent = useCallback(
+    async (eventType: string, data: any) => {
+      const client = clientRef.current;
+      if (!client) throw new Error("Client not initialized");
+      if (!inRoom) throw new Error("Not in a room");
+
+      try {
+        await client.sendCustomEvent(eventType, data);
+      } catch (error) {
+        console.error("Failed to send custom event:", error);
+        throw error;
+      }
+    },
+    [inRoom]
+  );
+
   const value = useMemo(
     () => ({
       client: clientRef.current,
@@ -883,6 +899,8 @@ export const ErmisClassroomProvider = ({
       isScreenSharing,
       toggleScreenShare,
       closeSubRoom,
+    // test
+      sendCustomEvent,
     }),
     [
       participants,
@@ -918,6 +936,7 @@ export const ErmisClassroomProvider = ({
       leaveSubRoom,
       toggleScreenShare,
       closeSubRoom,
+      sendCustomEvent,
     ]
   );
 

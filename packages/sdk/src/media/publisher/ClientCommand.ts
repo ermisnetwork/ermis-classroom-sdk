@@ -118,14 +118,15 @@ export class CommandSender {
         await this._sendPublisherCommand(ChannelName.MEETING_CONTROL, streamData, 'event', eventData);
     }
 
+
     async initChannelStream(channelName: string, streamData: StreamData): Promise<void> {
         await this._sendPublisherCommand(channelName, streamData, 'init_channel_stream', {
             channel: channelName,
         });
     }
 
-    async sendPublisherState(channelName: string, streamData: StreamData, state: PublisherState): Promise<void> {
-        await this._sendPublisherCommand(channelName, streamData, 'publisher_state', {
+    async sendPublisherState( streamData: StreamData, state: PublisherState): Promise<void> {
+        await this._sendPublisherCommand(ChannelName.MEETING_CONTROL, streamData, 'publisher_state', {
             has_mic: state.hasMic,
             has_camera: state.hasCamera,
             is_mic_on: state.isMicOn,

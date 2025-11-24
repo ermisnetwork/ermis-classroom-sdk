@@ -657,6 +657,22 @@ export class Room extends EventEmitter {
     }
   }
 
+  async sendCustomEvent(eventData: object): Promise<void> {
+    if (!this.isActive) {
+      return;
+    }
+
+    if (!this.localParticipant?.publisher) {
+      return;
+    }
+
+    try {
+      await this.localParticipant.publisher.sendCustomEvent([],eventData);
+    } catch (error) {
+      console.error("Failed to send custom event:", error);
+    }
+  }
+
   /**
    * Get recent messages
    */

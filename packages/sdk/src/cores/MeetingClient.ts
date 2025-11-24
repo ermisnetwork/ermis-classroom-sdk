@@ -74,6 +74,7 @@ export class ErmisClient extends EventEmitter {
     PARTICIPANT_PINNED_FOR_EVERYONE: 'participantPinnedForEveryone',
     PARTICIPANT_UNPINNED_FOR_EVERYONE: 'participantUnpinnedForEveryone',
     REMOTE_HAND_RAISING_STATUS_CHANGED: 'remoteHandRaisingStatusChanged',
+    CUSTOM : 'custom',
     ERROR: 'error',
   };
 
@@ -465,6 +466,7 @@ export class ErmisClient extends EventEmitter {
 
       // Update state
       this.state.currentRoom = room;
+      console.warn("Current room after join:", this.state.currentRoom?.getInfo());
       this.state.rooms.set(room.id, room);
 
       this.emit('roomJoined', { room, joinResult });
@@ -901,6 +903,16 @@ export class ErmisClient extends EventEmitter {
         this.emit(event, data);
       });
     });
+  }
+
+
+  async sendCustomEvent(eventData: object): Promise<void> {
+    console.log("[MeetingClient] Sending custom event:", eventData);
+    console.log("Current room:", this.state.currentRoom?.getInfo());
+    if (!this.state.currentRoom) {
+      return;
+    }
+    return await this.state.currentRoom.sendCustomEvent(eventData);
   }
 
   /**

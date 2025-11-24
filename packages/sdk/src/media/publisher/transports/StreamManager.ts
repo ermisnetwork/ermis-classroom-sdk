@@ -68,10 +68,12 @@ export class StreamManager extends EventEmitter<{
   private wasmInitializing = false;
   private wasmInitPromise: Promise<void> | null = null;
   private commandSender: CommandSender | null;
+  public streamId: string;
 
-  constructor(isWebRTC: boolean = false) {
+  constructor(isWebRTC: boolean = false, streamID?: string) {
     super();
     this.isWebRTC = isWebRTC;
+    this.streamId = streamID || "default_stream";
 
 
     if (isWebRTC) {
@@ -222,7 +224,7 @@ export class StreamManager extends EventEmitter<{
         const streamData = this.streams.get(channelName);
         // todo: get state from outside, check when sendpublisherstate call here or not
         if (streamData) {
-          this.commandSender?.sendPublisherState(channelName, streamData, {
+          this.commandSender?.sendPublisherState(streamData, {
             hasMic: true,
             hasCamera: true,
             isMicOn: true,
@@ -430,12 +432,45 @@ export class StreamManager extends EventEmitter<{
         // TODO: Send publisher state need get state from outside
         const streamData = this.streams.get(channelName);
         if (streamData) {
-          await this.commandSender?.sendPublisherState(channelName, streamData, {
+          await this.commandSender?.sendPublisherState(streamData, {
             hasMic: true,
             hasCamera: true,
             isMicOn: true,
             isCameraOn: true,
           });
+
+          //       {
+          //   "type": "event",
+          //   "data": {
+          //     "type": "custom",
+          //     "target": {
+          //       "group": { "ids": ["u1", "u2"] }
+          //     },
+          //     "value": {
+          //       "action": "play_sound",
+          //       "volume": 0.7
+          //     }
+          //   }
+          // }
+
+          const dummyEvent = {
+            type: "custom",
+            sender_stream_id: this.streamId,
+            // target is one of types: room or group, with group having array of user's streamId
+            target: {
+              type: "room"
+              // type: "group",
+              // ids: ["u1", "u2"]
+            },
+            value: {
+              action: "play_sound",
+              volume: 0.7
+            }
+          };
+
+          // console.warn(`[StreamManager] Sending dummy event after data channel open:`, dummyEvent);
+          await this.commandSender?.sendEvent(streamData, dummyEvent);
+          //send dummy custome event
         }
 
         // Setup event listener using channel name from streams map
@@ -454,6 +489,27 @@ export class StreamManager extends EventEmitter<{
         console.error(`[StreamManager] ${channelName} ICE connection FAILED!`);
       }
     };
+  }
+
+  
+
+  async sendCustomEvent(targets: string[], value: any,): Promise<void> {
+    let target: any;
+    if (targets.length === 0) {
+      target = { type: "room" }
+    } else {
+      target = { type: "group", ids: targets };
+    };
+    const streamData = this.streams.get(ChannelName.MEETING_CONTROL);
+    if (streamData) {
+      const event = {
+        type: "custom",
+        sender_stream_id: this.streamId,
+        target,
+        value
+      };
+      await this.commandSender?.sendEvent(streamData, event);
+    }
   }
 
   /**
@@ -688,20 +744,8 @@ export class StreamManager extends EventEmitter<{
   /**
    * Send event message
    */
-  async sendEvent(channelName: ChannelName, eventData: object): Promise<void> {
-    // const eventJson = JSON.stringify(eventData);
-    // const eventBytes = new TextEncoder().encode(eventJson);
-
-    // const sequenceNumber = this.getAndIncrementSequence(channelName);
-    // const packet = PacketBuilder.createPacket(
-    //   eventBytes,
-    //   Date.now(),
-    //   FrameType.EVENT,
-    //   sequenceNumber,
-    // );
-
-    // await this.sendPacket(channelName, packet, FrameType.EVENT);
-    const streamData = this.streams.get(channelName);
+  async sendEvent( eventData: object): Promise<void> {
+    const streamData = this.streams.get(ChannelName.MEETING_CONTROL);
     if (!streamData) {
       console.warn(`[StreamManager] Stream ${channelName} not ready yet for event`);
       return;

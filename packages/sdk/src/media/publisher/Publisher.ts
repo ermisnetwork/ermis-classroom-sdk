@@ -277,7 +277,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     });
 
     const webTransport = await this.webTransportManager.connect();
-    this.streamManager = new StreamManager(false);
+    this.streamManager = new StreamManager(false,  this.options.streamId);
 
     // Listen for server events from StreamManager
     this.streamManager.on("serverEvent", (event) => {
@@ -306,7 +306,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     const webRtcHost = this.options.webRtcHost || "daibo.ermis.network:9996";
 
     // Initialize StreamManager first
-    this.streamManager = new StreamManager(true);
+    this.streamManager = new StreamManager(true, this.options.streamId);
 
     // Listen for server events from StreamManager
     this.streamManager.on("serverEvent", (event) => {
@@ -570,27 +570,52 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     console.log("[Publisher] Hand lowered");
   }
 
+  // private async sendMeetingEvent(eventType: string, data?: any): Promise<void> {
+  //   if (!this.streamManager) {
+  //     console.warn("[Publisher] StreamManager not initialized");
+  //     return;
+  //   }
+
+  //   try {
+  //     const event = {
+  //       type: eventType,
+  //       sender_stream_id: this.options.streamId || "",
+  //       timestamp: Date.now(),
+  //       data: data || {},
+  //     };
+
+  //     await this.streamManager.sendData(
+  //       ChannelName.MEETING_CONTROL,
+  //       event
+  //     );
+  //   } catch (error: any) {
+  //     console.error("[Publisher] Failed to send meeting event:", error);
+  //   }
+  // }
+
   private async sendMeetingEvent(eventType: string, data?: any): Promise<void> {
     if (!this.streamManager) {
       console.warn("[Publisher] StreamManager not initialized");
       return;
     }
+    const event = {
+      type: eventType,
+      sender_stream_id: this.options.streamId || "",
+      timestamp: Date.now(),
+      data: data || {},
+    };
+    await this.streamManager.sendEvent(event);
+  }
 
-    try {
-      const event = {
-        type: eventType,
-        sender_stream_id: this.options.streamId || "",
-        timestamp: Date.now(),
-        data: data || {},
-      };
-
-      await this.streamManager.sendData(
-        ChannelName.MEETING_CONTROL,
-        event
-      );
-    } catch (error: any) {
-      console.error("[Publisher] Failed to send meeting event:", error);
+  /// send custom event to specific targets
+  /// targets = [] => send to whole room
+  /// targets = ['streamId1', 'streamId2'] => send to specific stream ids
+  async sendCustomEvent(targets: string[],eventData: any): Promise<void> {
+    if (!this.streamManager) {
+      throw new Error("StreamManager not initialized");
     }
+
+    await this.streamManager.sendCustomEvent(targets, eventData);
   }
 
   async stop(): Promise<void> {
@@ -653,9 +678,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (!this.streamManager) {
       throw new Error("StreamManager not initialized");
     }
-    const eventJson = JSON.stringify(eventData);
-    // Send event through meeting control channel using enum value
-    await this.streamManager.sendData(ChannelName.MEETING_CONTROL, new TextEncoder().encode(eventJson));
+    await this.streamManager.sendEvent( eventData);
   }
 
   // ========== Screen Sharing Methods ==========
