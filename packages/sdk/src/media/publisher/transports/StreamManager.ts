@@ -1,4 +1,5 @@
 import EventEmitter from "../../../events/EventEmitter";
+import { globalEventBus, GlobalEvents } from "../../../events/GlobalEventBus";
 import { ChannelName, FrameType } from "../../../types/media/publisher.types";
 import type {
   StreamData,
@@ -293,7 +294,6 @@ export class StreamManager extends EventEmitter<{
 
         while (true) {
           const message = await delimitedReader.readMessage();
-          console.log("[StreamManager] Message from server event stream:", message);
 
           if (message === null) {
             console.log(`[StreamManager] Event stream ended`);
@@ -307,8 +307,8 @@ export class StreamManager extends EventEmitter<{
             const event = JSON.parse(messageStr);
             console.log(`[StreamManager] Received server event:`, event);
 
-            // Emit event to Publisher
-            this.emit("serverEvent", event);
+            // Emit to global event bus
+            globalEventBus.emit(GlobalEvents.SERVER_EVENT, event);
           } catch (e) {
             console.log(
               `[StreamManager] Non-JSON event message:`,
@@ -345,7 +345,9 @@ export class StreamManager extends EventEmitter<{
         const messageStr = new TextDecoder().decode(data);
         const serverEvent = JSON.parse(messageStr);
         console.log(`[StreamManager] Received server event via data channel (${channelName}):`, serverEvent);
-        this.emit("serverEvent", serverEvent);
+
+        // Emit to global event bus
+        globalEventBus.emit(GlobalEvents.SERVER_EVENT, serverEvent);
       } catch (e) {
         console.log(`[StreamManager] Error parsing server event from ${channelName}:`, e);
       }
@@ -491,7 +493,7 @@ export class StreamManager extends EventEmitter<{
     };
   }
 
-  
+
 
   async sendCustomEvent(targets: string[], value: any,): Promise<void> {
     let target: any;
@@ -744,7 +746,7 @@ export class StreamManager extends EventEmitter<{
   /**
    * Send event message
    */
-  async sendEvent( eventData: object): Promise<void> {
+  async sendEvent(eventData: object): Promise<void> {
     const streamData = this.streams.get(ChannelName.MEETING_CONTROL);
     if (!streamData) {
       console.warn(`[StreamManager] Stream ${ChannelName.MEETING_CONTROL} not ready yet for event`);

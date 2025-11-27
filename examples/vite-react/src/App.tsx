@@ -5,7 +5,7 @@ import "./App.css";
 
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [selectedNode, setSelectedNode] = useState("admin.bandia.vn:9996");
+  const [selectedNode, setSelectedNode] = useState("admin.bandia.vn:9995");
   const [publishProtocol, setPublishProtocol] = useState("webrtc");
   // const [publishProtocol, setPublishProtocol] = useState("webtransport");
   const [subscribeProtocol, setSubscribeProtocol] = useState("websocket");

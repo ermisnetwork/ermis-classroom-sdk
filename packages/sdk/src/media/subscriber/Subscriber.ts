@@ -6,6 +6,7 @@
  */
 
 import { EventEmitter } from "../../events/EventEmitter";
+import { globalEventBus, GlobalEvents } from "../../events/GlobalEventBus";
 import type {
   SubscriberConfig,
   SubscriberInfo,
@@ -127,7 +128,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     this.config = {
       streamId: config.streamId || "",
       roomId: config.roomId || "",
-      host: config.host || "daibo.ermis.network:9996",
+      host: config.host || "admin.bandia.vn:9995",
       userMediaWorker:
         config.userMediaWorker ||
         "sfu-adaptive-trung.ermis-network.workers.dev",
@@ -246,6 +247,11 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     // Video processor events
     if (this.videoProcessor) {
       this.videoProcessor.on("initialized", ({ stream }) => {
+        console.log("[Subscriber] VideoProcessor initialized with stream:", {
+          streamId: this.config.streamId,
+          tracks: stream.getTracks().length,
+        });
+
         this.mediaStream = stream;
         this.emit("videoInitialized", { subscriber: this });
         this.emitRemoteStreamReady(stream);
@@ -335,7 +341,9 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       // Initialize video system if needed (not for screen sharing streams)
       // MATCH SubscriberDev.js: _initVideoSystem() is NOT awaited
       if (this.videoProcessor) {
+        console.log("[Subscriber] Initializing video processor for:", this.subscriberId);
         this.videoProcessor.init(); // ❗ NO await
+        console.log("[Subscriber] Video processor init() called");
       }
 
       // Attach streams to worker (WebTransport, WebRTC, or WebSocket)
@@ -672,13 +680,22 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
    * Emit remote stream ready event
    */
   private emitRemoteStreamReady(stream: MediaStream): void {
-    this.emit("remoteStreamReady", {
+    console.log("[Subscriber] Emitting REMOTE_STREAM_READY:", {
+      streamId: this.config.streamId,
+      subscribeType: this.config.subscribeType,
+      hasTracks: stream.getTracks().length,
+    });
+
+    const eventData = {
       stream,
       streamId: this.config.streamId,
-      subscriberId: this.subscriberId,
-      roomId: this.config.roomId,
-      isOwnStream: this.config.isOwnStream,
-    });
+      subscribeType: this.config.subscribeType,
+    };
+
+    // Emit to global event bus
+    globalEventBus.emit(GlobalEvents.REMOTE_STREAM_READY, eventData);
+
+    console.log("[Subscriber] ✅ REMOTE_STREAM_READY emitted successfully");
   }
 
   /**

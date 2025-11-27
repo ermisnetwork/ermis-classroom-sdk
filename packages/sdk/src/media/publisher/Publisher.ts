@@ -6,6 +6,7 @@
 */
 
 import EventEmitter from "../../events/EventEmitter";
+import { globalEventBus, GlobalEvents } from "../../events/GlobalEventBus";
 import type {
   PublisherConfig,
   StreamInfo,
@@ -249,8 +250,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     const audioTracks = stream.getAudioTracks();
 
-    // Emit localStreamReady event for UI
-    this.emit("localStreamReady", {
+    const eventData = {
       stream,
       videoOnlyStream,
       type: this.options.streamType || "camera",
@@ -264,7 +264,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       },
       hasAudio: audioTracks.length > 0,
       hasVideo: videoTracks.length > 0,
-    });
+    };
+
+    // Emit to global event bus
+    globalEventBus.emit(GlobalEvents.LOCAL_STREAM_READY, eventData);
 
     return stream;
   }
@@ -277,13 +280,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     });
 
     const webTransport = await this.webTransportManager.connect();
-    this.streamManager = new StreamManager(false,  this.options.streamId);
+    this.streamManager = new StreamManager(false, this.options.streamId);
 
-    // Listen for server events from StreamManager
-    this.streamManager.on("serverEvent", (event) => {
-      console.log("[Publisher] Received server event:", event);
-      this.emit("serverEvent", event);
-    });
+    // StreamManager now emits to globalEventBus directly - no need to re-emit
 
     const channelNames: ChannelName[] = [
       ...this.subStreams.map(s => s.channelName as ChannelName),
@@ -303,16 +302,12 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.updateStatus("Connecting via WebRTC...");
 
     // Use provided webRtcHost or fallback to default (same as JS version)
-    const webRtcHost = this.options.webRtcHost || "daibo.ermis.network:9996";
+    const webRtcHost = this.options.webRtcHost || "admin.bandia.vn:9995";
 
     // Initialize StreamManager first
     this.streamManager = new StreamManager(true, this.options.streamId);
 
-    // Listen for server events from StreamManager
-    this.streamManager.on("serverEvent", (event) => {
-      console.log("[Publisher] Received server event:", event);
-      this.emit("serverEvent", event);
-    });
+    // StreamManager now emits to globalEventBus directly - no need to re-emit
 
     // Initialize WebRTCManager to handle multiple connections
     this.webRtcManager = new WebRTCManager(
@@ -610,7 +605,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   /// send custom event to specific targets
   /// targets = [] => send to whole room
   /// targets = ['streamId1', 'streamId2'] => send to specific stream ids
-  async sendCustomEvent(targets: string[],eventData: any): Promise<void> {
+  async sendCustomEvent(targets: string[], eventData: any): Promise<void> {
     if (!this.streamManager) {
       throw new Error("StreamManager not initialized");
     }
@@ -678,7 +673,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (!this.streamManager) {
       throw new Error("StreamManager not initialized");
     }
-    await this.streamManager.sendEvent( eventData);
+    await this.streamManager.sendEvent(eventData);
   }
 
   // ========== Screen Sharing Methods ==========
@@ -762,8 +757,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       }
 
       console.log("[Publisher] Emitting localScreenShareReady event");
-      // Emit localScreenShareReady for UI to display the screen share locally
-      this.emit("localScreenShareReady", {
+
+      const screenShareData = {
         stream: this.screenStream,
         videoOnlyStream,
         streamId: this.options.streamId,
@@ -776,7 +771,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         },
         hasAudio,
         hasVideo,
-      });
+      };
+
+      // Emit to global event bus
+      globalEventBus.emit(GlobalEvents.LOCAL_SCREEN_SHARE_READY, screenShareData);
       console.log("[Publisher] localScreenShareReady event emitted");
 
       // Also emit screenShareStarted for backward compatibility

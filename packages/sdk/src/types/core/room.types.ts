@@ -283,6 +283,7 @@ export type ServerEventType =
 export interface ServerEventBase {
   /** Event type */
   type: ServerEventType;
+  data?: unknown;
   /** Timestamp */
   timestamp?: number;
 }

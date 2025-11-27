@@ -73,6 +73,8 @@ export const ErmisClassroomProvider = ({
   const [participants, setParticipants] = useState<Map<string, Participant>>(
     new Map()
   );
+  const participantsRef = useRef<Map<string, Participant>>(new Map());
+  const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(
     new Map()
   );
@@ -100,24 +102,24 @@ export const ErmisClassroomProvider = ({
     }
   }, [initialVideoRef, localStream]);
 
-  // Debug: Log screenShareStreams changes
-  useEffect(() => {
-    console.log("[Provider] screenShareStreams changed:", screenShareStreams);
-    console.log("[Provider] screenShareStreams size:", screenShareStreams.size);
-    if (screenShareStreams.size > 0) {
-      console.log("[Provider] screenShareStreams entries:", Array.from(screenShareStreams.entries()));
-    }
-  }, [screenShareStreams]);
+
 
   const setupEventListeners = useCallback((client: any) => {
     const events = ErmisClassroom.events;
     const unsubs: (() => void)[] = [];
 
-    console.log("[Provider] Setting up event listeners...");
-    console.log("[Provider] Available events:", events);
+    // Debounced update function to batch participant changes
+    const scheduleParticipantsUpdate = () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+      updateTimeoutRef.current = setTimeout(() => {
+        setParticipants(new Map(participantsRef.current));
+        updateTimeoutRef.current = null;
+      }, 16); // ~60fps
+    };
 
     const on = (evt: string, handler: (...args: any[]) => void) => {
-      // console.log(`[Provider] Registering listener for: ${evt}`);
       client.on(evt, handler);
       if (typeof client.off === "function") {
         unsubs.push(() => client.off(evt, handler));
@@ -135,9 +137,7 @@ export const ErmisClassroomProvider = ({
 
     // Listen for local screen share ready - use both event name and constant
     on("localScreenShareReady", (event: any) => {
-      console.log("LOCAL_SCREEN_SHARE_READY (direct)", event);
       if (event.videoOnlyStream && event.participant) {
-        console.log("Adding local screen share to map for:", event.participant.userId);
         setIsScreenSharing(true);
         setScreenShareStreams((prev) => {
           const updated = new Map(prev);
@@ -145,12 +145,8 @@ export const ErmisClassroomProvider = ({
             stream: event.videoOnlyStream,
             userName: event.participant.name || event.participant.userId,
           });
-          console.log("Local screen share map updated:", updated);
-          console.log("Map size:", updated.size);
           return updated;
         });
-      } else {
-        console.warn("localScreenShareReady missing data:", event);
       }
     });
 
@@ -162,20 +158,23 @@ export const ErmisClassroomProvider = ({
       });
     });
 
-    on(events.ROOM_JOINED, (data: any) => {
-      console.log("ROOM_JOINED", data);
+    on(events.ROOM_JOINED, () => {
+      // Room joined event
     });
 
     on(events.PARTICIPANT_ADDED, (data: any) => {
-      setParticipants(
-        (prev) => new Map(prev.set(data.participant.userId, data.participant))
-      );
+
+      setParticipants((prev) => {
+        participantsRef.current = new Map(prev.set(data.participant.userId, data.participant));
+        return participantsRef.current;
+      });
     });
 
     on(events.PARTICIPANT_REMOVED, (data: any) => {
       setParticipants((prev) => {
         const updated = new Map(prev);
         updated.delete(data.participant.userId);
+        participantsRef.current = updated;
         return updated;
       });
       setRemoteStreams((prev) => {
@@ -185,98 +184,59 @@ export const ErmisClassroomProvider = ({
       });
     });
 
-    on(events.ROOM_LEFT, (data: any) => {
-      console.log("ROOM_LEFT", data);
+    on(events.ROOM_LEFT, () => {
+      // Room left event
     });
 
     on(events.REMOTE_AUDIO_STATUS_CHANGED, (data: any) => {
-      setParticipants((prev) => {
-        const updated = new Map(prev);
-        const p = updated.get(data.participant.userId);
-        if (p) {
-          p.isAudioEnabled = data.enabled;
-          updated.set(data.participant.userId, p);
-        }
-        return updated;
-      });
+      const p = participantsRef.current.get(data.participant.userId);
+      if (p) {
+        // Participant object already mutated, schedule batched update
+        scheduleParticipantsUpdate();
+      }
     });
 
     on(events.REMOTE_VIDEO_STATUS_CHANGED, (data: any) => {
-      setParticipants((prev) => {
-        const updated = new Map(prev);
-        const p = updated.get(data.participant.userId);
-        if (p) {
-          p.isVideoEnabled = data.enabled;
-          updated.set(data.participant.userId, p);
-        }
-        return updated;
-      });
+      const p = participantsRef.current.get(data.participant.userId);
+      if (p) {
+        // Participant object already mutated, schedule batched update
+        scheduleParticipantsUpdate();
+      }
     });
 
     on("audioToggled", (data: any) => {
       if (data.participant.isLocal) {
         setMicEnabled(data.enabled);
-        setParticipants((prev) => {
-          const updated = new Map(prev);
-          const p = updated.get(data.participant.userId);
-          if (p) {
-            p.isAudioEnabled = data.enabled;
-            updated.set(data.participant.userId, p);
-          }
-          return updated;
-        });
+        // Don't update participants Map - server will broadcast remoteAudioStatusChanged
       }
     });
 
     on("videoToggled", (data: any) => {
       if (data.participant.isLocal) {
         setVideoEnabled(data.enabled);
-        setParticipants((prev) => {
-          const updated = new Map(prev);
-          const p = updated.get(data.participant.userId);
-          if (p) {
-            p.isVideoEnabled = data.enabled;
-            updated.set(data.participant.userId, p);
-          }
-          return updated;
-        });
+        // Don't update participants Map - server will broadcast remoteVideoStatusChanged
       }
     });
 
     on("handRaiseToggled", (data: any) => {
       if (data.participant.isLocal) {
         setHandRaised(data.enabled);
-        setParticipants((prev) => {
-          const updated = new Map(prev);
-          const p = updated.get(data.participant.userId);
-          if (p) {
-            p.isHandRaised = data.enabled;
-            updated.set(data.participant.userId, p);
-          }
-          return updated;
-        });
+        // Don't update participants Map - server will broadcast remoteHandRaisingStatusChanged
       }
     });
 
     on(events.SCREEN_SHARE_STARTED, (data: any) => {
-      console.log("[Provider] SCREEN_SHARE_STARTED received:", data);
       setIsScreenSharing(true);
 
-      // Handle both formats: direct from Room or forwarded
       const stream = data.stream;
       const participant = data.participant;
 
       if (stream && participant) {
-        console.log("[Provider] Screen share started for:", participant.userId);
-        console.log("[Provider] Screen share stream:", stream);
-        console.log("[Provider] Stream tracks:", stream.getTracks());
-
         // Create video-only stream for display
         const videoOnlyStream = new MediaStream();
         const videoTracks = stream.getVideoTracks();
         if (videoTracks.length > 0) {
           videoOnlyStream.addTrack(videoTracks[0]);
-          console.log("[Provider] Added video track to videoOnlyStream");
         }
 
         setScreenShareStreams((prev) => {
@@ -285,18 +245,12 @@ export const ErmisClassroomProvider = ({
             stream: videoOnlyStream.getTracks().length > 0 ? videoOnlyStream : stream,
             userName: participant.name || participant.userId,
           });
-          console.log("[Provider] Updated screenShareStreams map:", updated);
-          console.log("[Provider] screenShareStreams size:", updated.size);
-          console.log("[Provider] User added:", participant.userId);
           return updated;
         });
-      } else {
-        console.warn("[Provider] SCREEN_SHARE_STARTED event missing stream or participant data:", data);
       }
     });
 
     on(events.SCREEN_SHARE_STOPPED, (data: any) => {
-      console.log("SCREEN_SHARE_STOPPED", data);
       setIsScreenSharing(false);
       // Use data.room to get local participant's userId
       if (data.room && data.room.localParticipant) {
@@ -322,7 +276,6 @@ export const ErmisClassroomProvider = ({
     });
 
     on(events.REMOTE_SCREEN_SHARE_STOPPED, (data: any) => {
-      console.log("REMOTE_SCREEN_SHARE_STOPPED", data);
       setParticipants((prev) => {
         const updated = new Map(prev);
         const p = updated.get(data.participant.userId);
@@ -341,7 +294,6 @@ export const ErmisClassroomProvider = ({
 
     // Listen for remote screen share stream ready
     on(events.REMOTE_SCREEN_SHARE_STREAM_READY, (data: any) => {
-      console.log("REMOTE_SCREEN_SHARE_STREAM_READY", data);
       if (data.stream && data.participant) {
         setScreenShareStreams((prev) => {
           const updated = new Map(prev);
@@ -349,11 +301,8 @@ export const ErmisClassroomProvider = ({
             stream: data.stream,
             userName: data.participant.name || data.participant.userId,
           });
-          console.log("Remote screen share map after add: ", updated);
           return updated;
         });
-      } else {
-        console.warn("REMOTE_SCREEN_SHARE_STREAM_READY missing data:", data);
       }
     });
 
@@ -368,33 +317,20 @@ export const ErmisClassroomProvider = ({
     });
 
     on(events.REMOTE_HAND_RAISING_STATUS_CHANGED, (data: any) => {
-      setParticipants((prev) => {
-        const updated = new Map(prev);
-        const p = updated.get(data.participant.userId);
-        if (p) {
-          p.isHandRaised = data.raised;
-          updated.set(data.participant.userId, p);
-        }
-        return updated;
-      });
+      const p = participantsRef.current.get(data.participant.userId);
+      if (p) {
+        // Participant object already mutated, schedule batched update
+        scheduleParticipantsUpdate();
+      }
     });
 
     // SubRoom event handlers
     on("subRoomCreated", (data: any) => {
-      console.log("-----Sub room created:----", data);
       setCurrentRoom(data.room);
       setParticipants(data.room.participants);
-      // You might want to update some state here if needed
     });
 
     on("subRoomJoined", (data: any) => {
-      console.log("✅ subroom (legacy):", data);
-      // setCurrentRoom(data.subRoom.room);
-      // setParticipants(data.participants.reduce((map: any, p: Participant) => {
-      //   map.set(p.userId, p);
-      //   return map;
-      // }, new Map()));
-
       setCurrentRoom(data.room);
       setParticipants(data.room.currentSubRoom?.participants || new Map());
     });
@@ -411,6 +347,7 @@ export const ErmisClassroomProvider = ({
     return unsubs;
   }, []);
 
+  // Effect 1: Setup client (only re-run when config changes)
   useEffect(() => {
     if (clientRef.current) {
       if (typeof clientRef.current.updateConfig === "function") {
@@ -429,13 +366,17 @@ export const ErmisClassroomProvider = ({
         return;
       }
 
+      console.log("[Provider] Cleaning up old client before recreation...");
       try {
         unsubRef.current.forEach((fn) => fn());
       } catch { }
       unsubRef.current = [];
       try {
-        clientRef.current.destroy?.();
-      } catch { }
+        // Use hard cleanup when recreating (not in room)
+        clientRef.current?.cleanup?.();
+      } catch (e) {
+        console.error("[Provider] Cleanup before recreation failed:", e);
+      }
       clientRef.current = null;
     }
 
@@ -444,27 +385,34 @@ export const ErmisClassroomProvider = ({
 
     const off = setupEventListeners(client);
     unsubRef.current = off;
+  }, [cfgKey, setupEventListeners]);
 
-    // Re-authenticate if user was previously authenticated
-    if (isAuthenticated && userId) {
-      console.log("Re-authenticating user after client recreation:", userId);
-      client.authenticate(userId).catch((e: any) => {
+  // Effect 2: Handle re-authentication when userId/auth state changes
+  useEffect(() => {
+    if (clientRef.current && isAuthenticated && userId) {
+      clientRef.current.authenticate(userId).catch((e: any) => {
         console.error("Re-authentication failed:", e);
         setIsAuthenticated(false);
       });
     }
+  }, [isAuthenticated, userId]);
 
+  // Effect 3: Cleanup ONLY on component unmount
+  useEffect(() => {
     return () => {
       try {
         unsubRef.current.forEach((fn) => fn());
       } catch { }
       unsubRef.current = [];
+
       try {
-        clientRef.current?.destroy?.();
-      } catch { }
+        clientRef.current?.cleanup?.();
+      } catch (e) {
+        console.error("[Provider] Unmount cleanup failed:", e);
+      }
       clientRef.current = null;
     };
-  }, [cfgKey, setupEventListeners, inRoom, isAuthenticated, userId]);
+  }, []); // Empty deps = only run on mount/unmount
 
   useEffect(() => {
     // TODO: MediaDeviceManager not yet migrated to TypeScript SDK
@@ -510,7 +458,6 @@ export const ErmisClassroomProvider = ({
 
       // Only pin if not already pinned
       if (currentRoom.pinnedParticipant?.userId !== screenShareId) {
-        console.log(`Auto-pinning screen share: ${screenShareId}`);
         currentRoom.pinParticipant(screenShareId);
         setPinType('local');
         setParticipants(prev => new Map(prev)); // Force re-render
@@ -519,7 +466,6 @@ export const ErmisClassroomProvider = ({
       // No screen shares, unpin if currently pinned to a screen share
       const pinnedId = currentRoom.pinnedParticipant?.userId;
       if (pinnedId && pinnedId.endsWith('-screenshare') && pinType === 'local') {
-        console.log(`Auto-unpinning screen share: ${pinnedId}`);
         currentRoom.unpinParticipant();
         setPinType(null);
         setParticipants(prev => new Map(prev)); // Force re-render
@@ -532,7 +478,6 @@ export const ErmisClassroomProvider = ({
     setUserId(userIdToAuth);
     await client.authenticate(userIdToAuth);
     setIsAuthenticated(true);
-    console.log("[Provider] User authenticated successfully:", userIdToAuth);
   }, []);
 
   const joinRoom = useCallback(
@@ -556,6 +501,7 @@ export const ErmisClassroomProvider = ({
               setHandRaised((p as any).isHandRaised || false);
             }
           });
+          participantsRef.current = map;
           return map;
         });
 
@@ -580,7 +526,9 @@ export const ErmisClassroomProvider = ({
     await client.leaveRoom();
     setInRoom(false);
     setCurrentRoom(null);
-    setParticipants(new Map());
+    const emptyMap = new Map();
+    participantsRef.current = emptyMap;
+    setParticipants(emptyMap);
     setRemoteStreams(new Map());
     setMicEnabled(true);
     setVideoEnabled(true);
@@ -594,12 +542,7 @@ export const ErmisClassroomProvider = ({
     const p = participants.get(userId);
     if (!p) return;
     await p.toggleMicrophone();
-    setMicEnabled(p.isAudioEnabled);
-    setParticipants((prev) => {
-      const updated = new Map(prev);
-      updated.set(userId, p);
-      return updated;
-    });
+    // State is updated by audioToggled event
   }, [participants, userId]);
 
   const toggleCamera = useCallback(async () => {
@@ -607,12 +550,7 @@ export const ErmisClassroomProvider = ({
     const p = participants.get(userId);
     if (!p) return;
     await p.toggleCamera();
-    setVideoEnabled(p.isVideoEnabled);
-    setParticipants((prev) => {
-      const updated = new Map(prev);
-      updated.set(userId, p);
-      return updated;
-    });
+    // State is updated by videoToggled event
   }, [participants, userId]);
 
   const toggleRaiseHand = useCallback(async () => {
@@ -620,12 +558,7 @@ export const ErmisClassroomProvider = ({
     const p = participants.get(userId);
     if (!p) return;
     await p.toggleRaiseHand();
-    setHandRaised(p.isHandRaised);
-    setParticipants((prev) => {
-      const updated = new Map(prev);
-      updated.set(userId, p);
-      return updated;
-    });
+    // State is updated by handRaiseToggled event
   }, [participants, userId]);
 
   const togglePin = useCallback(
@@ -828,9 +761,6 @@ export const ErmisClassroomProvider = ({
   }, [currentRoom]);
 
   const toggleScreenShare = useCallback(async () => {
-    console.log("Toggling screen share");
-    console.log("Current isScreenSharing:", isScreenSharing);
-    console.log("Current screenShareStreams:", screenShareStreams);
     if (!currentRoom) return;
 
     try {
@@ -899,7 +829,7 @@ export const ErmisClassroomProvider = ({
       isScreenSharing,
       toggleScreenShare,
       closeSubRoom,
-    // test
+      // test
       sendCustomEvent,
     }),
     [

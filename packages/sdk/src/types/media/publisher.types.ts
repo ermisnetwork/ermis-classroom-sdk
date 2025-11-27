@@ -2,6 +2,9 @@
  * Publisher Types and Interfaces
  */
 
+// Re-export ServerEvent from room.types to avoid duplication
+export type { ServerEvent } from "../core/room.types";
+
 // Stream type constants (for Publisher/Subscriber)
 export const StreamTypes = {
   CAMERA: "camera",
@@ -102,13 +105,6 @@ export interface EncoderData {
   config: VideoEncoderConfig;
   metadataReady: boolean;
   videoDecoderConfig: VideoDecoderConfig | null;
-}
-
-// Server event structure
-export interface ServerEvent {
-  type: string;
-  data?: unknown;
-  timestamp?: number;
 }
 
 // Meeting event structure

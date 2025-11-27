@@ -31,13 +31,17 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
    */
   init(): MediaStream {
     try {
+      console.log("[VideoProcessor] Initializing video system...");
+
       // Check for MediaStreamTrackGenerator support
       if (typeof MediaStreamTrackGenerator !== "function") {
+        console.error("[VideoProcessor] MediaStreamTrackGenerator not supported in this browser");
         throw new Error(
           "MediaStreamTrackGenerator not supported in this browser"
         );
       }
 
+      console.log("[VideoProcessor] Creating MediaStreamTrackGenerator...");
       // Create video track generator
       this.videoGenerator = new MediaStreamTrackGenerator({
         kind: "video",
@@ -48,7 +52,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       // Create MediaStream with video track only
       this.mediaStream = new MediaStream([this.videoGenerator]);
 
-      console.log("Video system initialized");
+      console.log("[VideoProcessor] ✅ Video system initialized, emitting 'initialized' event");
       this.emit("initialized", { stream: this.mediaStream });
 
       return this.mediaStream;

@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from "../events/EventEmitter";
+import { globalEventBus, GlobalEvents } from "../events/GlobalEventBus";
 import { Participant } from "./Participant";
 import { SubRoom } from "./SubRoom";
 import { Publisher } from "../media/publisher/Publisher";
@@ -59,6 +60,9 @@ export class Room extends EventEmitter {
   // Chat management
   messages: ChatMessage[] = [];
   typingUsers = new Map<string, TypingUser>();
+
+  // Global event subscriptions cleanup
+  private globalEventCleanups: Array<() => void> = [];
 
   constructor(config: RoomConfig) {
     super();
@@ -118,6 +122,9 @@ export class Room extends EventEmitter {
       // Setup media connections with optional custom stream
       await this._setupMediaConnections(mediaStream);
 
+      // Setup global event listeners (subscribe directly from globalEventBus)
+      this._setupGlobalEventListeners();
+
       this.isActive = true;
       this.emit("joined", { room: this, participants: this.participants });
 
@@ -149,6 +156,9 @@ export class Room extends EventEmitter {
 
       // Cleanup media connections
       await this._cleanupMediaConnections();
+
+      // Cleanup global event listeners
+      this._cleanupGlobalEventListeners();
 
       // Cleanup participants
       this._cleanupParticipants();
@@ -667,7 +677,7 @@ export class Room extends EventEmitter {
     }
 
     try {
-      await this.localParticipant.publisher.sendCustomEvent([],eventData);
+      await this.localParticipant.publisher.sendCustomEvent([], eventData);
     } catch (error) {
       console.error("Failed to send custom event:", error);
     }
@@ -929,14 +939,7 @@ export class Room extends EventEmitter {
         screenSubscriber.setAudioMixer(this.audioMixer);
       }
 
-      // Setup stream event forwarding
-      screenSubscriber.on("remoteStreamReady", (data: any) => {
-        this.emit("remoteScreenShareStreamReady", {
-          ...data,
-          participant: participant.getInfo(),
-          roomId: this.id,
-        });
-      });
+      // No need to listen to subscriber events - Room subscribes directly from globalEventBus
 
       await screenSubscriber.start();
 
@@ -994,8 +997,8 @@ export class Room extends EventEmitter {
       }
     }
 
-    // Setup stream event forwarding
-    this._setupStreamEventForwarding();
+    // Note: Stream events are now handled via globalEventBus
+    // No need for local event forwarding
   }
 
   /**
@@ -1038,51 +1041,8 @@ export class Room extends EventEmitter {
       },
     });
 
-    // Listen for server events from Publisher (using EventEmitter)
-    publisher.on("serverEvent", async (event: any) => {
-      console.log("[Room] Received serverEvent from Publisher:", event);
-      await this._handleServerEvent(event);
-    });
-
-    // Setup stream event forwarding
-    publisher.on("localStreamReady", (data: any) => {
-      this.emit("localStreamReady", {
-        ...data,
-        participant: this.localParticipant?.getInfo(),
-        roomId: this.id,
-      });
-    });
-
-    // Listen for local screen share ready event
-    publisher.on("localScreenShareReady", (data: any) => {
-      console.log("[Room] Received localScreenShareReady from publisher:", data);
-      console.log("[Room] Local participant info:", this.localParticipant?.getInfo());
-
-      const eventData = {
-        ...data,
-        participant: this.localParticipant?.getInfo(),
-        roomId: this.id,
-      };
-
-      console.log("[Room] About to emit localScreenShareReady with data:", eventData);
-      console.log("[Room] EventEmitter listeners count:", this.listenerCount("localScreenShareReady"));
-
-      this.emit("localScreenShareReady", eventData);
-
-      console.log("[Room] localScreenShareReady event emitted to client");
-    });
-
-    // Listen for screen share stopped event
-    publisher.on("screenShareStopped", (data: any) => {
-      if (this.localParticipant) {
-        this.localParticipant.isScreenSharing = false;
-      }
-      this.emit("screenShareStopped", {
-        ...data,
-        participant: this.localParticipant?.getInfo(),
-        roomId: this.id,
-      });
-    });
+    // No need to listen to publisher events - Room subscribes directly from globalEventBus
+    // This eliminates event re-emission chain: StreamManager -> Publisher -> Room
 
     await publisher.startPublishing();
     this.localParticipant.setPublisher(publisher);
@@ -1122,15 +1082,8 @@ export class Room extends EventEmitter {
       subscriber.setAudioMixer(this.audioMixer);
     }
 
-    // Setup stream event forwarding
-    subscriber.on("remoteStreamReady", (data: any) => {
-      console.log("[Room] 📢 Emitting remoteStreamReady event for:", participant.userId);
-      this.emit("remoteStreamReady", {
-        ...data,
-        participant: participant.getInfo(),
-        roomId: this.id,
-      });
-    });
+    // No need to listen to subscriber events - Room subscribes directly from globalEventBus
+    // This eliminates event re-emission: Subscriber -> Room
 
     console.log("[Room] Starting subscriber for:", participant.userId);
     await subscriber.start();
@@ -1150,8 +1103,6 @@ export class Room extends EventEmitter {
    * Handle server events from publisher
    */
   private async _handleServerEvent(event: ServerEvent): Promise<void> {
-    console.log("-----Received server event----", event);
-
     if (event.type === "join") {
       const joinEvent = event as any;
       const joinedParticipant = joinEvent.participant;
@@ -1451,6 +1402,88 @@ export class Room extends EventEmitter {
   }
 
   /**
+   * Setup global event listeners - Subscribe directly from globalEventBus
+   * This eliminates event chain: StreamManager -> Publisher -> Room
+   */
+  private _setupGlobalEventListeners(): void {
+    // Bind handlers to preserve 'this' context
+    const handleServerEvent = async (event: ServerEvent) => {
+      console.log("[Room] Received serverEvent from GlobalEventBus:", event);
+      await this._handleServerEvent(event);
+    };
+
+    const handleLocalStreamReady = (data: any) => {
+      this.emit("localStreamReady", {
+        ...data,
+        participant: this.localParticipant?.getInfo(),
+        roomId: this.id,
+      });
+    };
+
+    const handleLocalScreenShareReady = (data: any) => {
+      console.log("[Room] Received localScreenShareReady from globalEventBus:", data);
+      this.emit("localScreenShareReady", {
+        ...data,
+        participant: this.localParticipant?.getInfo(),
+        roomId: this.id,
+      });
+    };
+
+    const handleScreenShareStopped = () => {
+      if (this.localParticipant) {
+        this.localParticipant.isScreenSharing = false;
+      }
+      this.emit("screenShareStopped", {
+        participant: this.localParticipant?.getInfo(),
+        roomId: this.id,
+      });
+    };
+
+    const handleRemoteStreamReady = (data: any) => {
+      // Find participant by streamId
+      const participant = Array.from(this.participants.values()).find(
+        p => p.streamId === data.streamId
+      );
+
+      if (participant) {
+        console.log("[Room] 📢 Emitting remoteStreamReady event for:", participant.userId);
+        this.emit("remoteStreamReady", {
+          ...data,
+          participant: participant.getInfo(),
+          roomId: this.id,
+        });
+      }
+    };
+
+    // Subscribe to global events
+    globalEventBus.on(GlobalEvents.SERVER_EVENT, handleServerEvent);
+    globalEventBus.on(GlobalEvents.LOCAL_STREAM_READY, handleLocalStreamReady);
+    globalEventBus.on(GlobalEvents.LOCAL_SCREEN_SHARE_READY, handleLocalScreenShareReady);
+    globalEventBus.on(GlobalEvents.SCREEN_SHARE_STOPPED, handleScreenShareStopped);
+    globalEventBus.on(GlobalEvents.REMOTE_STREAM_READY, handleRemoteStreamReady);
+
+    // Store cleanup functions
+    this.globalEventCleanups.push(
+      () => globalEventBus.off(GlobalEvents.SERVER_EVENT, handleServerEvent),
+      () => globalEventBus.off(GlobalEvents.LOCAL_STREAM_READY, handleLocalStreamReady),
+      () => globalEventBus.off(GlobalEvents.LOCAL_SCREEN_SHARE_READY, handleLocalScreenShareReady),
+      () => globalEventBus.off(GlobalEvents.SCREEN_SHARE_STOPPED, handleScreenShareStopped),
+      () => globalEventBus.off(GlobalEvents.REMOTE_STREAM_READY, handleRemoteStreamReady),
+    );
+
+    console.log("[Room] ✅ Global event listeners setup complete");
+  }
+
+  /**
+   * Cleanup global event listeners
+   */
+  private _cleanupGlobalEventListeners(): void {
+    this.globalEventCleanups.forEach(cleanup => cleanup());
+    this.globalEventCleanups = [];
+    console.log("[Room] ✅ Global event listeners cleaned up");
+  }
+
+  /**
    * Cleanup media connections
    */
   private async _cleanupMediaConnections(): Promise<void> {
@@ -1495,52 +1528,11 @@ export class Room extends EventEmitter {
   }
 
   /**
-   * Setup stream event forwarding for existing participants
+   * Note: Stream event forwarding is now handled via globalEventBus
+   * Publisher and Subscriber emit directly to globalEventBus
+   * Room and MeetingClient subscribe from globalEventBus
+   * This eliminates the need for local event forwarding methods
    */
-  private _setupStreamEventForwarding(): void {
-    // Setup for local participant if exists
-    if (this.localParticipant && this.localParticipant.publisher) {
-      this.localParticipant.publisher.on("localStreamReady", (data: any) => {
-        this.emit("localStreamReady", {
-          ...data,
-          participant: this.localParticipant?.getInfo(),
-          roomId: this.id,
-        });
-      });
-    }
-
-    // Setup for remote participants
-    for (const participant of this.participants.values()) {
-      if (participant.subscriber && !participant.isLocal) {
-        participant.subscriber.on("remoteStreamReady", (data: any) => {
-          this.emit("remoteStreamReady", {
-            ...data,
-            participant: participant.getInfo(),
-            roomId: this.id,
-          });
-        });
-      }
-    }
-  }
-
-  /**
-   * Remove stream event forwarding
-   */
-  // @ts-expect-error - Defined for future use
-  private _removeStreamEventForwarding(): void {
-    // Remove local participant events
-    if (this.localParticipant && this.localParticipant.publisher) {
-      this.localParticipant.publisher.removeAllListeners("localStreamReady");
-    }
-
-    // Remove remote participants events
-    for (const participant of this.participants.values()) {
-      if (participant.subscriber && !participant.isLocal) {
-        participant.subscriber.removeAllListeners("remoteStreamReady");
-        participant.subscriber.removeAllListeners("streamRemoved");
-      }
-    }
-  }
 
   /**
    * Setup sub room from API data

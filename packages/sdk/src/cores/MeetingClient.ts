@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from '../events/EventEmitter';
+import { globalEventBus, GlobalEvents } from '../events/GlobalEventBus';
 import { Room } from './Room';
 import { ApiClient } from '../api/ApiClient';
 import type {
@@ -43,6 +44,9 @@ export class ErmisClient extends EventEmitter {
   // Media configuration
   private mediaConfig: MediaConfig;
 
+  // Global event subscriptions cleanup
+  private globalEventCleanups: Array<() => void> = [];
+
   /**
    * Static factory method for backward compatibility
    */
@@ -74,7 +78,7 @@ export class ErmisClient extends EventEmitter {
     PARTICIPANT_PINNED_FOR_EVERYONE: 'participantPinnedForEveryone',
     PARTICIPANT_UNPINNED_FOR_EVERYONE: 'participantUnpinnedForEveryone',
     REMOTE_HAND_RAISING_STATUS_CHANGED: 'remoteHandRaisingStatusChanged',
-    CUSTOM : 'custom',
+    CUSTOM: 'custom',
     ERROR: 'error',
   };
 
@@ -188,6 +192,7 @@ export class ErmisClient extends EventEmitter {
     };
 
     this._setupEventHandlers();
+    this._setupGlobalEventListeners();
   }
 
   /**
@@ -461,12 +466,14 @@ export class ErmisClient extends EventEmitter {
         this._setupRoomEvents(room);
       }
 
+      // Set currentRoom BEFORE join so event handlers can access it
+      this.state.currentRoom = room;
+
       // Join the room with optional custom media stream
       const joinResult = await room.join(this.state.user!.id, mediaStream);
 
-      // Update state
-      this.state.currentRoom = room;
-      console.warn("Current room after join:", this.state.currentRoom?.getInfo());
+      // Update state after join completes
+      console.log("Room joined successfully:", room.getInfo());
       this.state.rooms.set(room.id, room);
 
       this.emit('roomJoined', { room, joinResult });
@@ -833,8 +840,14 @@ export class ErmisClient extends EventEmitter {
    */
   async cleanup(): Promise<void> {
     try {
+      console.log('[MeetingClient] Starting cleanup...');
+
+      // Cleanup global event listeners
+      this._cleanupGlobalEventListeners();
+
       // Leave current room
       if (this.state.currentRoom) {
+        console.log('[MeetingClient] Leaving current room...');
         await this.state.currentRoom.leave();
       }
 
@@ -857,13 +870,140 @@ export class ErmisClient extends EventEmitter {
   }
 
   /**
+   * Soft cleanup - only remove listeners without leaving room
+   * Use this when React component unmounts but user is still in meeting
+   */
+  cleanupListeners(): void {
+    console.log('[MeetingClient] Cleaning up listeners only (soft cleanup)...');
+
+    // Cleanup global event listeners
+    this._cleanupGlobalEventListeners();
+
+    // Remove all local listeners
+    this.removeAllListeners();
+
+    console.log('[MeetingClient] Listener cleanup completed');
+  }
+
+  /**
+   * Alias for cleanup() - for backward compatibility
+   */
+  async destroy(): Promise<void> {
+    return this.cleanup();
+  }
+
+  /**
+   * Setup global event listeners - Listen directly from globalEventBus
+   * This bypasses Room layer for better performance and cleaner architecture
+   */
+  private _setupGlobalEventListeners(): void {
+    // Handle server events
+    const handleServerEvent = async (event: any) => {
+      console.log('[MeetingClient] Received SERVER_EVENT from globalEventBus:', event);
+      // Server events are already handled by Room, just log for debugging
+    };
+
+    // Handle local stream ready
+    const handleLocalStreamReady = (data: any) => {
+      console.log('[MeetingClient] Received LOCAL_STREAM_READY from globalEventBus', {
+        hasCurrentRoom: !!this.state.currentRoom,
+        dataStreamId: data.streamId,
+      });
+
+      if (!this.state.currentRoom) {
+        console.warn('[MeetingClient] No currentRoom when LOCAL_STREAM_READY received');
+        return;
+      }
+
+      console.log('[MeetingClient] ✅ Emitting localStreamReady to UI');
+
+      // Enrich with room context and emit
+      this.emit('localStreamReady', {
+        ...data,
+        participant: this.state.currentRoom.localParticipant?.getInfo(),
+        roomId: this.state.currentRoom.id,
+      });
+    };
+
+    // Handle local screen share ready
+    const handleLocalScreenShareReady = (data: any) => {
+      console.log('[MeetingClient] Received LOCAL_SCREEN_SHARE_READY from globalEventBus');
+
+      if (!this.state.currentRoom) return;
+
+      this.emit('localScreenShareReady', {
+        ...data,
+        participant: this.state.currentRoom.localParticipant?.getInfo(),
+        roomId: this.state.currentRoom.id,
+      });
+    };
+
+    // Handle remote stream ready
+    const handleRemoteStreamReady = (data: any) => {
+      console.log('[MeetingClient] Received REMOTE_STREAM_READY from globalEventBus', {
+        streamId: data.streamId,
+        subscribeType: data.subscribeType,
+        hasCurrentRoom: !!this.state.currentRoom,
+      });
+
+      if (!this.state.currentRoom) {
+        console.warn('[MeetingClient] No currentRoom, cannot process REMOTE_STREAM_READY');
+        return;
+      }
+
+      // Find participant by streamId
+      const participant = Array.from(this.state.currentRoom.participants.values()).find(
+        p => p.streamId === data.streamId
+      );
+
+      if (participant) {
+        console.log('[MeetingClient] ✅ Found participant for stream:', participant.userId);
+        this.emit('remoteStreamReady', {
+          ...data,
+          participant: participant.getInfo(),
+          roomId: this.state.currentRoom.id,
+        });
+      } else {
+        console.warn('[MeetingClient] ❌ Participant not found for streamId:', data.streamId, {
+          participantsCount: this.state.currentRoom.participants.size,
+          participantIds: Array.from(this.state.currentRoom.participants.keys()),
+        });
+      }
+    };
+
+    // Subscribe to global events
+    globalEventBus.on(GlobalEvents.SERVER_EVENT, handleServerEvent);
+    globalEventBus.on(GlobalEvents.LOCAL_STREAM_READY, handleLocalStreamReady);
+    globalEventBus.on(GlobalEvents.LOCAL_SCREEN_SHARE_READY, handleLocalScreenShareReady);
+    globalEventBus.on(GlobalEvents.REMOTE_STREAM_READY, handleRemoteStreamReady);
+
+    // Store cleanup functions
+    this.globalEventCleanups.push(
+      () => globalEventBus.off(GlobalEvents.SERVER_EVENT, handleServerEvent),
+      () => globalEventBus.off(GlobalEvents.LOCAL_STREAM_READY, handleLocalStreamReady),
+      () => globalEventBus.off(GlobalEvents.LOCAL_SCREEN_SHARE_READY, handleLocalScreenShareReady),
+      () => globalEventBus.off(GlobalEvents.REMOTE_STREAM_READY, handleRemoteStreamReady),
+    );
+
+    console.log('[MeetingClient] ✅ Global event listeners setup complete');
+  }
+
+  /**
+   * Cleanup global event listeners
+   */
+  private _cleanupGlobalEventListeners(): void {
+    this.globalEventCleanups.forEach(cleanup => cleanup());
+    this.globalEventCleanups = [];
+    console.log('[MeetingClient] ✅ Global event listeners cleaned up');
+  }
+
+  /**
    * Setup event handlers for rooms
+   * Keep only non-media events that are still emitted by Room directly
    */
   private _setupRoomEvents(room: Room): void {
-    // Forward room events to client
+    // Forward room-specific events (not media events)
     const eventsToForward = [
-      'roomJoined',
-      'roomLeft',
       'participantAdded',
       'participantRemoved',
       'participantPinned',
@@ -871,9 +1011,6 @@ export class ErmisClient extends EventEmitter {
       'participantPinnedForEveryone',
       'participantUnpinnedForEveryone',
       'subRoomCreated',
-      'localStreamReady',
-      'localScreenShareReady',
-      'remoteStreamReady',
       'streamRemoved',
       'audioToggled',
       'videoToggled',
@@ -899,7 +1036,7 @@ export class ErmisClient extends EventEmitter {
 
     eventsToForward.forEach((event) => {
       room.on(event, (data: any) => {
-        console.log(`[MeetingClient] Forwarding event: ${event}`, data);
+        console.log(`[MeetingClient] Forwarding room event: ${event}`, data);
         this.emit(event, data);
       });
     });

@@ -42,3 +42,7 @@ export type * from "./types/media/mediaDevices.types";
 // Export event emitter
 export { EventEmitter } from "./events/EventEmitter";
 
+// Export global event bus for advanced use cases
+export { globalEventBus, GlobalEvents } from "./events/GlobalEventBus";
+export type { GlobalEventMap } from "./events/GlobalEventBus";
+
