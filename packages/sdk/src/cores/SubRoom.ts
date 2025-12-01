@@ -49,6 +49,7 @@ export class SubRoom extends EventEmitter {
       roomId: this.id,
       name: memberData.name,
       isLocal,
+      permissions: memberData.permissions,
     });
 
     this.participants.set(participant.userId, participant);

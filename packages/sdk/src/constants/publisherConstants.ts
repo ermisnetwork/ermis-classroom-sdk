@@ -130,12 +130,50 @@ export const SUB_STREAMS: Record<string, SubStream> = {
     },
 };
 
-export function getSubStreams(streamType: string): SubStream[] {
+// export function getSubStreams(streamType: string): SubStream[] {
+//     console.log("Getting sub streams for type:", streamType);
+//     if (streamType === StreamTypes.SCREEN_SHARE) {
+//         return [SUB_STREAMS.SCREEN_SHARE_AUDIO, SUB_STREAMS.SCREEN_SHARE_720P];
+//     } else if (streamType === StreamTypes.CAMERA) {
+//         return [
+//             SUB_STREAMS.MEETING_CONTROL,
+//             SUB_STREAMS.MIC_AUDIO,
+//             SUB_STREAMS.VIDEO_360P,
+//             SUB_STREAMS.VIDEO_720P,
+//         ];
+//     } else {
+//         throw new Error(`Invalid publisher type, cannot get sub streams for type: ${streamType}`);
+//     }
+// }
+
+export function getSubStreams(
+    streamType: string,
+    permissions: {
+        can_publish: boolean;
+        can_publish_sources: [string, boolean][];
+    }
+): SubStream[] {
+
     console.log("Getting sub streams for type:", streamType);
+
+    
+    if (!permissions.can_publish) {
+        return [];
+    }
+
+   
+    const allowedSources = new Map(permissions.can_publish_sources);
+
+    
+    let baseSubStreams: SubStream[];
+
     if (streamType === StreamTypes.SCREEN_SHARE) {
-        return [SUB_STREAMS.SCREEN_SHARE_AUDIO, SUB_STREAMS.SCREEN_SHARE_720P];
+        baseSubStreams = [
+            SUB_STREAMS.SCREEN_SHARE_AUDIO,
+            SUB_STREAMS.SCREEN_SHARE_720P,
+        ];
     } else if (streamType === StreamTypes.CAMERA) {
-        return [
+        baseSubStreams = [
             SUB_STREAMS.MEETING_CONTROL,
             SUB_STREAMS.MIC_AUDIO,
             SUB_STREAMS.VIDEO_360P,
@@ -144,7 +182,21 @@ export function getSubStreams(streamType: string): SubStream[] {
     } else {
         throw new Error(`Invalid publisher type, cannot get sub streams for type: ${streamType}`);
     }
+
+   
+    const filtered = baseSubStreams.filter((sub) => {
+        if (sub.channelName === ChannelName.MEETING_CONTROL) {
+            return true; 
+        }
+
+        const key = sub.channelName; 
+        const allowed = allowedSources.get(key);
+        return allowed === true;
+    });
+
+    return filtered;
 }
+
 
 export const MEETING_EVENTS = {
     // Join / Leave room

@@ -13,6 +13,7 @@ import type {
 } from "../types/core/participant.types";
 import type { Publisher } from "../media/publisher/Publisher";
 import type { Subscriber } from "../media/subscriber/Subscriber";
+import { ParticipantPermissions } from "../types/media/publisher.types";
 
 export class Participant extends EventEmitter {
   // Identity
@@ -43,7 +44,7 @@ export class Participant extends EventEmitter {
 
   // Status
   connectionStatus: ParticipantConnectionStatus = "disconnected";
-
+  permissions: ParticipantPermissions;
   constructor(config: ParticipantConfig) {
     super();
 
@@ -57,6 +58,14 @@ export class Participant extends EventEmitter {
 
     this.isScreenSharing = config.isScreenSharing || false;
     this.subRoomId = config.subRoomId || null;
+    this.permissions = config.permissions || {
+      can_subscribe: true,
+      can_publish: true,
+      can_publish_data: true,
+      can_publish_sources: [["mic_48k", true], ["video_360p", true], ["video_720p", true], ["screen_share_720p", true], ["screen_share_1080p", true], ["screen_share_audio", true]],
+      hidden: false,
+      can_update_metadata: false,
+    };
   }
 
   /**
@@ -126,7 +135,7 @@ export class Participant extends EventEmitter {
     if (this.isLocal || !this.subscriber) return;
 
     try {
-      await this.subscriber.toggleAudio();
+      this.subscriber.toggleAudio();
       this.isAudioEnabled = !this.isAudioEnabled;
       this.emit("remoteAudioToggled", {
         participant: this,
@@ -398,6 +407,7 @@ export class Participant extends EventEmitter {
       isScreenSharing: this.isScreenSharing,
       connectionStatus: this.connectionStatus,
       name: this.name,
+      participantPermissions: this.permissions
     };
   }
 }
