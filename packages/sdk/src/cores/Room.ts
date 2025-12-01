@@ -935,6 +935,7 @@ export class Room extends EventEmitter {
         },
         audioWorkletUrl: "/workers/audio-worklet.js",
         mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
+        protocol: "webtransport",
       });
 
       // Add to audio mixer if has audio
@@ -1058,6 +1059,7 @@ export class Room extends EventEmitter {
       streamId: participant.streamId,
       roomId: this.id,
     });
+    console.log("[Room] Media config protocol:", this.mediaConfig.subscribeProtocol);
 
     const subscriber = new Subscriber({
       subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
@@ -1067,6 +1069,7 @@ export class Room extends EventEmitter {
       host: this.mediaConfig.hostNode,
       protocol: this.mediaConfig.subscribeProtocol as any,
       subscribeType: StreamTypes.CAMERA,
+      // protocol: "webtransport",
 
       onStatus: (_msg, isError) => {
         console.log("[Room] Subscriber status for", participant.userId, ":", isError ? "FAILED" : "CONNECTED");
