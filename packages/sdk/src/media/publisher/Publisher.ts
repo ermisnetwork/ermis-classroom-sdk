@@ -727,6 +727,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       console.log(`[Publisher] Creating screen share streams...`);
       await this.streamManager.addStream(ChannelName.SCREEN_SHARE_720P);
+      
       if (hasAudio) {
         await this.streamManager.addStream(ChannelName.SCREEN_SHARE_AUDIO);
       }

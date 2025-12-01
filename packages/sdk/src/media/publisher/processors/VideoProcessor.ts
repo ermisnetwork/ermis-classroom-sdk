@@ -261,6 +261,9 @@ export class VideoProcessor extends EventEmitter<{
         const encoderNames = this.subStreams.map((s) => s.name);
         await this.videoEncoderManager.encodeFrame(frame, encoderNames);
 
+        // !!!Close frame to free resources
+        frame.close();
+        
         this.frameCounter++;
       }
       console.log("[VideoProcessor] processFrames() ended, total frames:", frameCount);

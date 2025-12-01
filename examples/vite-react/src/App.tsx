@@ -10,7 +10,7 @@ function App() {
   // const [publishProtocol, setPublishProtocol] = useState("webtransport");
   const [subscribeProtocol, setSubscribeProtocol] = useState("websocket");
   // const [subscribeProtocol, setSubscribeProtocol] = useState("webtransport");
-  const [apiHost, setApiHost] = useState("daibo.ermis.network:9935");
+  const [apiHost, setApiHost] = useState("daibo.ermis.network:9934");
 
   return (
     <ErmisClassroomProvider

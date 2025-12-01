@@ -135,7 +135,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       screenShareWorker:
         config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev",
       isOwnStream: config.isOwnStream || false,
-      protocol: config.protocol || "websocket",
+      protocol: config.protocol || "webtransport",
       subscribeType: config.subscribeType || "camera",
       mediaWorkerUrl: config.mediaWorkerUrl || "/workers/media-worker-dev.js",
       audioWorkletUrl: config.audioWorkletUrl || "/workers/audio-worklet.js",
@@ -503,6 +503,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     if (!this.workerManager) {
       throw new Error("Worker manager not initialized");
     }
+    console.warn("[Subscriber] Attaching streams using protocol:", this.protocol);
 
     try {
       if (this.protocol === "webtransport") {

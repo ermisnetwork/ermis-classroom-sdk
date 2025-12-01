@@ -66,15 +66,16 @@ export class WebTransportManager extends EventEmitter<WebTransportManagerEvents>
       this.emit("connected", undefined);
 
       // Listen for connection closure
-      this.webTransport.closed
-        .then(() => {
-          console.log("WebTransport closed gracefully");
-          this.handleDisconnection();
-        })
-        .catch((error) => {
-          console.error("WebTransport closed with error:", error);
-          this.handleDisconnection(error);
-        });
+      // ? temporary disable close handler for debugging
+      // this.webTransport.closed
+      //   .then(() => {
+      //     console.log("WebTransport closed gracefully");
+      //     this.handleDisconnection();
+      //   })
+      //   .catch((error) => {
+      //     console.error("WebTransport closed with error:", error);
+      //     this.handleDisconnection(error);
+      //   });
     } catch (error) {
       console.error("Failed to connect to WebTransport:", error);
       this.handleConnectionError(error);

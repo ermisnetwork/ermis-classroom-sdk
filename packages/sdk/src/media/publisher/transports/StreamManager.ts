@@ -183,8 +183,10 @@ export class StreamManager extends EventEmitter<{
       return;
     }
 
+    //? create data channel in WebRTC case!
+
     // if (this.isWebRTC) {
-    //   await this.createDataChannelDirect(channelName);
+    //   await this.wec;
     // } else {
     await this.createBidirectionalStream(channelName);
     // }

@@ -51,7 +51,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
     subscribeType: SubscribeType = "camera"
   ): Promise<void> {
     try {
-      console.log("Initializing media worker:", this.workerUrl);
+      console.warn("[Subscriber] Initializing media worker:", this.workerUrl, "with subscribeType:", subscribeType);
 
       // Create worker with cache busting
       this.worker = new Worker(`${this.workerUrl}?t=${Date.now()}`, {
