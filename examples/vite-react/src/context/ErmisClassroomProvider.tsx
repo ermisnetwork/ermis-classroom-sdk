@@ -454,7 +454,7 @@ export const ErmisClassroomProvider = ({
     // If there's a screen share, pin the first one
     if (screenShareStreams.size > 0) {
       const firstScreenShareUserId = Array.from(screenShareStreams.keys())[0];
-      const screenShareId = `${firstScreenShareUserId}-screenshare`;
+      const screenShareId = `${firstScreenShareUserId}-screen`;
 
       // Only pin if not already pinned
       if (currentRoom.pinnedParticipant?.userId !== screenShareId) {
@@ -465,7 +465,7 @@ export const ErmisClassroomProvider = ({
     } else {
       // No screen shares, unpin if currently pinned to a screen share
       const pinnedId = currentRoom.pinnedParticipant?.userId;
-      if (pinnedId && pinnedId.endsWith('-screenshare') && pinType === 'local') {
+      if (pinnedId && pinnedId.endsWith('-screen') && pinType === 'local') {
         currentRoom.unpinParticipant();
         setPinType(null);
         setParticipants(prev => new Map(prev)); // Force re-render

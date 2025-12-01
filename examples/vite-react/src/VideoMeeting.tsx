@@ -177,7 +177,7 @@ export default function VideoMeeting({
 
     // Set streams for active screen shares
     screenShareStreams?.forEach((data: any, userId: any) => {
-      const videoId = `${userId}-screenshare`;
+      const videoId = `${userId}-screen`;
       const videoElement = videoRefs.current.get(videoId);
       if (videoElement && data.stream) {
         console.log(`Setting srcObject for ${videoId}:`, data.stream);
@@ -196,8 +196,8 @@ export default function VideoMeeting({
     // Cleanup: Remove srcObject from video elements that are no longer in screenShareStreams
     return () => {
       videoRefs.current.forEach((videoElement, videoId) => {
-        if (videoId.endsWith('-screenshare')) {
-          const userId = videoId.replace('-screenshare', '');
+        if (videoId.endsWith('-screen')) {
+          const userId = videoId.replace('-screen', '');
           if (!screenShareStreams?.has(userId)) {
             console.log(`Cleaning up video element for ${videoId}`);
             if (videoElement.srcObject) {
@@ -520,7 +520,7 @@ export default function VideoMeeting({
     const screenShareTiles = Array.from(
       screenShareStreams?.entries() || [],
       ([screenShareUserId, data]: [string, ScreenShareData]) => ({
-        userId: `${screenShareUserId}-screenshare`,
+        userId: `${screenShareUserId}-screen`,
         isLocal: screenShareUserId === userId,
         isAudioEnabled: false,
         isVideoEnabled: true,

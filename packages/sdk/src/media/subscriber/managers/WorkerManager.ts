@@ -12,6 +12,7 @@ import EventEmitter from "../../../events/EventEmitter";
 import type {
   WorkerMessageData,
   QualityLevel,
+  SubscribeType,
 } from "../../../types/media/subscriber.types";
 
 /**
@@ -47,7 +48,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
    */
   async init(
     channelPort: MessagePort,
-    subscribeType: "camera" | "screenshare" = "camera"
+    subscribeType: SubscribeType = "camera"
   ): Promise<void> {
     try {
       console.log("Initializing media worker:", this.workerUrl);

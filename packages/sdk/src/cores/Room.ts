@@ -915,21 +915,24 @@ export class Room extends EventEmitter {
    */
   async handleRemoteScreenShare(
     participantId: string,
-    screenStreamId: string,
+    _screenStreamId: string,
     isStarting: boolean,
   ): Promise<void> {
     const participant = this.participants.get(participantId);
     if (!participant) return;
 
     if (isStarting) {
-      // Create subscriber for screen share
       const screenSubscriber = new Subscriber({
-        subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${screenStreamId}`,
-        streamId: screenStreamId,
+        subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
+        streamId: participant.streamId,
         roomId: this.id,
-        host: this.mediaConfig.host,
-        isScreenSharing: true,
+        host: this.mediaConfig.hostNode,
+        protocol: this.mediaConfig.subscribeProtocol as any,
+        subscribeType: StreamTypes.SCREEN_SHARE,
         streamOutputEnabled: true,
+        onStatus: (_msg, isError) => {
+          participant.setConnectionStatus(isError ? "failed" : "connected");
+        },
         audioWorkletUrl: "/workers/audio-worklet.js",
         mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
       });
@@ -939,20 +942,16 @@ export class Room extends EventEmitter {
         screenSubscriber.setAudioMixer(this.audioMixer);
       }
 
-      // No need to listen to subscriber events - Room subscribes directly from globalEventBus
-
       await screenSubscriber.start();
 
-      // Store reference
-      participant.screenSubscriber = screenSubscriber;
+      (participant as any).screenSubscriber = screenSubscriber;
       participant.isScreenSharing = true;
 
       this.emit("remoteScreenShareStarted", { room: this, participant });
     } else {
-      // Stop screen share
-      if (participant.screenSubscriber) {
-        participant.screenSubscriber.stop();
-        participant.screenSubscriber = null;
+      if ((participant as any).screenSubscriber) {
+        (participant as any).screenSubscriber.stop();
+        (participant as any).screenSubscriber = null;
       }
 
       participant.isScreenSharing = false;
@@ -1446,12 +1445,23 @@ export class Room extends EventEmitter {
       );
 
       if (participant) {
-        console.log("[Room] 📢 Emitting remoteStreamReady event for:", participant.userId);
-        this.emit("remoteStreamReady", {
-          ...data,
-          participant: participant.getInfo(),
-          roomId: this.id,
-        });
+        const isScreenShare = data.subscribeType === "screen_share";
+
+        if (isScreenShare) {
+          console.log("[Room] 📢 Emitting remoteScreenShareStreamReady for:", participant.userId);
+          this.emit("remoteScreenShareStreamReady", {
+            ...data,
+            participant: participant.getInfo(),
+            roomId: this.id,
+          });
+        } else {
+          console.log("[Room] 📢 Emitting remoteStreamReady for:", participant.userId);
+          this.emit("remoteStreamReady", {
+            ...data,
+            participant: participant.getInfo(),
+            roomId: this.id,
+          });
+        }
       }
     };
 

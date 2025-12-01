@@ -692,9 +692,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       subscribeType: this.config.subscribeType,
     };
 
-    // Emit to global event bus
     globalEventBus.emit(GlobalEvents.REMOTE_STREAM_READY, eventData);
-
     console.log("[Subscriber] ✅ REMOTE_STREAM_READY emitted successfully");
   }
 

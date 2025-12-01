@@ -724,28 +724,22 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       this.isScreenSharing = true;
 
-      // Send START_SCREEN_SHARE event
-      await this.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE);
-
-      // Create streams for screen share BEFORE starting encoding
-      // This ensures streams are ready when processors try to send config
-
 
       console.log(`[Publisher] Creating screen share streams...`);
-      // todo: createdatachanneldirect
       await this.streamManager.addStream(ChannelName.SCREEN_SHARE_720P);
       if (hasAudio) {
         await this.streamManager.addStream(ChannelName.SCREEN_SHARE_AUDIO);
       }
       console.log(`[Publisher] Screen share streams created successfully`);
 
-      // Start video encoding
       await this.startScreenVideoCapture();
 
       // Start audio if available
       if (hasAudio) {
         await this.startScreenAudioStreaming();
       }
+
+      await this.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE);
 
       this.updateStatus(`Screen sharing started (Video: ${hasVideo}, Audio: ${hasAudio})`);
 

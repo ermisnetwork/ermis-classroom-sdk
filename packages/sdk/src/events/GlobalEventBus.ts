@@ -22,6 +22,7 @@ export enum GlobalEvents {
 
     // Subscriber media events
     REMOTE_STREAM_READY = "subscriber:remoteStreamReady",
+    REMOTE_SCREEN_SHARE_READY = "subscriber:remoteScreenShareReady",
     REMOTE_VIDEO_INITIALIZED = "subscriber:remoteVideoInitialized",
     REMOTE_AUDIO_INITIALIZED = "subscriber:remoteAudioInitialized",
 
@@ -91,6 +92,21 @@ export interface GlobalEventMap extends Record<string, unknown> {
         stream: MediaStream;
         streamId: string;
         subscribeType: string;
+    };
+
+    [GlobalEvents.REMOTE_SCREEN_SHARE_READY]: {
+        stream: MediaStream;
+        videoOnlyStream: MediaStream;
+        streamId: string;
+        config: {
+            codec: string;
+            width: number;
+            height: number;
+            framerate: number;
+            bitrate: number;
+        };
+        hasAudio: boolean;
+        hasVideo: boolean;
     };
 
     [GlobalEvents.REMOTE_VIDEO_INITIALIZED]: {

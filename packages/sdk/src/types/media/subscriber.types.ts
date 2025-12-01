@@ -14,7 +14,7 @@ export type QualityLevel = '360p' | '720p' | '1080p';
 export type SubscriberProtocol = 'webtransport' | 'webrtc' | 'websocket';
 
 // Subscribe type (for different stream types)
-export type SubscribeType = 'camera' | 'screenshare';
+export type SubscribeType = 'camera' | 'screen_share';
 
 // Stream mode for WebTransport
 export type StreamMode = 'single' | 'multi';
