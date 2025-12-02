@@ -18,7 +18,6 @@ interface ErmisClassroomConfig {
   publishProtocol?: string
   subscribeProtocol?: string
   hostNode?: string
-  apiHost?: string
 
 }
 
@@ -50,7 +49,6 @@ export const ErmisClassroomProvider = ({
       publishProtocol: config.publishProtocol,
       subscribeProtocol: config.subscribeProtocol,
       hostNode: config.hostNode,
-      apiHost: config.apiHost,
     }),
     [
       config.host,
@@ -62,7 +60,6 @@ export const ErmisClassroomProvider = ({
       config.publishProtocol,
       config.subscribeProtocol,
       config.hostNode,
-      config.apiHost,
     ]
   );
   const cfgKey = useMemo(() => JSON.stringify(cfg), [cfg]);

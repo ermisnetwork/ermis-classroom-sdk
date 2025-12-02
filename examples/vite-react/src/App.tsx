@@ -21,7 +21,6 @@ function App() {
         publishProtocol: publishProtocol,
         subscribeProtocol: subscribeProtocol,
         hostNode: selectedNode,
-        apiHost: apiHost,
       }}
       videoRef={videoRef}
     >
