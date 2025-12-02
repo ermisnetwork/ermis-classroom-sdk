@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     port: 3001,
     open: true,
-    allowedHosts: ['meet.xoithit.lol', 'admin.bandia.vn', '4000.bandia.vn', 'xoithit.lol'],
+    allowedHosts: true,
   },
   base: '/',
   build: {

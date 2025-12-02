@@ -1,0 +1,57 @@
+{
+  "name": "@ermisnetwork/vcr-client",
+  "version": "0.0.2",
+  "description": "TypeScript Client for Virtual Classroom API with full type support and API key authentication",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "vcr",
+    "virtual-classroom",
+    "sdk",
+    "typescript",
+    "api",
+    "classroom",
+    "education",
+    "livekit",
+    "video-conferencing"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist .turbo node_modules"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ermisnetwork/ermis-classroom-sdk/tree/main/packages/vcr-client",
+    "directory": "packages/vcr-client"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  }
+}
