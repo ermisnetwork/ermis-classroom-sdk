@@ -1,7 +1,7 @@
 // signTypedRs256.ts
 import fs from "fs";
 import jwt from "jsonwebtoken";
-import {ParticipantPermissions} from "../types";
+import {ParticipantPermissions, RoomTokenType} from "../types";
 
 
 export interface TypedPayload {
@@ -39,7 +39,10 @@ export function signParticipantToken(
   } catch {
     // if an error occurs reading path, assume it's raw key string and continue
   }
-  const payloadCopy: Record<string, any> = {...payload};
+  const payloadCopy: Record<string, any> = {
+    ...payload,
+    type: RoomTokenType.PARTICIPANT,
+  };
 
   if (payloadCopy.exp && typeof payloadCopy.exp === "number") {
     if (payloadCopy.exp > 1e10) {

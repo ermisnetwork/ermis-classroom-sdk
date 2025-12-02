@@ -111,3 +111,8 @@ export enum ErrorCode {
   NETWORK_ERROR = "network_error",
   UNKNOWN_ERROR = "unknown_error",
 }
+
+export enum RoomTokenType {
+  PARTICIPANT = 'participant',
+  ROOM_SERVICE = 'room-service'
+}
