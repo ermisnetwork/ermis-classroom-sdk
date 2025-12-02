@@ -1,6 +1,6 @@
 {
   "name": "@ermisnetwork/ermis-classroom-sdk",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "TypeScript SDK for Ermis Classroom - Real-time video conferencing and collaboration",
   "license": "MIT",
   "type": "module",
