@@ -1,6 +1,6 @@
 {
   "name": "@ermisnetwork/ermis-classroom-patch-files",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Patch files including WASM modules, workers, and polyfills with Vite plugin",
   "license": "MIT",
   "type": "module",
