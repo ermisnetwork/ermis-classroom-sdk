@@ -46,6 +46,15 @@
   },
   "peerDependencies": {
     "vite": ">=6.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ermisnetwork/ermis-classroom-sdk",
+    "directory": "packages/patch-files"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
   }
 }
 

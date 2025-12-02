@@ -6,14 +6,24 @@ on:
       - main
     paths:
       - 'packages/**'
-      - 'examples/**'
-      - 'pnpm-workspace.yaml'
       - '.github/workflows/release.yml'
       - '!packages/**.md'
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
   packages: write
+  id-token: write
 
 jobs:
   release:
@@ -30,9 +40,26 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://npm.pkg.github.com'
+          scope: '@ermisnetwork'
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -42,78 +69,160 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump vcr-sdk version
+      - name: Determine version bump type
+        id: bump_type
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "type=${{ github.event.inputs.version_bump }}" >> $GITHUB_OUTPUT
+          else
+            echo "type=patch" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump SDK version
         id: version_sdk
         run: |
-          cd packages/vcr-sdk
+          cd packages/sdk
           OLD_VERSION=$(node -p "require('./package.json').version")
-          npm version patch --no-git-tag-version
+          npm version ${{ steps.bump_type.outputs.type }} --no-git-tag-version
           NEW_VERSION=$(node -p "require('./package.json').version")
           echo "old=$OLD_VERSION" >> $GITHUB_OUTPUT
           echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "SDK version: $OLD_VERSION → $NEW_VERSION"
 
-      - name: Bump vcr-client version
+      - name: Bump VCR Client version
         id: version_client
         run: |
           cd packages/vcr-client
           OLD_VERSION=$(node -p "require('./package.json').version")
-          npm version patch --no-git-tag-version
+          npm version ${{ steps.bump_type.outputs.type }} --no-git-tag-version
           NEW_VERSION=$(node -p "require('./package.json').version")
           echo "old=$OLD_VERSION" >> $GITHUB_OUTPUT
           echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "VCR Client version: $OLD_VERSION → $NEW_VERSION"
 
-      - name: Commit versions
+      - name: Bump Patch Files version
+        id: version_patch
         run: |
-          git add packages/vcr-sdk/package.json packages/vcr-client/package.json
-          git commit -m "chore: bump vcr-sdk to ${{ steps.version_sdk.outputs.new }} and vcr-client to ${{ steps.version_client.outputs.new }} [skip ci]"
+          cd packages/patch-files
+          OLD_VERSION=$(node -p "require('./package.json').version")
+          npm version ${{ steps.bump_type.outputs.type }} --no-git-tag-version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "old=$OLD_VERSION" >> $GITHUB_OUTPUT
+          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "Patch Files version: $OLD_VERSION → $NEW_VERSION"
+
+      - name: Commit version bumps
+        run: |
+          git add packages/sdk/package.json packages/vcr-client/package.json packages/patch-files/package.json
+          git commit -m "chore: release v${{ steps.version_sdk.outputs.new }} [skip ci]
+
+          - @ermisnetwork/ermis-classroom-sdk: ${{ steps.version_sdk.outputs.old }} → ${{ steps.version_sdk.outputs.new }}
+          - @ermisnetwork/vcr-client: ${{ steps.version_client.outputs.old }} → ${{ steps.version_client.outputs.new }}
+          - @ermisnetwork/ermis-classroom-patch-files: ${{ steps.version_patch.outputs.old }} → ${{ steps.version_patch.outputs.new }}"
           git push
 
-      - name: Build vcr-sdk
-        run: pnpm build --filter=@ermisnetwork/vcr-sdk...
+      - name: Build all packages
+        run: pnpm build --filter='./packages/*'
 
-      - name: Build vcr-client
-        run: pnpm build --filter=@ermisnetwork/vcr-client...
+      - name: Run tests
+        run: pnpm test --filter='./packages/*'
+        continue-on-error: true
 
-      - name: Create vcr-sdk archive
-        run: |
-          cd packages/vcr-sdk/dist
-          tar -czf ../../../vcr-sdk-${{ steps.version_sdk.outputs.new }}.tar.gz .
-
-      - name: Create vcr-client archive
-        run: |
-          cd packages/vcr-client/dist
-          tar -czf ../../../vcr-client-${{ steps.version_client.outputs.new }}.tar.gz .
-
-      - name: Create Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version_sdk.outputs.new }}
-          release_name: v${{ steps.version_sdk.outputs.new }}
+          name: Release v${{ steps.version_sdk.outputs.new }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
           body: |
-            ## Release v${{ steps.version_sdk.outputs.new }}
+            ## 📦 Packages Released
 
-            ### VCR SDK v${{ steps.version_sdk.outputs.new }}
+            ### @ermisnetwork/ermis-classroom-sdk v${{ steps.version_sdk.outputs.new }}
+            TypeScript SDK for Ermis Classroom - Real-time video conferencing and collaboration
+
+            **Installation:**
             ```bash
-            pnpm add @ermisnetwork/vcr-sdk@${{ steps.version_sdk.outputs.new }}
+            npm install @ermisnetwork/ermis-classroom-sdk@${{ steps.version_sdk.outputs.new }}
+            # or
+            pnpm add @ermisnetwork/ermis-classroom-sdk@${{ steps.version_sdk.outputs.new }}
+            # or
+            yarn add @ermisnetwork/ermis-classroom-sdk@${{ steps.version_sdk.outputs.new }}
             ```
 
-            ### VCR Client v${{ steps.version_client.outputs.new }}
+            ### @ermisnetwork/vcr-client v${{ steps.version_client.outputs.new }}
+            TypeScript Client for Virtual Classroom API with full type support
+
+            **Installation:**
             ```bash
+            npm install @ermisnetwork/vcr-client@${{ steps.version_client.outputs.new }}
+            # or
             pnpm add @ermisnetwork/vcr-client@${{ steps.version_client.outputs.new }}
+            # or
+            yarn add @ermisnetwork/vcr-client@${{ steps.version_client.outputs.new }}
             ```
 
-      - name: Publish vcr-sdk to GitHub Packages
+            ### @ermisnetwork/ermis-classroom-patch-files v${{ steps.version_patch.outputs.new }}
+            Patch files including WASM modules, workers, and polyfills with Vite plugin
+
+            **Installation:**
+            ```bash
+            npm install @ermisnetwork/ermis-classroom-patch-files@${{ steps.version_patch.outputs.new }}
+            # or
+            pnpm add @ermisnetwork/ermis-classroom-patch-files@${{ steps.version_patch.outputs.new }}
+            # or
+            yarn add @ermisnetwork/ermis-classroom-patch-files@${{ steps.version_patch.outputs.new }}
+            ```
+
+            ---
+
+            ## 📝 Changes
+            ${{ steps.version_sdk.outputs.old }} → ${{ steps.version_sdk.outputs.new }}
+
+      - name: Setup .npmrc for GitHub Packages
         run: |
-          cd packages/vcr-sdk
-          npm publish
+          echo "@ermisnetwork:registry=https://npm.pkg.github.com" > .npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
+
+      - name: Publish @ermisnetwork/ermis-classroom-sdk
+        run: |
+          cd packages/sdk
+          npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish vcr-client to GitHub Packages
+      - name: Publish @ermisnetwork/vcr-client
         run: |
           cd packages/vcr-client
-          npm publish
+          npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish @ermisnetwork/ermis-classroom-patch-files
+        run: |
+          cd packages/patch-files
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## 🎉 Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Published Packages" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | Version | Registry |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|---------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| @ermisnetwork/ermis-classroom-sdk | ${{ steps.version_sdk.outputs.new }} | GitHub Packages |" >> $GITHUB_STEP_SUMMARY
+          echo "| @ermisnetwork/vcr-client | ${{ steps.version_client.outputs.new }} | GitHub Packages |" >> $GITHUB_STEP_SUMMARY
+          echo "| @ermisnetwork/ermis-classroom-patch-files | ${{ steps.version_patch.outputs.new }} | GitHub Packages |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Installation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "pnpm add @ermisnetwork/ermis-classroom-sdk@${{ steps.version_sdk.outputs.new }}" >> $GITHUB_STEP_SUMMARY
+          echo "pnpm add @ermisnetwork/vcr-client@${{ steps.version_client.outputs.new }}" >> $GITHUB_STEP_SUMMARY
+          echo "pnpm add @ermisnetwork/ermis-classroom-patch-files@${{ steps.version_patch.outputs.new }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
