@@ -3,11 +3,11 @@
  * Handles authentication and API requests
  */
 
-import type {
-  ApiClientConfig,
+import {
   CreateRoomResponse,
   CreateSubRoomRequest,
   CreateSubRoomResponse,
+  ErmisClientConfig,
   HttpMethod,
   JoinRoomResponse,
   JoinSubRoomRequest,
@@ -24,7 +24,7 @@ export class ApiClient {
   private jwtToken: string | null = null;
   private userId: string | null = null;
 
-  constructor(config: ApiClientConfig = {}) {
+  constructor(config: ErmisClientConfig = {}) {
     this.host = config.host || 'daibo.ermis.network:9993';
     this.apiBaseUrl = config.apiUrl || `https://${this.host}/meeting`;
   }
