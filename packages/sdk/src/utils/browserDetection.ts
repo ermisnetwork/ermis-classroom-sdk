@@ -3,11 +3,7 @@
  * Utilities for detecting browser capabilities and selecting optimal transport
  */
 
-import type {
-    BrowserInfo,
-    TransportRecommendation,
-    BrowserCapabilities,
-} from "../types/utils/browserDetection.types";
+import type {BrowserCapabilities, BrowserInfo, TransportRecommendation,} from "../types";
 
 /**
  * Detect if current browser is Safari
@@ -15,8 +11,7 @@ import type {
  */
 export function isSafari(): boolean {
     const ua = navigator.userAgent.toLowerCase();
-    const isSafari = ua.indexOf("safari") !== -1 && ua.indexOf("chrome") === -1;
-    return isSafari;
+  return ua.indexOf("safari") !== -1 && ua.indexOf("chrome") === -1;
 }
 
 /**

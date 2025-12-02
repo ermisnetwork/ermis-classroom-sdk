@@ -63,42 +63,12 @@ export interface PublisherConfig {
   bitrate?: number;
   hasCamera?: boolean;
   hasMic?: boolean;
-  webRtcHost?: string; // Changed from webRtcServerUrl to match JS version
+  webRtcHost?: string;
   permissions: ParticipantPermissions;
   onStatusUpdate?: (message: string, isError?: boolean) => void;
   onStreamStart?: () => void;
   onStreamStop?: () => void;
-  // Note: onServerEvent removed - use EventEmitter pattern: publisher.on("serverEvent", handler)
 }
-// "permissions": {
-//   "can_subscribe": true,
-//     "can_publish": true,
-//       "can_publish_data": false,
-//         "can_publish_sources": [
-//           [
-//             "mic_48k",
-//             true
-//           ],
-//           [
-//             "video_360p",
-//             false
-//           ],
-//           [
-//             "video_720p",
-//             false
-//           ],
-//           [
-//             "screen_share_720p",
-//             false
-//           ],
-//           [
-//             "screen_share_1080p",
-//             false
-//           ]
-//         ],
-//           "hidden": false,
-//             "can_update_metadata": false
-// }
 
 
 
@@ -106,7 +76,7 @@ export interface ParticipantPermissions {
   can_subscribe: boolean;
   can_publish: boolean;
   can_publish_data: boolean;
-  can_publish_sources: Array<[string, boolean]>;
+  can_publish_sources: Array<[ChannelName, boolean]>;
   hidden: boolean;
   can_update_metadata: boolean;
 }
