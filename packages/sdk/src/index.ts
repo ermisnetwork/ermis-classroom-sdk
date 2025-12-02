@@ -29,15 +29,10 @@ export {VERSION} from "./constants/version";
 
 // Export utilities
 export * from './utils';
+export * from './types';
 
 // Export API client
 export {ApiClient} from "./api/ApiClient";
-
-// Export types
-export type * from "./types/core/ermisClient.types";
-export type * from "./types/core/participant.types";
-export type * from "./types/media/subscriber.types";
-export type * from "./types/media/mediaDevices.types";
 
 // Export event emitter
 export {EventEmitter} from "./events/EventEmitter";
