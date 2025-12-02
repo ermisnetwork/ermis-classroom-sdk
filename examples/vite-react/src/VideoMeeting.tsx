@@ -814,7 +814,7 @@ export default function VideoMeeting({
                     value={apiHost}
                     onChange={(e) => setApiHost(e.target.value)}
                   >
-                    <option value="daibo.ermis.network:9934">daibo.ermis.network:9934</option>
+                    <option value="daibo.ermis.network:9936">daibo.ermis.network:9936</option>
                     <option value="daibo.ermis.network:9935">daibo.ermis.network:9935</option>
                     <option value="admin.bandia.vn:9998">admin.bandia.vn:9998</option>
                     <option value="admin.bandia.vn:8888">admin.bandia.vn:8888</option>

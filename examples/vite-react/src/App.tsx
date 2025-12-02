@@ -5,12 +5,12 @@ import "./App.css";
 
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [selectedNode, setSelectedNode] = useState("admin.bandia.vn:9995");
+  const [selectedNode, setSelectedNode] = useState("admin.bandia.vn:9996");
   const [publishProtocol, setPublishProtocol] = useState("webrtc");
   // const [publishProtocol, setPublishProtocol] = useState("webtransport");
-  const [subscribeProtocol, setSubscribeProtocol] = useState("websocket");
-  // const [subscribeProtocol, setSubscribeProtocol] = useState("webtransport");
-  const [apiHost, setApiHost] = useState("daibo.ermis.network:9934");
+  // const [subscribeProtocol, setSubscribeProtocol] = useState("websocket");
+  const [subscribeProtocol, setSubscribeProtocol] = useState("webtransport");
+  const [apiHost, setApiHost] = useState("daibo.ermis.network:9936");
 
   return (
     <ErmisClassroomProvider

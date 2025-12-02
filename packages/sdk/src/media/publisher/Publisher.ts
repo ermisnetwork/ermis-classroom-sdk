@@ -12,6 +12,7 @@ import type {
   StreamInfo,
   ServerEvent,
   SubStream,
+  ParticipantPermissions,
 } from "../../types/media/publisher.types";
 import { ChannelName } from "../../types/media/publisher.types";
 import { getSubStreams, MEETING_EVENTS } from "../../constants/publisherConstants";
@@ -92,11 +93,16 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private videoProcessor: VideoProcessor | null = null;
   private audioProcessor: AudioProcessor | null = null;
   private InitAudioRecorder: any = null;
+  private permissions: ParticipantPermissions ;
 
   constructor(config: PublisherConfig) {
     super();
     this.options = config;
-    this.subStreams = getSubStreams(config.streamType || "camera");
+    this.subStreams = getSubStreams(config.streamType || "camera", {
+      can_publish: this.options.permissions.can_publish,
+      can_publish_sources: this.options.permissions.can_publish_sources,
+    });
+    this.permissions = this.options.permissions;
 
     if (config.onStatusUpdate) {
       this.on("statusUpdate", ({ message, isError }) => {
@@ -179,6 +185,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       } else {
         await this.setupWebTransportConnection();
       }
+
+     
 
       await this.initializeProcessors();
       await this.startMediaProcessing();
@@ -283,14 +291,15 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.streamManager = new StreamManager(false, this.options.streamId);
 
     // StreamManager now emits to globalEventBus directly - no need to re-emit
-
+    console.warn("[Publisher] Initializing publisher with permissions:", this.permissions);
+    console.warn("[Publisher] Sub streams for WebTransport:", this.subStreams);
     const channelNames: ChannelName[] = [
       ...this.subStreams.map(s => s.channelName as ChannelName),
     ];
 
-    if (this.hasAudio) {
-      channelNames.push(ChannelName.MICROPHONE);
-    }
+    // if (this.hasAudio) {
+    //   channelNames.push(ChannelName.MICROPHONE);
+    // }
 
     await this.streamManager.initWebTransportStreams(webTransport, channelNames);
 
@@ -792,7 +801,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (!videoTrack) return;
 
     // Initialize video encoder manager for screen share
-    const screenSubStreams = getSubStreams("screen_share");
+    const screenSubStreams = getSubStreams("screen_share", {
+      can_publish: this.options.permissions.can_publish,
+      can_publish_sources: this.options.permissions.can_publish_sources,
+    });
     this.screenVideoEncoderManager = new VideoEncoderManager();
 
     // Create video processor for screen share

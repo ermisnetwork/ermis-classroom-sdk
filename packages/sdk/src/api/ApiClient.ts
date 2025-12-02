@@ -102,7 +102,22 @@ export class ApiClient {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ sub: userId }),
+      body: JSON.stringify({
+        sub: userId, permissions: {
+          can_subscribe: true,
+          can_publish: true,
+          can_publish_data: true,
+          can_publish_sources: [
+            ["mic_48k", true],
+            ["video_360p", true],
+            ["video_720p", true],
+            ["screen_share_720p", true],
+            ["screen_share_1080p", true],
+            ["screen_share_audio", true],
+          ],
+          hidden: false,
+          can_update_metadata: false
+        } }),
     };
 
     try {

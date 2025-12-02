@@ -3,6 +3,8 @@
  * Type definitions for Participant class
  */
 
+import { ParticipantPermissions } from "../media/publisher.types";
+
 /**
  * Participant role in the room
  */
@@ -39,6 +41,8 @@ export interface ParticipantConfig {
   isScreenSharing?: boolean;
   /** Sub-room identifier if in a sub-room */
   subRoomId?: string | null;
+
+  permissions: ParticipantPermissions;
 }
 
 /**
@@ -69,6 +73,8 @@ export interface ParticipantInfo {
   connectionStatus: ParticipantConnectionStatus;
   /** Display name */
   name?: string;
+  
+  participantPermissions: ParticipantPermissions;
 }
 
 /**

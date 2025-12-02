@@ -4,6 +4,7 @@
  */
 
 import type { Participant } from '../../cores/Participant';
+import { ParticipantPermissions } from '../media/publisher.types';
 
 /**
  * SubRoom type identifier
@@ -58,6 +59,8 @@ export interface SubRoomMemberData {
   role: string;
   /** Member name */
   name?: string;
+  /** Member permissions */
+  permissions: ParticipantPermissions;
 }
 
 /**

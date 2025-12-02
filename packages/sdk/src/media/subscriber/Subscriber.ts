@@ -150,8 +150,11 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       onStatus: config.onStatus,
     };
 
+    console.log("Subscriber config protocol:", this.config.protocol);
+
     // Set protocol and subscribeType
     this.protocol = this.config.protocol;
+    // this.protocol = "webtransport";
     this.subscribeType = this.config.subscribeType;
 
     // Generate unique ID

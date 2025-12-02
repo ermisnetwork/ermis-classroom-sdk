@@ -41,6 +41,7 @@ export interface PublisherState {
     isCameraOn: boolean;
 }
 
+// todo: add change participant permissions command
 export class CommandSender {
     private sendData: CommandSenderConfig['sendDataFn'];
     private protocol: CommandSenderConfig['protocol'];

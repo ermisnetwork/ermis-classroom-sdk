@@ -4,6 +4,7 @@
  */
 
 import type { Participant } from '../../cores/Participant';
+import { ParticipantPermissions } from '../media/publisher.types';
 
 /**
  * Room type constants
@@ -232,6 +233,8 @@ export interface ParticipantApiData {
   name?: string;
   /** Screen sharing status */
   is_screen_sharing?: boolean;
+  /** permissions */
+  permissions: ParticipantPermissions;
 }
 
 /**

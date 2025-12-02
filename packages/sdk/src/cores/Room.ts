@@ -725,6 +725,7 @@ export class Room extends EventEmitter {
       name: memberData.name,
       isLocal,
       isScreenSharing: memberData.is_screen_sharing || false,
+      permissions: memberData.permissions,
     });
 
     // Setup participant events
@@ -935,6 +936,7 @@ export class Room extends EventEmitter {
         },
         audioWorkletUrl: "/workers/audio-worklet.js",
         mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
+        // protocol: "webtransport",
       });
 
       // Add to audio mixer if has audio
@@ -1033,6 +1035,7 @@ export class Room extends EventEmitter {
       roomId: this.id,
       useWebRTC: useWebRTC,
       webRtcHost: this.mediaConfig.hostNode,
+      permissions: this.localParticipant.permissions,
       onStatusUpdate: (_message: string, isError?: boolean) => {
         this.localParticipant?.setConnectionStatus(
           isError ? "failed" : "connected",
@@ -1058,6 +1061,7 @@ export class Room extends EventEmitter {
       streamId: participant.streamId,
       roomId: this.id,
     });
+    console.log("[Room] Media config protocol:", this.mediaConfig.subscribeProtocol);
 
     const subscriber = new Subscriber({
       subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
@@ -1067,6 +1071,7 @@ export class Room extends EventEmitter {
       host: this.mediaConfig.hostNode,
       protocol: this.mediaConfig.subscribeProtocol as any,
       subscribeType: StreamTypes.CAMERA,
+      // protocol: "webtransport",
 
       onStatus: (_msg, isError) => {
         console.log("[Room] Subscriber status for", participant.userId, ":", isError ? "FAILED" : "CONNECTED");
@@ -1101,6 +1106,8 @@ export class Room extends EventEmitter {
   /**
    * Handle server events from publisher
    */
+
+  // todo: handle changes in participant info (name, role, permissions) events
   private async _handleServerEvent(event: ServerEvent): Promise<void> {
     if (event.type === "join") {
       const joinEvent = event as any;
@@ -1120,6 +1127,7 @@ export class Room extends EventEmitter {
           id: joinedParticipant.membership_id,
           role: joinedParticipant.role,
           name: joinedParticipant.name,
+          permissions: joinedParticipant.permissions,
         },
         this.localParticipant?.userId || "",
       );
