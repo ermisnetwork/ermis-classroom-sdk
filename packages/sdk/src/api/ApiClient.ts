@@ -5,18 +5,18 @@
 
 import type {
   ApiClientConfig,
-  TokenResponse,
   CreateRoomResponse,
-  ListRoomsResponse,
-  RoomDetailsResponse,
-  JoinRoomResponse,
   CreateSubRoomRequest,
   CreateSubRoomResponse,
+  HttpMethod,
+  JoinRoomResponse,
   JoinSubRoomRequest,
   LeaveSubRoomRequest,
+  ListRoomsResponse,
+  RoomDetailsResponse,
   RoomUpdateData,
-  HttpMethod,
-} from '../types/api/apiClient.types';
+  TokenResponse,
+} from '../types';
 
 export class ApiClient {
   private host: string;
@@ -117,7 +117,8 @@ export class ApiClient {
           ],
           hidden: false,
           can_update_metadata: false
-        } }),
+        }
+      }),
     };
 
     try {
