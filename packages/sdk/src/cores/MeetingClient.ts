@@ -1043,13 +1043,13 @@ export class ErmisClient extends EventEmitter {
   }
 
 
-  async sendCustomEvent(eventData: object): Promise<void> {
+  async sendCustomEvent(targets: string[], eventData: object): Promise<void> {
     console.log("[MeetingClient] Sending custom event:", eventData);
     console.log("Current room:", this.state.currentRoom?.getInfo());
     if (!this.state.currentRoom) {
       return;
     }
-    return await this.state.currentRoom.sendCustomEvent(eventData);
+    return await this.state.currentRoom.sendCustomEvent(targets, eventData);
   }
 
   /**

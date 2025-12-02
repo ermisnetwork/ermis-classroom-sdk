@@ -667,7 +667,7 @@ export class Room extends EventEmitter {
     }
   }
 
-  async sendCustomEvent(eventData: object): Promise<void> {
+  async sendCustomEvent(targets: string[], eventData: object): Promise<void> {
     if (!this.isActive) {
       return;
     }
@@ -677,7 +677,7 @@ export class Room extends EventEmitter {
     }
 
     try {
-      await this.localParticipant.publisher.sendCustomEvent([], eventData);
+      await this.localParticipant.publisher.sendCustomEvent(targets, eventData);
     } catch (error) {
       console.error("Failed to send custom event:", error);
     }
