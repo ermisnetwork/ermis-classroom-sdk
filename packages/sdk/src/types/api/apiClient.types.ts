@@ -3,6 +3,8 @@
  * Type definitions for ApiClient class
  */
 
+import {SubRoomDefinition} from "../core/room.types";
+
 /**
  * ApiClient configuration
  */
@@ -11,18 +13,6 @@ export interface ApiClientConfig {
   host?: string;
   /** API base URL */
   apiUrl?: string;
-}
-
-/**
- * Token response from authentication
- */
-export interface TokenResponse {
-  /** Access token */
-  access_token: string;
-  /** Token type */
-  token_type?: string;
-  /** Expiration time in seconds */
-  expires_in?: number;
 }
 
 /**
@@ -212,16 +202,6 @@ export interface CreateSubRoomRequest {
   main_room_id: string;
   /** List of rooms to create */
   rooms: SubRoomDefinition[];
-}
-
-/**
- * Sub room definition
- */
-export interface SubRoomDefinition {
-  /** Room name */
-  room_name: string;
-  /** Participants to assign */
-  participants: SubRoomParticipant[];
 }
 
 /**

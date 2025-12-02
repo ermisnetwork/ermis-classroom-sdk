@@ -1,7 +1,7 @@
 // signTypedRs256.ts
 import fs from "fs";
 import jwt from "jsonwebtoken";
-import {ParticipantPermissions} from "../types/media/publisher.types";
+import {ParticipantPermissions} from "../types";
 
 
 export interface TypedPayload {
