@@ -5,7 +5,7 @@ import { copySDKStaticFiles } from '@ermisnetwork/ermis-classroom-sdk/vite-plugi
 export default defineConfig({
   plugins: [react(), copySDKStaticFiles({ verbose: true })],
   server: {
-    port: 4000,
+    port: 3001,
     open: true,
     allowedHosts: true,
   },
