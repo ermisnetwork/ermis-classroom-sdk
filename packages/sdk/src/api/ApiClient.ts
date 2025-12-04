@@ -18,6 +18,11 @@ import type {
   HttpMethod,
 } from '../types/api/apiClient.types';
 
+const dummyUserToken = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJleHAiOjE4NjQ3NDk3MjgyODUsInN1YiI6Imtob2FwaGFuNzc5NUBnbWFpbC5jb20iLCJmdWxsTmFtZSI6Imtob2FwaGFuNzc5NUBnbWFpbC5jb20iLCJwZXJtaXNzaW9ucyI6eyJjYW5fc3Vic2NyaWJlIjp0cnVlLCJjYW5fcHVibGlzaCI6dHJ1ZSwiY2FuX3B1Ymxpc2hfZGF0YSI6dHJ1ZSwiY2FuX3B1Ymxpc2hfc291cmNlcyI6W1sibWljXzQ4ayIsdHJ1ZV0sWyJ2aWRlb18zNjBwIix0cnVlXSxbInZpZGVvXzcyMHAiLHRydWVdLFsic2NyZWVuX3NoYXJlXzcyMHAiLHRydWVdLFsic2NyZWVuX3NoYXJlXzEwODBwIix0cnVlXSxbInNjcmVlbl9zaGFyZV9hdWRpbyIsdHJ1ZV1dLCJoaWRkZW4iOmZhbHNlLCJjYW5fdXBkYXRlX21ldGFkYXRhIjpmYWxzZX19.BMS7UkIkC0DTRtrrSkpqDnAhaz0KCfpS7j9UObBXKj6TBMN4nVaZtTU9sK6C0Idy2ZxRftD826et_xGlxRpf24MC8Ox8jyvh5SyUXoTPwU-d8KtWwSnKEdCQcNJQnEzUE5YEr3D-3xZYdXZf473IFCVwvgqm7W1bGdgjff_i1OpXSL2nTB1801zuecyviTv_zE5wL6DIGA8XIoK3TBas6W6jHVCsUw-tazCP08NpQA3S2K81v8cVxOogiN24AfHoZAFWiNvswVaq72h-kiZz3isMGRXruG8VaL-Lk7H_8jSK1UJ3L7BKJhbC_ZDW6tv26AcNB-a0IikvTg-ACpgOOQ";
+
+/**
+ * ApiClient class
+ */
 export class ApiClient {
   private host: string;
   private apiBaseUrl: string;
@@ -28,6 +33,7 @@ export class ApiClient {
     this.host = config.host || 'daibo.ermis.network:9993';
     this.apiBaseUrl = config.apiUrl || `https://${this.host}/meeting`;
   }
+
 
   /**
    * Set authentication token and user ID
@@ -59,6 +65,7 @@ export class ApiClient {
     endpoint: string,
     method: HttpMethod = 'GET',
     body: any = null,
+    token?: string
   ): Promise<T> {
     if (!this.userId) {
       throw new Error('Please authenticate first');
@@ -67,11 +74,13 @@ export class ApiClient {
     if (!this.jwtToken) {
       throw new Error('JWT token not found');
     }
+    const bearer = token ? `Bearer ${token}` : `Bearer ${this.jwtToken}`;
+    console.warn('Using token:', bearer, "token params:", token);
 
     const options: RequestInit = {
       method,
       headers: {
-        Authorization: `Bearer ${this.jwtToken}`,
+        Authorization: bearer,
         'Content-Type': 'application/json',
       },
     };
@@ -95,8 +104,8 @@ export class ApiClient {
   /**
    * Get dummy token for authentication
    */
-  async getDummyToken(userId: string): Promise<TokenResponse> {
-    const endpoint = '/get-token';
+  async getDummyUserToken(userId: string): Promise<TokenResponse> {
+    const endpoint = '/get-user-token';
     const options: RequestInit = {
       method: 'POST',
       headers: {
@@ -118,6 +127,31 @@ export class ApiClient {
           hidden: false,
           can_update_metadata: false
         } }),
+    };
+
+    try {
+      const response = await fetch(`${this.apiBaseUrl}${endpoint}`, options);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Token request failed:', error);
+      throw error;
+    }
+  }
+  /**
+   * Get dummy token for authentication
+   */
+  async getDummyServiceToken(): Promise<TokenResponse> {
+    const endpoint = '/get-service-token';
+    const options: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        issuer: "hoangbim@gmail.com" }),
     };
 
     try {
@@ -173,7 +207,8 @@ export class ApiClient {
     return await this.apiCall<JoinRoomResponse>('/rooms/join', 'POST', {
       room_code: roomCode,
       app_name: appName,
-    });
+      
+    },  dummyUserToken,);
   }
 
   /**

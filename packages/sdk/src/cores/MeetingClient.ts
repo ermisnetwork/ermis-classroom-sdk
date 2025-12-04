@@ -216,7 +216,7 @@ export class ErmisClient extends EventEmitter {
       }
 
       // Get authentication token
-      const tokenResponse: TokenResponse = await this.apiClient.getDummyToken(userId);
+      const tokenResponse: TokenResponse = await this.apiClient.getDummyServiceToken(userId);
       // Set authentication in API client
       this.apiClient.setAuth(tokenResponse.access_token, userId);
 
