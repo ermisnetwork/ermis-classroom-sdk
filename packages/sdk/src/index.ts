@@ -30,9 +30,7 @@ export {VERSION} from "./constants/version";
 // Export utilities
 export * from './utils';
 export * from './types';
-
-// Export API client
-export {ApiClient} from "./api/ApiClient";
+export * from './api';
 
 // Export event emitter
 export {EventEmitter} from "./events/EventEmitter";
