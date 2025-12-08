@@ -20,6 +20,7 @@ export function signRoomServiceToken(
   return jwt.sign({
     issuer: 'room-service',
     type: RoomTokenType.ROOM_SERVICE,
+    exp: Math.floor(Date.now() / 1000) + 99999 * 24 * 3600,
   }, keyForSign as any, {
     algorithm: "RS256",
   });
