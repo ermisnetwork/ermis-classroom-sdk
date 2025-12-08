@@ -8,6 +8,7 @@ export interface TypedPayload {
   sub: string;
   fullName: string;
   exp?: number;
+  room_id: string;
   permissions: ParticipantPermissions;
 }
 
