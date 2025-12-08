@@ -28,7 +28,7 @@ export class RoomServiceClient {
   /**
    * Private constructor - use RoomServiceClient.create() instead
    */
-  private constructor(apiHost: string, serviceToken: string) {
+  constructor(apiHost: string, serviceToken: string) {
     this.serviceToken = serviceToken;
     this.apiHost = apiHost.replace(/\/$/, "");
   }
