@@ -5,7 +5,7 @@ export interface TypedPayload {
   fullName: string;
   exp?: number;
   room_id: string;
-  issuer: string;
+  issuer?: string;
   permissions: ParticipantPermissions;
 }
 
