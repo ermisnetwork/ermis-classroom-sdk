@@ -42,7 +42,6 @@
     "clean": "rm -rf dist .turbo node_modules"
   },
   "devDependencies": {
-    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.1",
     "tsup": "^8.0.0",
     "typescript": "^5.8.2",
@@ -60,8 +59,5 @@
   "publishConfig": {
     "registry": "https://npm.pkg.github.com",
     "access": "public"
-  },
-  "dependencies": {
-    "jsonwebtoken": "^9.0.2"
   }
 }
