@@ -9,6 +9,7 @@ export * from "./media/publisher.types";
 export * from "./media/subscriber.types";
 export * from "./media/audioMixer.types";
 export * from "./api/apiClient.types";
+export * from "./api/roomServiceClient.types";
 export * from "./utils/browserDetection.types";
 export * from "./core/ermisClient.types";
 export * from "./core/participant.types";

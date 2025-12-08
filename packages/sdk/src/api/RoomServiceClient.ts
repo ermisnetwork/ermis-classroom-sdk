@@ -1,50 +1,138 @@
-import {signRoomServiceToken} from "../utils/signRoomServiceToken";
-import {HttpMethod, ParticipantPermissions} from "../types";
-import Participant from "../cores/Participant";
-import Room from "../cores/Room";
+import { signRoomServiceToken } from "../utils/signRoomServiceToken";
+import {
+  HttpMethod,
+  CreateRoomResponse,
+  ListQuery,
+  ListConditions,
+  JoinRoomRequest,
+} from "../types";
+import {
+  BreakoutRequest,
+  BreakoutRoomResponse,
+  CustomEventRequest,
+  GetTokenResponse,
+  PaginatedParticipantResponse,
+  ParticipantResponse,
+  PermissionChanged,
+  RoomServiceDetailResponse,
+  UpdateParticipantRequest,
+  GetServiceTokenRequest,
+  GetUserTokenRequest,
+} from "../types/api/roomServiceClient.types";
+import { ParticipantPermissions } from "../types/media/publisher.types";
 
 export class RoomServiceClient {
-  private serviceToken: string = '';
-  private apiHost: string = 'https://daibo.ermis.network:9993';
-  
-  constructor(apiHost: string, privateKeyOrPath: string) {
-    this.serviceToken = signRoomServiceToken(privateKeyOrPath);
-    this.apiHost = apiHost;
+  private serviceToken: string = "";
+  private apiHost: string;
+
+  constructor(apiHost: string, privateKeyOrPath: string, passphrase?: string) {
+    this.serviceToken = signRoomServiceToken(privateKeyOrPath, passphrase);
+    this.apiHost = apiHost.replace(/\/$/, "");
   }
-  
-  getParticipants(roomId: string): Promise<Participant[]> {
-    throw new Error("Method not implemented.");
-  }
-  
-  getRoom(roomId: string): Promise<Room> {
-    throw new Error("Method not implemented.");
-  }
-  
-  removeParticipant(roomId: string, participantId: string): Promise<void> {
-    throw new Error("Method not implemented.");
-  }
-  
-  updateParticipant(roomId: string, participantId: string, newPermissions: ParticipantPermissions): Promise<void> {
-    throw new Error("Method not implemented.");
-  }
-  
-  updateRoom(roomId: string, updates: any): Promise<void> {
-    throw new Error("Method not implemented.");
-  }
-  
-  
-  async call(method: HttpMethod, endpoint: string, body?: any): Promise<any> {
-    const response = await fetch(`${this.apiHost}/${endpoint}`, {
+
+  private async call<T>(
+    method: HttpMethod,
+    endpoint: string,
+    body?: unknown
+  ): Promise<T> {
+    const options: RequestInit = {
       method,
       headers: {
         Authorization: `Bearer ${this.serviceToken}`,
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    };
+    if (body !== undefined) {
+      options.body = JSON.stringify(body);
     }
-    return await response.json();
+    const response = await fetch(`${this.apiHost}${endpoint}`, options);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+    const text = await response.text();
+    if (!text) return null as T;
+    return JSON.parse(text) as T;
+  }
+
+  async getServiceToken(issuer: string): Promise<GetTokenResponse> {
+    const req: GetServiceTokenRequest = { issuer };
+    return this.call<GetTokenResponse>("POST", "/meeting/get-service-token", req);
+  }
+
+  async getUserToken(
+    sub: string,
+    permissions: ParticipantPermissions
+  ): Promise<GetTokenResponse> {
+    const req: GetUserTokenRequest = { sub, permissions };
+    return this.call<GetTokenResponse>("POST", "/meeting/get-user-token", req);
+  }
+
+  async createRoom(
+    roomName: string,
+    options?: { parentId?: string; roomType?: string }
+  ): Promise<CreateRoomResponse> {
+    return this.call<CreateRoomResponse>("POST", "/meeting/rooms", {
+      room_name: roomName,
+      parent_id: options?.parentId,
+      room_type: options?.roomType,
+    });
+  }
+
+  async listRooms(
+    listQuery: ListQuery,
+    conditions?: ListConditions
+  ): Promise<CreateRoomResponse[]> {
+    return this.call<CreateRoomResponse[]>("POST", "/meeting/rooms/list", {
+      list_query: listQuery,
+      conditions,
+    });
+  }
+
+  async getRoom(roomId: string): Promise<RoomServiceDetailResponse> {
+    return this.call<RoomServiceDetailResponse>("GET", `/meeting/rooms/${roomId}`);
+  }
+
+  async joinRoom(request: JoinRoomRequest): Promise<ParticipantResponse> {
+    return this.call<ParticipantResponse>("POST", "/meeting/rooms/join", request);
+  }
+
+  async createBreakoutRooms(request: BreakoutRequest): Promise<BreakoutRoomResponse | null> {
+    return this.call<BreakoutRoomResponse | null>("POST", "/meeting/rooms/breakout", request);
+  }
+
+  async closeBreakoutRooms(mainRoomId: string): Promise<void> {
+    await this.call<null>("PUT", `/meeting/rooms/${mainRoomId}/breakout/close`);
+  }
+
+  async sendCustomEvent(request: CustomEventRequest): Promise<void> {
+    await this.call<null>("POST", "/meeting/rooms/custom-event", request);
+  }
+
+  async listParticipants(
+    roomId: string,
+    listQuery: ListQuery
+  ): Promise<PaginatedParticipantResponse> {
+    return this.call<PaginatedParticipantResponse>("POST", "/meeting/participants/list", {
+      room_id: roomId,
+      list_query: listQuery,
+    });
+  }
+
+  async updateParticipant(
+    roomId: string,
+    streamId: string,
+    permissionChanged: PermissionChanged
+  ): Promise<UpdateParticipantRequest> {
+    const req: UpdateParticipantRequest = {
+      room_id: roomId,
+      stream_id: streamId,
+      permission_changed: permissionChanged,
+    };
+    return this.call<UpdateParticipantRequest>("POST", "/meeting/participants/update", req);
+  }
+
+  async removeParticipant(streamId: string): Promise<void> {
+    await this.call<null>("DELETE", `/meeting/participants/remove/${streamId}`);
   }
 }
