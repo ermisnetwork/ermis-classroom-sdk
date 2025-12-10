@@ -177,8 +177,23 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       const stream = await this.getMediaStream();
       this.currentStream = stream;
-      this.hasVideo = stream.getVideoTracks().length > 0;
-      this.hasAudio = stream.getAudioTracks().length > 0;
+
+      const videoTracks = stream.getVideoTracks();
+      const audioTracks = stream.getAudioTracks();
+
+      this.hasVideo = videoTracks.length > 0;
+      this.hasAudio = audioTracks.length > 0;
+
+      // Check initial track enabled state from the stream
+      // If track exists but is disabled, set our state accordingly
+      if (this.hasVideo) {
+        this.videoEnabled = videoTracks[0].enabled;
+        console.log("[Publisher] Initial video enabled state:", this.videoEnabled);
+      }
+      if (this.hasAudio) {
+        this.audioEnabled = audioTracks[0].enabled;
+        console.log("[Publisher] Initial audio enabled state:", this.audioEnabled);
+      }
 
       if (this.options.useWebRTC) {
         await this.setupWebRTCConnection();
@@ -186,7 +201,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         await this.setupWebTransportConnection();
       }
 
-     
+
 
       await this.initializeProcessors();
       await this.startMediaProcessing();
@@ -194,6 +209,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       this.isPublishing = true;
       this.updateStatus("Publishing started");
       this.emit("streamStart");
+
+      // Send initial state to server so other clients know the mic/camera status
+      // This is important when user joins with mic/camera already disabled
+      await this.sendInitialState();
 
       if (this.options.onStreamStart) {
         this.options.onStreamStart();
@@ -203,6 +222,31 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       this.updateStatus("Failed to start publishing", true);
       await this.stop();
       throw error;
+    }
+  }
+
+  /**
+   * Send initial mic/camera state to server
+   * Called after publishing starts to notify other clients of the initial state
+   */
+  private async sendInitialState(): Promise<void> {
+    try {
+      // Send camera state if video is available
+      if (this.hasVideo) {
+        const cameraEvent = this.videoEnabled ? MEETING_EVENTS.CAMERA_ON : MEETING_EVENTS.CAMERA_OFF;
+        await this.sendMeetingEvent(cameraEvent);
+        console.log("[Publisher] Sent initial camera state:", this.videoEnabled ? "ON" : "OFF");
+      }
+
+      // Send mic state if audio is available
+      if (this.hasAudio) {
+        const micEvent = this.audioEnabled ? MEETING_EVENTS.MIC_ON : MEETING_EVENTS.MIC_OFF;
+        await this.sendMeetingEvent(micEvent);
+        console.log("[Publisher] Sent initial mic state:", this.audioEnabled ? "ON" : "OFF");
+      }
+    } catch (error) {
+      console.error("[Publisher] Failed to send initial state:", error);
+      // Don't throw - this is not critical for publishing to work
     }
   }
 
@@ -258,6 +302,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     const audioTracks = stream.getAudioTracks();
 
+    // Check if tracks are enabled (not just present)
+    const videoEnabled = videoTracks.length > 0 && videoTracks[0].enabled;
+    const audioEnabled = audioTracks.length > 0 && audioTracks[0].enabled;
+
     const eventData = {
       stream,
       videoOnlyStream,
@@ -272,6 +320,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       },
       hasAudio: audioTracks.length > 0,
       hasVideo: videoTracks.length > 0,
+      audioEnabled,
+      videoEnabled,
     };
 
     // Emit to global event bus
@@ -493,6 +543,20 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
   async toggleCamera(): Promise<void> {
     return this.toggleVideo();
+  }
+
+  /**
+   * Get current video enabled state
+   */
+  isVideoOn(): boolean {
+    return this.videoEnabled;
+  }
+
+  /**
+   * Get current audio enabled state
+   */
+  isAudioOn(): boolean {
+    return this.audioEnabled;
   }
 
   async switchVideoDevice(deviceId: string): Promise<void> {

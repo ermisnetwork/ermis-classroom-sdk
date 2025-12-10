@@ -14,7 +14,7 @@ import {
   LeaveSubRoomRequest,
   ListRoomsResponse,
   RoomDetailsResponse,
-  RoomUpdateData,
+  RoomUpdateData, TokenResponse,
 } from '../types';
 
 /**
@@ -52,6 +52,100 @@ export class ApiClient {
    */
   isAuthenticated(): boolean {
     return !!(this.jwtToken && this.userId);
+  }
+
+
+  /**
+   * Get dummy token for authentication
+   */
+  async getDummyUserToken(userId: string): Promise<TokenResponse> {
+    const endpoint = '/get-user-token';
+    const options: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sub: userId, permissions: {
+          can_subscribe: true,
+          can_publish: true,
+          can_publish_data: true,
+          can_publish_sources: [
+            ["mic_48k", true],
+            ["video_360p", true],
+            ["video_720p", true],
+            ["screen_share_720p", true],
+            ["screen_share_1080p", true],
+            ["screen_share_audio", true],
+          ],
+          hidden: false,
+          can_update_metadata: false
+        }
+      }),
+    };
+
+    try {
+      const response = await fetch(`${this.apiBaseUrl}${endpoint}`, options);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Token request failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get dummy token for authentication
+   */
+  async getUserToken(): Promise<TokenResponse> {
+    const endpoint = '/get-user-token';
+    const options: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        issuer: "hoangbim@gmail.com" }),
+    };
+
+    try {
+      const response = await fetch(`${this.apiBaseUrl}${endpoint}`, options);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Token request failed:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Get dummy token for authentication
+   */
+  async getDummyServiceToken(): Promise<TokenResponse> {
+    const endpoint = '/get-service-token';
+    const options: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        issuer: "hoangbim@gmail.com" }),
+    };
+
+    try {
+      const response = await fetch(`${this.apiBaseUrl}${endpoint}`, options);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Token request failed:', error);
+      throw error;
+    }
   }
 
   /**

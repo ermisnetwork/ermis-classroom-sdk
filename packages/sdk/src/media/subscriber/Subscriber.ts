@@ -533,9 +533,11 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
     console.log("Attaching WebTransport streams...");
 
-    // MATCH EXACT LOGIC FROM SubscriberDev.js
-    // Create WebTransport connection
-    const webTpUrl = `https://${this.config.host}/meeting/wt/subscribe/${this.config.roomId}/${this.config.streamId}`;
+    // Use the subcribeUrl from config (already constructed in Room.ts with correct webtpUrl)
+    const webTpUrl = this.config.subcribeUrl;
+    if (!webTpUrl) {
+      throw new Error("Subscribe URL not provided");
+    }
     console.log("Trying to connect to WebTransport to subscribe:", webTpUrl);
 
     const wt = new WebTransport(webTpUrl);

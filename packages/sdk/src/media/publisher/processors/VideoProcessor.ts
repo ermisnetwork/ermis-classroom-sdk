@@ -57,6 +57,7 @@ export class VideoProcessor extends EventEmitter<{
   private isProcessing = false;
   private cameraEnabled = true;
   private frameCounter = 0;
+  private videoTrack: MediaStreamTrack | null = null;
 
   // Sub-stream configurations
   private subStreams: SubStream[] = [];
@@ -92,6 +93,13 @@ export class VideoProcessor extends EventEmitter<{
     try {
       console.log("[VideoProcessor] Initializing...");
       console.log("[VideoProcessor] Sub-streams:", this.subStreams.length, this.subStreams.map(s => s.name));
+
+      // Store track reference for enabling/disabling
+      this.videoTrack = videoTrack;
+
+      // Sync initial cameraEnabled state with track's enabled state
+      this.cameraEnabled = videoTrack.enabled;
+      console.log("[VideoProcessor] Initial camera enabled state:", this.cameraEnabled);
 
       // Create encoders for each sub-stream
       for (const subStream of this.subStreams) {
@@ -422,6 +430,14 @@ export class VideoProcessor extends EventEmitter<{
    */
   setCameraEnabled(enabled: boolean): void {
     this.cameraEnabled = enabled;
+
+    // Also toggle the actual MediaStreamTrack's enabled property
+    // This ensures the video element shows/hides the video properly
+    if (this.videoTrack) {
+      this.videoTrack.enabled = enabled;
+      console.log(`[VideoProcessor] Video track enabled set to: ${enabled}`);
+    }
+
     console.log(`[VideoProcessor] Camera ${enabled ? "enabled" : "disabled"}`);
     this.emit("cameraStateChanged", enabled);
   }
