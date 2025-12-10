@@ -1048,6 +1048,16 @@ export class Room extends EventEmitter {
 
     await publisher.startPublishing();
     this.localParticipant.setPublisher(publisher);
+
+    // Sync participant's enabled state with publisher's initial state
+    // This handles the case when user joins with mic/camera disabled in preview
+    this.localParticipant.isAudioEnabled = publisher.isAudioOn();
+    this.localParticipant.isVideoEnabled = publisher.isVideoOn();
+
+    console.log("[Room] Local participant initial state synced:", {
+      audioEnabled: this.localParticipant.isAudioEnabled,
+      videoEnabled: this.localParticipant.isVideoEnabled,
+    });
   }
 
   /**

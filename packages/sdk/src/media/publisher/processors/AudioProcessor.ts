@@ -56,6 +56,7 @@ export class AudioProcessor extends EventEmitter<{
 
   private micEnabled = true;
   private isProcessing = false;
+  private audioTrack: MediaStreamTrack | null = null;
 
   constructor(
     audioEncoderManager: AudioEncoderManager,
@@ -147,6 +148,15 @@ export class AudioProcessor extends EventEmitter<{
 
     try {
       console.log("[AudioProcessor] Initializing...");
+
+      // Store audio track reference for enabling/disabling
+      const audioTracks = audioStream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        this.audioTrack = audioTracks[0];
+        // Sync initial micEnabled state with track's enabled state
+        this.micEnabled = this.audioTrack.enabled;
+        console.log("[AudioProcessor] Initial mic enabled state:", this.micEnabled);
+      }
 
       await this.audioEncoderManager.initialize(audioStream);
 
@@ -278,6 +288,13 @@ export class AudioProcessor extends EventEmitter<{
    */
   setMicEnabled(enabled: boolean): void {
     this.micEnabled = enabled;
+
+    // Also toggle the actual MediaStreamTrack's enabled property
+    if (this.audioTrack) {
+      this.audioTrack.enabled = enabled;
+      console.log(`[AudioProcessor] Audio track enabled set to: ${enabled}`);
+    }
+
     console.log(`[AudioProcessor] Microphone ${enabled ? "enabled" : "disabled"}`);
     this.emit("micStateChanged", enabled);
   }
