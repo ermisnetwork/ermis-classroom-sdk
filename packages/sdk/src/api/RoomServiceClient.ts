@@ -25,9 +25,29 @@ export class RoomServiceClient {
   private serviceToken: string = "";
   private apiHost: string;
 
-  constructor(apiHost: string, privateKeyOrPath: string, passphrase?: string) {
-    this.serviceToken = signRoomServiceToken(privateKeyOrPath, passphrase);
+  /**
+   * Private constructor - use RoomServiceClient.create() instead
+   */
+  constructor(apiHost: string, serviceToken: string) {
+    this.serviceToken = serviceToken;
     this.apiHost = apiHost.replace(/\/$/, "");
+  }
+
+  /**
+   * Create a new RoomServiceClient instance.
+   *
+   * @param apiHost - The API host URL
+   * @param privateKeyPem - Raw PEM string of the private key (PKCS8 format)
+   * @returns Promise resolving to a RoomServiceClient instance
+   *
+   * @example
+   * ```typescript
+   * const client = await RoomServiceClient.create('https://api.example.com', privateKeyPem);
+   * ```
+   */
+  static async create(apiHost: string, privateKeyPem: string): Promise<RoomServiceClient> {
+    const serviceToken = await signRoomServiceToken(privateKeyPem);
+    return new RoomServiceClient(apiHost, serviceToken);
   }
 
   private async call<T>(
