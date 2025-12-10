@@ -82,6 +82,7 @@ interface SubscriberEvents extends Record<string, unknown> {
 export class Subscriber extends EventEmitter<SubscriberEvents> {
   // Configuration - make required fields explicit
   private config: {
+    localStreamId: string;
     streamId: string;
     roomId: string;
     host: string;
@@ -126,6 +127,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
     // Set default configuration
     this.config = {
+      localStreamId: config.localStreamId || "",
       streamId: config.streamId || "",
       roomId: config.roomId || "",
       host: config.host || "admin.bandia.vn:9995",
@@ -181,7 +183,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     // Worker manager
     this.workerManager = new WorkerManager(
       this.config.mediaWorkerUrl,
-      this.subscriberId
+      this.subscriberId,
     );
 
     // Polyfill manager
@@ -548,7 +550,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     this.workerManager.attachStream(
       "media",  // channelName not used by worker, just for logging
       mediaStream.readable,
-      mediaStream.writable
+      mediaStream.writable,
+      this.config.localStreamId
     );
     console.log("✅ WebTransport stream attached");
   }

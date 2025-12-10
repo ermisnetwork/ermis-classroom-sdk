@@ -201,8 +201,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         await this.setupWebTransportConnection();
       }
 
-
-
       await this.initializeProcessors();
       await this.startMediaProcessing();
 
@@ -340,6 +338,14 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     const webTransport = await this.webTransportManager.connect();
     this.streamManager = new StreamManager(false, this.options.streamId);
 
+    // Set publisher state before initializing streams so correct state is sent to server
+    this.streamManager.setPublisherState({
+      hasMic: this.hasAudio,
+      hasCamera: this.hasVideo,
+      isMicOn: this.audioEnabled,
+      isCameraOn: this.videoEnabled,
+    });
+
     // StreamManager now emits to globalEventBus directly - no need to re-emit
     console.warn("[Publisher] Initializing publisher with permissions:", this.permissions);
     console.warn("[Publisher] Sub streams for WebTransport:", this.subStreams);
@@ -365,6 +371,14 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     // Initialize StreamManager first
     this.streamManager = new StreamManager(true, this.options.streamId);
+
+    // Set publisher state before initializing streams so correct state is sent to server
+    this.streamManager.setPublisherState({
+      hasMic: this.hasAudio,
+      hasCamera: this.hasVideo,
+      isMicOn: this.audioEnabled,
+      isCameraOn: this.videoEnabled,
+    });
 
     // StreamManager now emits to globalEventBus directly - no need to re-emit
 

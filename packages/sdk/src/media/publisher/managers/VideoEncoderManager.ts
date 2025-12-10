@@ -41,7 +41,7 @@ export class VideoEncoderManager extends EventEmitter<{
   private encoders = new Map<string, VideoEncoderObject>();
   private frameCounter = 0;
   private keyframeInterval: number = VIDEO_CONFIG.KEYFRAME_INTERVAL;
-
+  
   /**
    * Create video encoder for specific quality
    *

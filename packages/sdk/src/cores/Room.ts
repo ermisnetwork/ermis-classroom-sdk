@@ -714,6 +714,8 @@ export class Room extends EventEmitter {
       userId: memberData.user_id,
       streamId: memberData.stream_id,
       isLocal,
+      isMicOn: memberData.is_mic_on,
+      isCameraOn: memberData.is_camera_on,
     });
 
     const participant = new Participant({
@@ -726,6 +728,9 @@ export class Room extends EventEmitter {
       isLocal,
       isScreenSharing: memberData.is_screen_sharing || false,
       permissions: memberData.permissions,
+      // Pass initial audio/video enabled state from server
+      isAudioEnabled: memberData.is_mic_on,
+      isVideoEnabled: memberData.is_camera_on,
     });
 
     // Setup participant events
@@ -922,9 +927,10 @@ export class Room extends EventEmitter {
     const participant = this.participants.get(participantId);
     if (!participant) return;
 
-    if (isStarting) {
+    if (isStarting && this.localParticipant?.streamId) {
       const screenSubscriber = new Subscriber({
         subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
+        localStreamId: this.localParticipant?.streamId,
         streamId: participant.streamId,
         roomId: this.id,
         host: this.mediaConfig.hostNode,
@@ -1072,8 +1078,9 @@ export class Room extends EventEmitter {
       roomId: this.id,
     });
     console.log("[Room] Media config protocol:", this.mediaConfig.subscribeProtocol);
-
+    if (!this.localParticipant?.streamId) throw new Error('Local stream must be defined');
     const subscriber = new Subscriber({
+      localStreamId: this.localParticipant?.streamId,
       subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
       streamId: participant.streamId,
       roomId: this.id,
@@ -1138,6 +1145,9 @@ export class Room extends EventEmitter {
           role: joinedParticipant.role,
           name: joinedParticipant.name,
           permissions: joinedParticipant.permissions,
+          // Pass initial mic/camera state from join event
+          is_mic_on: joinedParticipant.is_mic_on,
+          is_camera_on: joinedParticipant.is_camera_on,
         },
         this.localParticipant?.userId || "",
       );

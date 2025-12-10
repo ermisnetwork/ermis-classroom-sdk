@@ -26,7 +26,7 @@ function App() {
     <ErmisClassroomProvider
       config={{
         host: "daibo.ermis.network:9936",
-        webtpUrl: "https://admin.bandia.vn:9996/meeting/wt",
+        webtpUrl: "https://admin.bandia.vn:9997/meeting/wt",
       }}
     >
       <AppContent />

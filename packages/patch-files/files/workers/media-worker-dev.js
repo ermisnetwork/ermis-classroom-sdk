@@ -86,7 +86,7 @@ const audioInit = {
 // ------------------------------
 
 self.onmessage = async function (e) {
-  const { type, port, quality, readable, writable, channelName, dataChannel, wsUrl } = e.data;
+  const { type, port, quality, readable, writable, channelName, dataChannel, wsUrl, streamId } = e.data;
 
   switch (type) {
     case "init":
@@ -98,6 +98,7 @@ self.onmessage = async function (e) {
     case "attachWebSocket":
       if (wsUrl) {
         commandSender = new CommandSender({
+          streamId,
           sendDataFn: sendOverWebSocket,
           protocol: "websocket",
           commandType: "subscriber_command",

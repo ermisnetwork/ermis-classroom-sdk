@@ -66,6 +66,11 @@ export class Participant extends EventEmitter {
       hidden: false,
       can_update_metadata: false,
     };
+
+    // Set initial audio/video enabled state from server data
+    // Default to true if not provided (for backwards compatibility)
+    this.isAudioEnabled = config.isAudioEnabled !== undefined ? config.isAudioEnabled : true;
+    this.isVideoEnabled = config.isVideoEnabled !== undefined ? config.isVideoEnabled : true;
   }
 
   /**

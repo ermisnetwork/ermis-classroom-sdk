@@ -43,6 +43,11 @@ export interface ParticipantConfig {
   subRoomId?: string | null;
 
   permissions: ParticipantPermissions;
+
+  /** Initial audio enabled state (from server) */
+  isAudioEnabled?: boolean;
+  /** Initial video enabled state (from server) */
+  isVideoEnabled?: boolean;
 }
 
 /**

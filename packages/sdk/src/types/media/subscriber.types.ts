@@ -21,6 +21,7 @@ export type StreamMode = 'single' | 'multi';
 
 // Subscriber configuration
 export interface SubscriberConfig {
+  localStreamId: string;
   streamId: string;
   roomId?: string;
   host?: string;

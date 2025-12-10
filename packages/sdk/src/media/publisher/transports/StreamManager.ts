@@ -9,7 +9,15 @@ import { PacketBuilder } from "../../shared/utils/PacketBuilder";
 import type { RaptorQConfig } from "../../shared/utils/PacketBuilder";
 import { FrameTypeHelper } from "../../shared/utils/FrameTypeHelper";
 import { LengthDelimitedReader } from "../../shared/utils/LengthDelimitedReader";
-import CommandSender from "../ClientCommand";
+import CommandSender, {PublisherState} from "../ClientCommand";
+
+// Default publisher state - will be updated by Publisher
+const DEFAULT_PUBLISHER_STATE: PublisherState = {
+  hasMic: false,
+  hasCamera: false,
+  isMicOn: false,
+  isCameraOn: false,
+};
 
 // WasmEncoder type from RaptorQ
 interface WasmEncoderType {
@@ -70,6 +78,7 @@ export class StreamManager extends EventEmitter<{
   private wasmInitPromise: Promise<void> | null = null;
   private commandSender: CommandSender | null;
   public streamId: string;
+  private publisherState: PublisherState = { ...DEFAULT_PUBLISHER_STATE };
 
   constructor(isWebRTC: boolean = false, streamID?: string) {
     super();
@@ -90,6 +99,22 @@ export class StreamManager extends EventEmitter<{
       protocol: "webtransport",
       sendDataFn: this.sendViaWebTransport.bind(this),
     });
+  }
+
+  /**
+   * Set the publisher state (mic/camera availability and on/off status)
+   * This should be called by Publisher before streams are initialized
+   */
+  setPublisherState(state: Partial<PublisherState>): void {
+    this.publisherState = { ...this.publisherState, ...state };
+    console.log("[StreamManager] Publisher state updated:", this.publisherState);
+  }
+
+  /**
+   * Get the current publisher state
+   */
+  getPublisherState(): PublisherState {
+    return { ...this.publisherState };
   }
 
   /**
@@ -205,14 +230,10 @@ export class StreamManager extends EventEmitter<{
       // Setup event reader for MEETING_CONTROL channel
       if (channelName === ChannelName.MEETING_CONTROL) {
         const streamData = this.streams.get(channelName);
-        // todo: get state from outside, check when sendpublisherstate call here or not
+        // Use the publisher state set by Publisher
         if (streamData) {
-          this.commandSender?.sendPublisherState(streamData, {
-            hasMic: true,
-            hasCamera: true,
-            isMicOn: true,
-            isCameraOn: true,
-          });
+          this.commandSender?.sendPublisherState(streamData, this.publisherState);
+          console.log("[StreamManager] Sent initial publisher state (WebTransport):", this.publisherState);
         }
         this.setupEventStreamReader(reader);
       }
@@ -413,15 +434,11 @@ export class StreamManager extends EventEmitter<{
       } as any);
 
       if (channelName === ChannelName.MEETING_CONTROL) {
-        // TODO: Send publisher state need get state from outside
+        // Use the publisher state set by Publisher
         const streamData = this.streams.get(channelName);
         if (streamData) {
-          await this.commandSender?.sendPublisherState(streamData, {
-            hasMic: true,
-            hasCamera: true,
-            isMicOn: true,
-            isCameraOn: true,
-          });
+          await this.commandSender?.sendPublisherState(streamData, this.publisherState);
+          console.log("[StreamManager] Sent initial publisher state (WebRTC):", this.publisherState);
 
           //       {
           //   "type": "event",

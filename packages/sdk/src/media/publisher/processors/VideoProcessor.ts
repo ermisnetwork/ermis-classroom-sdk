@@ -59,6 +59,10 @@ export class VideoProcessor extends EventEmitter<{
   private frameCounter = 0;
   private videoTrack: MediaStreamTrack | null = null;
 
+  // Config capture mode - temporarily encode frames to get video config even when camera is off
+  private isCapturingConfig = false;
+  private configCaptureComplete = false;
+
   // Sub-stream configurations
   private subStreams: SubStream[] = [];
 
@@ -166,6 +170,14 @@ export class VideoProcessor extends EventEmitter<{
       // Reset base timestamp
       (window as any).videoBaseTimestamp = undefined;
 
+      // If camera is initially disabled, enable config capture mode
+      // This will temporarily encode frames to get video config, then stop
+      if (!this.cameraEnabled) {
+        console.log("[VideoProcessor] Camera disabled, enabling config capture mode...");
+        this.isCapturingConfig = true;
+        this.configCaptureComplete = false;
+      }
+
       console.log("[VideoProcessor] Starting frame processing...");
       this.emit("started");
 
@@ -259,8 +271,11 @@ export class VideoProcessor extends EventEmitter<{
           console.log(`[VideoProcessor] Processing frame ${frameCount}, timestamp:`, frame.timestamp);
         }
 
-        // Skip frame if camera disabled
-        if (!this.cameraEnabled) {
+        // Determine if we should encode this frame
+        // Encode if: camera is enabled OR we're capturing config and haven't completed yet
+        const shouldEncode = this.cameraEnabled || (this.isCapturingConfig && !this.configCaptureComplete);
+
+        if (!shouldEncode) {
           frame.close();
           continue;
         }
@@ -271,8 +286,20 @@ export class VideoProcessor extends EventEmitter<{
 
         // !!!Close frame to free resources
         frame.close();
-        
+
         this.frameCounter++;
+
+        // Check if config capture is complete (all encoders have metadata)
+        if (this.isCapturingConfig && !this.configCaptureComplete) {
+          const allConfigsCaptured = this.subStreams.every(
+            (s) => this.videoEncoderManager.isMetadataReady(s.name)
+          );
+          if (allConfigsCaptured) {
+            console.log("[VideoProcessor] Config capture complete, all encoder configs captured");
+            this.configCaptureComplete = true;
+            this.isCapturingConfig = false;
+          }
+        }
       }
       console.log("[VideoProcessor] processFrames() ended, total frames:", frameCount);
     } catch (error) {
@@ -329,6 +356,12 @@ export class VideoProcessor extends EventEmitter<{
           },
           "video",
         );
+      }
+
+      // Don't send video chunks if we're only capturing config (camera is off)
+      // We only want to send the config, not the actual video data
+      if (this.isCapturingConfig || !this.cameraEnabled) {
+        return;
       }
 
       // Wait for config to be sent before sending video chunks

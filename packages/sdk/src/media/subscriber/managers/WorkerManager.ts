@@ -103,7 +103,8 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   attachStream(
     channelName: "cam_360p" | "cam_720p" | "mic_48k" | "media",
     readable: ReadableStream,
-    writable: WritableStream
+    writable: WritableStream,
+    streamId: string
   ): void {
     if (!this.worker || !this.isInitialized) {
       throw new Error("Worker not initialized");
@@ -117,6 +118,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
         channelName,
         readable,
         writable,
+        streamId,
       },
       [readable as unknown as Transferable, writable as unknown as Transferable]
     );
