@@ -567,7 +567,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     console.log("Using WebSocket for media transport");
 
     const wsUrl = `wss://${this.config.host}/meeting/${this.config.roomId}/${this.config.streamId}`;
-    this.workerManager.attachWebSocket(wsUrl);
+    this.workerManager.attachWebSocket(wsUrl, this.config.localStreamId);
 
     console.log("WebSocket attached successfully");
   }

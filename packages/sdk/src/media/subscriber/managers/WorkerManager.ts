@@ -104,7 +104,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
     channelName: "cam_360p" | "cam_720p" | "mic_48k" | "media",
     readable: ReadableStream,
     writable: WritableStream,
-    streamId: string
+    localStreamId: string
   ): void {
     if (!this.worker || !this.isInitialized) {
       throw new Error("Worker not initialized");
@@ -118,7 +118,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
         channelName,
         readable,
         writable,
-        streamId,
+        localStreamId,
       },
       [readable as unknown as Transferable, writable as unknown as Transferable]
     );
@@ -150,7 +150,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   /**
    * Attach WebSocket to the worker
    */
-  attachWebSocket(wsUrl: string): void {
+  attachWebSocket(wsUrl: string, localStreamId: string): void {
     if (!this.worker || !this.isInitialized) {
       throw new Error("Worker not initialized");
     }
@@ -160,6 +160,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
     this.worker.postMessage({
       type: "attachWebSocket",
       wsUrl,
+      localStreamId,
     });
   }
 
