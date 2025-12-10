@@ -43,11 +43,14 @@ export class CommandSender {
   private sendData: CommandSenderConfig['sendDataFn'];
   private protocol: CommandSenderConfig['protocol'];
   private commandType: string;
+    private HEARTBEAT_INTERVAL_MS = 2000; // 2 seconds
+    private heartbeatInterval: ReturnType<typeof setInterval> | null;
 
   constructor(config: CommandSenderConfig) {
     this.sendData = config.sendDataFn;
     this.protocol = config.protocol;
     this.commandType = config.commandType || 'publisher_command';
+      this.heartbeatInterval = null;
   }
 
   private async _sendPublisherCommand(
@@ -161,6 +164,38 @@ export class CommandSender {
   async resumeStream(streamData: StreamData): Promise<void> {
     await this._sendSubscriberCommand(streamData, CLIENT_COMMANDS.RESUME_STREAM);
   }
+
+
+    async sendHeartbeat(streamData: StreamData): Promise<void> {
+        await this._sendPublisherCommand(
+            ChannelName.MEETING_CONTROL,
+            streamData,
+            'ping'
+        );
+    }
+
+    startHeartbeat(streamData: StreamData): void {
+        this.stopHeartbeat();
+
+        console.log('[CommandSender] Starting heartbeat interval');
+
+        this.heartbeatInterval = setInterval(async () => {
+            try {
+                await this.sendHeartbeat(streamData);
+                console.log('[CommandSender] Heartbeat sent');
+            } catch (error) {
+                console.error('[CommandSender] Failed to send heartbeat:', error);
+            }
+        }, this.HEARTBEAT_INTERVAL_MS);
+    }
+
+    stopHeartbeat(): void {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+            console.log('[CommandSender] Heartbeat stopped');
+        }
+    }
 }
 
 export default CommandSender;
