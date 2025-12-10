@@ -1,104 +1,125 @@
-import {join} from 'path';
-import {cpSync, existsSync} from 'fs';
-import type {Plugin} from 'vite';
+import {join, dirname} from 'path';
+import {cpSync, existsSync, mkdirSync, watch, type FSWatcher} from 'fs';
+import type {Plugin, ViteDevServer} from 'vite';
 
 export interface CopySDKFilesOptions {
-  /**
-   * Enable verbose logging
-   * @default false
-   */
   verbose?: boolean;
+  publicDir?: string;
+  directories?: string[];
 }
 
-/**
- * Vite plugin to copy static files from SDK to public directory
- * Works in both monorepo and npm package scenarios
- *
- * @example
- * ```typescript
- * import { copySDKStaticFiles } from '@ermisnetwork/ermis-classroom-sdk/vite-plugin';
- *
- * export default defineConfig({
- *   plugins: [
- *     react(),
- *     copySDKStaticFiles({ verbose: true }),
- *   ],
- * });
- * ```
- */
+const DEFAULT_DIRECTORIES = ['workers', 'raptorQ', 'polyfills', 'opus_decoder'];
+
 export function copySDKStaticFiles(options: CopySDKFilesOptions = {}): Plugin {
-  const {verbose = false} = options;
+  const {
+    verbose = false,
+    publicDir: customPublicDir = 'public',
+    directories = DEFAULT_DIRECTORIES,
+  } = options;
+
+  let sdkPath: string | null = null;
+  let isMonorepo = false;
+  let watchers: FSWatcher[] = [];
+  let server: ViteDevServer | null = null;
 
   const log = (message: string) => {
-    if (verbose) {
-      console.log(`[copy-sdk-files] ${message}`);
+    if (verbose) console.log(`[ermis-sdk] ${message}`);
+  };
+
+  const findSdkPath = (projectRoot: string): string | null => {
+    const nodeModulesPath = join(projectRoot, 'node_modules/@ermisnetwork/ermis-classroom-sdk/src');
+    if (existsSync(nodeModulesPath)) {
+      isMonorepo = false;
+      return nodeModulesPath;
+    }
+    const monorepoPatterns = [
+      join(projectRoot, '../packages/sdk/src'),
+      join(projectRoot, '../../packages/sdk/src'),
+      join(projectRoot, '../../../packages/sdk/src'),
+    ];
+    for (const pattern of monorepoPatterns) {
+      if (existsSync(pattern)) {
+        isMonorepo = true;
+        return pattern;
+      }
+    }
+    return null;
+  };
+
+  const copyDirectory = (src: string, dest: string, dirName: string): boolean => {
+    if (!existsSync(src)) return false;
+    const parentDir = dirname(dest);
+    if (!existsSync(parentDir)) mkdirSync(parentDir, {recursive: true});
+    cpSync(src, dest, {recursive: true, force: true});
+    log(`Copied ${dirName}/`);
+    return true;
+  };
+
+  const copyAllDirectories = (projectRoot: string) => {
+    if (!sdkPath) sdkPath = findSdkPath(projectRoot);
+    if (!sdkPath) {
+      console.warn('[ermis-sdk] SDK not found in node_modules or local workspace.');
+      return;
+    }
+    const publicDir = join(projectRoot, customPublicDir);
+    log('Copying static files from SDK...');
+    let copied = 0;
+    for (const dir of directories) {
+      const src = join(sdkPath, dir);
+      const dest = join(publicDir, dir);
+      if (copyDirectory(src, dest, dir)) copied++;
+    }
+    const source = isMonorepo ? 'local monorepo' : 'node_modules';
+    log(`Copied ${copied}/${directories.length} directories from ${source}`);
+  };
+
+  const setupWatchers = (projectRoot: string) => {
+    if (!sdkPath || !isMonorepo) return;
+    watchers.forEach(w => w.close());
+    watchers = [];
+    const publicDir = join(projectRoot, customPublicDir);
+    for (const dir of directories) {
+      const srcDir = join(sdkPath, dir);
+      if (!existsSync(srcDir)) continue;
+      try {
+        const watcher = watch(srcDir, {recursive: true}, (_eventType, filename) => {
+          if (!filename) return;
+          log(`${dir}/${filename} changed, re-copying...`);
+          const src = join(sdkPath!, dir);
+          const dest = join(publicDir, dir);
+          copyDirectory(src, dest, dir);
+          if (server) server.ws.send({type: 'full-reload'});
+        });
+        watchers.push(watcher);
+        log(`Watching ${dir}/ for changes`);
+      } catch (err) {
+        console.warn(`[ermis-sdk] Failed to watch ${dir}:`, err);
+      }
     }
   };
 
   return {
-    name: 'copy-sdk-static-files',
-
-    buildStart() {
-      // Try to copy from node_modules first (for published SDK), fallback to local src
-      let sdkPath = join(process.cwd(), 'node_modules/@ermisnetwork/ermis-classroom-sdk/src');
-
-      // If not in node_modules, we're in monorepo - use local src
-      if (!existsSync(sdkPath)) {
-        sdkPath = join(process.cwd(), '../../packages/sdk/src');
-      }
-
-      const publicDir = join(process.cwd(), 'public');
-
-      if (!existsSync(sdkPath)) {
-        console.warn('[copy-sdk-files] SDK not found in node_modules or local workspace.');
-        return;
-      }
-
-      const staticDirs = ['workers', 'raptorQ', 'polyfills', 'opus_decoder'];
-
-      log('�� Copying static files from SDK...');
-
-      let copied = 0;
-
-      for (const dir of staticDirs) {
-        const src = join(sdkPath, dir);
-        const dest = join(publicDir, dir);
-
-        if (existsSync(src)) {
-          cpSync(src, dest, {recursive: true, force: true});
-          log(`  ✅ Copied ${dir}/`);
-          copied++;
-        }
-      }
-
-      const source = sdkPath.includes('node_modules') ? 'node_modules' : 'local src';
-      log(`✨ Copied ${copied}/${staticDirs.length} directories from ${source}`);
+    name: 'ermis-sdk-static-files',
+    enforce: 'pre',
+    configResolved(config) {
+      sdkPath = findSdkPath(config.root);
     },
-
-    configureServer(server) {
-      // Watch SDK src for changes in monorepo development
-      const localSdkSrc = join(process.cwd(), '../../packages/sdk/src');
-
-      if (existsSync(localSdkSrc)) {
-        server.watcher.add(localSdkSrc);
-
-        server.watcher.on('change', (path: string) => {
-          if (path.startsWith(localSdkSrc)) {
-            log('SDK src changed, re-copying...');
-            // Manually trigger copy again
-            const publicDir = join(process.cwd(), 'public');
-            const staticDirs = ['workers', 'raptorQ', 'polyfills', 'opus_decoder'];
-
-            for (const dir of staticDirs) {
-              const src = join(localSdkSrc, dir);
-              const dest = join(publicDir, dir);
-              if (existsSync(src)) {
-                cpSync(src, dest, {recursive: true, force: true});
-              }
-            }
-          }
-        });
+    buildStart() {
+      copyAllDirectories(process.cwd());
+    },
+    configureServer(devServer) {
+      server = devServer;
+      const projectRoot = devServer.config.root;
+      copyAllDirectories(projectRoot);
+      if (isMonorepo) {
+        setupWatchers(projectRoot);
+        log('Hot reload enabled for SDK static files');
       }
-    }
+    },
+    closeBundle() {
+      watchers.forEach(w => w.close());
+      watchers = [];
+    },
   };
 }
+
