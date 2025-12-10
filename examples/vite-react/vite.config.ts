@@ -1,28 +1,38 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import { copySDKStaticFiles } from '@ermisnetwork/ermis-classroom-sdk/vite-plugin';
+import path from "path"
+import react from "@vitejs/plugin-react"
+import { defineConfig } from "vite"
 
+// https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), copySDKStaticFiles({ verbose: true })],
-  server: {
-    port: 4000,
-    open: true,
-    allowedHosts: true,
+  plugins: [react()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+      // Node.js polyfills for browser
+      "util": "util",
+      "stream": "stream-browserify",
+    },
   },
-  base: '/',
-  build: {
-    outDir: 'dist',
-    rollupOptions: {
-      onwarn(warning, warn) {
-        // Ignore warnings about unresolved dynamic imports from public folder
-        if (
-          warning.code === 'UNRESOLVED_IMPORT' &&
-          (warning.exporter?.includes('/raptorQ/') || warning.exporter?.includes('/opus_decoder/'))
-        ) {
-          return;
-        }
-        warn(warning);
+  define: {
+    // Polyfill for Node.js globals needed by some packages
+    global: 'globalThis',
+    'process.env': {},
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      // Node.js global to browser globalThis
+      define: {
+        global: 'globalThis',
       },
     },
   },
-});
+  assetsInclude: ['**/*.wasm'],
+  server: {
+    host: true,
+    headers: {
+
+    },
+    port: 5173,
+    allowedHosts: true,
+  },
+})
