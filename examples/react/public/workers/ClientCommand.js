@@ -5,6 +5,7 @@ class CommandSender {
     this.sendData = config.sendDataFn;
     this.protocol = config.protocol || "websocket";
     this.commandType = config.commandType || "publisher_command"; // publisher or subscriber
+    this.localStreamId = config.localStreamId;
   }
 
   async _sendPublisherCommand(channelName, type, data = null) {
@@ -65,6 +66,7 @@ class CommandSender {
   }
 
   async initSubscribeChannelStream(subscriberType) {
+    console.log('init subscribe channel', this.localStreamId);
     const initQuality =
       subscriberType === STREAM_TYPE.SCREEN_SHARE ? CHANNEL_NAME.SCREEN_SHARE_720P : CHANNEL_NAME.VIDEO_720P;
     console.log(
@@ -74,6 +76,7 @@ class CommandSender {
       initQuality
     );
     await this._sendSubscriberCommand("init_channel_stream", {
+      subscriber_stream_id: this.localStreamId,
       stream_type: subscriberType,
       audio: true,
       video: true,

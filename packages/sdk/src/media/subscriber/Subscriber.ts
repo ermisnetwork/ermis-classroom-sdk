@@ -541,6 +541,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       throw new Error("Subscribe URL not provided");
     }
     console.log("Trying to connect to WebTransport to subscribe:", webTpUrl);
+    
+    console.log('this.config', this.config);
 
     const wt = new WebTransport(webTpUrl);
     await wt.ready;
