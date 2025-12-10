@@ -232,8 +232,10 @@ export class StreamManager extends EventEmitter<{
         const streamData = this.streams.get(channelName);
         // Use the publisher state set by Publisher
         if (streamData) {
+
           this.commandSender?.sendPublisherState(streamData, this.publisherState);
           console.log("[StreamManager] Sent initial publisher state (WebTransport):", this.publisherState);
+          this.commandSender?.startHeartbeat(streamData);
         }
         this.setupEventStreamReader(reader);
       }
