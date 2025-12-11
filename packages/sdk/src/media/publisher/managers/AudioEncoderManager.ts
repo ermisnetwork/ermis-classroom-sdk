@@ -6,6 +6,7 @@ import type {
   InitAudioRecorder,
   AudioRecorder,
 } from "../../../types/media/publisher.types";
+import {log} from "../../../utils";
 
 /**
  * AudioEncoderManager - Manages audio encoding using Opus codec
@@ -90,7 +91,7 @@ export class AudioEncoderManager extends EventEmitter<{
         timeSlice: 100, // Send data every 100ms
       };
 
-      console.log(
+      log(
         `[AudioEncoder] Initializing recorder for ${this.channelName}`,
       );
 
@@ -108,7 +109,7 @@ export class AudioEncoderManager extends EventEmitter<{
         this.handleAudioData(data);
       };
 
-      console.log(
+      log(
         `[AudioEncoder] Recorder initialized for ${this.channelName}`,
       );
       this.emit("initialized", { channelName: this.channelName });
@@ -138,7 +139,7 @@ export class AudioEncoderManager extends EventEmitter<{
       this.samplesSent = 0;
       this.chunkCount = 0;
 
-      console.log(`[AudioEncoder] Started recording on ${this.channelName}`);
+      log(`[AudioEncoder] Started recording on ${this.channelName}`);
       this.emit("started", { channelName: this.channelName });
     } catch (error) {
       console.error(
@@ -168,7 +169,7 @@ export class AudioEncoderManager extends EventEmitter<{
       this.configReady = false;
       this.audioConfig = null;
 
-      console.log(`[AudioEncoder] Stopped recording on ${this.channelName}`);
+      log(`[AudioEncoder] Stopped recording on ${this.channelName}`);
       this.emit("stopped", { channelName: this.channelName });
     } catch (error) {
       console.error(
@@ -208,7 +209,7 @@ export class AudioEncoderManager extends EventEmitter<{
           description: dataArray,
         };
 
-        console.log(`[AudioEncoder] Config ready for ${this.channelName}:`, {
+        log(`[AudioEncoder] Config ready for ${this.channelName}:`, {
           codec: this.audioConfig.codec,
           sampleRate: this.audioConfig.sampleRate,
           numberOfChannels: this.audioConfig.numberOfChannels,
@@ -239,7 +240,7 @@ export class AudioEncoderManager extends EventEmitter<{
         this.samplesSent = 0;
         this.chunkCount = 0;
 
-        console.log(
+        log(
           `[AudioEncoder] Initialized timing for ${this.channelName}, baseTime: ${this.baseTime}`,
         );
       }
@@ -269,7 +270,7 @@ export class AudioEncoderManager extends EventEmitter<{
    */
   setConfigSent(): void {
     this.configReady = true;
-    console.log(`[AudioEncoder] Config marked as sent for ${this.channelName}`);
+    log(`[AudioEncoder] Config marked as sent for ${this.channelName}`);
   }
 
   /**
@@ -329,7 +330,7 @@ export class AudioEncoderManager extends EventEmitter<{
     this.baseTime = 0;
     this.samplesSent = 0;
     this.chunkCount = 0;
-    console.log(`[AudioEncoder] Timing reset for ${this.channelName}`);
+    log(`[AudioEncoder] Timing reset for ${this.channelName}`);
   }
 
   /**
@@ -339,7 +340,7 @@ export class AudioEncoderManager extends EventEmitter<{
    */
   updateConfig(config: Partial<AudioEncoderConfig>): void {
     this.config = { ...this.config, ...config };
-    console.log(
+    log(
       `[AudioEncoder] Config updated for ${this.channelName}:`,
       this.config,
     );

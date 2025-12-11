@@ -171,7 +171,6 @@ const SUB_STREAMS = {
 };
 
 function getSubStreams(streamType) {
-  console.log("Getting sub streams for type:", streamType);
   if (streamType === STREAM_TYPE.SCREEN_SHARE) {
     return [SUB_STREAMS.SCREEN_SHARE_AUDIO, SUB_STREAMS.SCREEN_SHARE_720P]; //, SUB_STREAMS.SCREEN_SHARE_1080P];
   } else if (streamType === STREAM_TYPE.CAMERA) {

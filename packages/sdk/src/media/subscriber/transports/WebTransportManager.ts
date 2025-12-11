@@ -8,6 +8,7 @@
  */
 
 import EventEmitter from "../../../events/EventEmitter";
+import {log} from "../../../utils";
 
 /**
  * Stream channel types
@@ -54,7 +55,7 @@ export class WebTransportManager extends EventEmitter<WebTransportManagerEvents>
    */
   async connect(): Promise<void> {
     try {
-      console.log("Connecting to WebTransport:", this.subscribeUrl);
+      log("Connecting to WebTransport:", this.subscribeUrl);
 
       this.webTransport = new WebTransport(this.subscribeUrl);
       await this.webTransport.ready;
@@ -62,14 +63,14 @@ export class WebTransportManager extends EventEmitter<WebTransportManagerEvents>
       this.isConnected = true;
       this.reconnectAttempts = 0;
 
-      console.log("WebTransport connected successfully");
+      log("WebTransport connected successfully");
       this.emit("connected", undefined);
 
       // Listen for connection closure
       // ? temporary disable close handler for debugging
       // this.webTransport.closed
       //   .then(() => {
-      //     console.log("WebTransport closed gracefully");
+      //     log("WebTransport closed gracefully");
       //     this.handleDisconnection();
       //   })
       //   .catch((error) => {
@@ -94,7 +95,7 @@ export class WebTransportManager extends EventEmitter<WebTransportManagerEvents>
     }
 
     try {
-      console.log(`Creating bidirectional stream for ${channelName}`);
+      log(`Creating bidirectional stream for ${channelName}`);
 
       const stream = await this.webTransport.createBidirectionalStream();
 
@@ -125,7 +126,7 @@ export class WebTransportManager extends EventEmitter<WebTransportManagerEvents>
         this.webTransport.close();
         this.webTransport = null;
         this.isConnected = false;
-        console.log("WebTransport disconnected");
+        log("WebTransport disconnected");
       } catch (error) {
         console.error("Error during disconnect:", error);
       }
@@ -230,7 +231,7 @@ export class WebTransportManager extends EventEmitter<WebTransportManagerEvents>
       maxDelay
     );
 
-    console.log(
+    log(
       `[WebTransport] Reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms...`
     );
 
@@ -238,7 +239,7 @@ export class WebTransportManager extends EventEmitter<WebTransportManagerEvents>
 
     try {
       await this.connect();
-      console.log("[WebTransport] Reconnection successful!");
+      log("[WebTransport] Reconnection successful!");
     } catch (error) {
       console.error(
         `[WebTransport] Reconnection attempt ${this.reconnectAttempts} failed:`,

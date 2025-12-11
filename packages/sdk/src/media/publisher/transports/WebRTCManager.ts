@@ -3,6 +3,7 @@ import type {
   WebRTCConfig,
   WebRTCManagerEvents,
 } from "../../../types/media/transport.types";
+import {log} from "../../../utils";
 
 /**
  * WebRTCManager - Manages WebRTC peer connection lifecycle
@@ -77,7 +78,7 @@ export class WebRTCManager extends EventEmitter<
     // Close all multiple connections (same as JS)
     if (this.peerConnections.size > 0) {
       for (const [channelName, connection] of this.peerConnections) {
-        console.log(`[WebRTCManager] Closing connection for ${channelName}`);
+        log(`[WebRTCManager] Closing connection for ${channelName}`);
         connection.close();
       }
       this.peerConnections.clear();
@@ -85,7 +86,7 @@ export class WebRTCManager extends EventEmitter<
 
     this.isConnected = false;
     this.emit("closed", undefined);
-    console.log("[WebRTC] Connection closed");
+    log("[WebRTC] Connection closed");
   }
 
   /**
@@ -118,7 +119,7 @@ export class WebRTCManager extends EventEmitter<
   ): Promise<void> {
     try {
       for (const channelName of channelNames) {
-        console.log(`[WebRTC] Setting up connection for: ${channelName}`);
+        log(`[WebRTC] Setting up connection for: ${channelName}`);
 
         const webRtc = new RTCPeerConnection();
         this.peerConnections.set(channelName, webRtc);
@@ -126,20 +127,20 @@ export class WebRTCManager extends EventEmitter<
         // Log ICE candidates for debugging
         webRtc.onicecandidate = (event) => {
           if (event.candidate) {
-            console.log(`[WebRTC] ${channelName} ICE candidate:`, event.candidate.candidate);
+            log(`[WebRTC] ${channelName} ICE candidate:`, event.candidate.candidate);
           } else {
-            console.log(`[WebRTC] ${channelName} ICE gathering complete`);
+            log(`[WebRTC] ${channelName} ICE gathering complete`);
           }
         };
 
-        console.log(`[WebRTC] Creating data channel for: ${channelName}`);
+        log(`[WebRTC] Creating data channel for: ${channelName}`);
         streamManager.createDataChannelDirect(channelName, webRtc);
 
-        console.log(`[WebRTC] Creating offer for: ${channelName}`);
+        log(`[WebRTC] Creating offer for: ${channelName}`);
         const offer = await webRtc.createOffer();
         await webRtc.setLocalDescription(offer);
 
-        console.log(`[WebRTC] Sending offer to server for: ${channelName}`);
+        log(`[WebRTC] Sending offer to server for: ${channelName}`);
         const response = await fetch(
           `https://${this.serverUrl}/meeting/sdp/answer`,
           {
@@ -162,19 +163,19 @@ export class WebRTCManager extends EventEmitter<
         }
 
         const answer = await response.json();
-        console.log(`[WebRTC] Got answer from server for: ${channelName}`);
-        console.log(`[WebRTC] Answer SDP for ${channelName}:`, answer.sdp);
+        log(`[WebRTC] Got answer from server for: ${channelName}`);
+        log(`[WebRTC] Answer SDP for ${channelName}:`, answer.sdp);
 
         await webRtc.setRemoteDescription(answer);
-        console.log(`[WebRTC] Set remote description for: ${channelName}`);
+        log(`[WebRTC] Set remote description for: ${channelName}`);
 
-        console.log(
+        log(
           `WebRTC connection established for channel: ${channelName}`
         );
       }
 
       this.isConnected = true;
-      console.log(`[WebRTC] All ${channelNames.length} channels setup complete`);
+      log(`[WebRTC] All ${channelNames.length} channels setup complete`);
     } catch (error) {
       console.error("WebRTC setup error:", error);
     }

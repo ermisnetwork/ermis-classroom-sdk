@@ -3,6 +3,7 @@ import type {
   WebTransportConfig,
   TransportManagerEvents,
 } from "../../../types/media/transport.types";
+import {log} from "../../../utils";
 
 /**
  * WebTransportManager - Manages WebTransport connection lifecycle
@@ -45,12 +46,12 @@ export class WebTransportManager extends EventEmitter<
    */
   async connect(): Promise<WebTransport> {
     if (this.isConnected && this.transport) {
-      console.log("[WebTransport] Already connected");
+      log("[WebTransport] Already connected");
       return this.transport;
     }
 
     try {
-      console.log("[WebTransport] Connecting to:", this.config.url);
+      log("[WebTransport] Connecting to:", this.config.url);
 
       const connectPromise = new Promise<WebTransport>((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -71,7 +72,7 @@ export class WebTransportManager extends EventEmitter<
 
             this.setupEventHandlers();
 
-            console.log("[WebTransport] Connected successfully");
+            log("[WebTransport] Connected successfully");
             this.emit("connected");
 
             resolve(this.transport);
@@ -105,7 +106,7 @@ export class WebTransportManager extends EventEmitter<
     // Handle connection closure
     this.transport.closed
       .then(() => {
-        console.log("[WebTransport] Connection closed gracefully");
+        log("[WebTransport] Connection closed gracefully");
         this.handleDisconnection("closed");
       })
       .catch((error) => {
@@ -142,7 +143,7 @@ export class WebTransportManager extends EventEmitter<
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * 2 ** (this.reconnectAttempts - 1);
 
-    console.log(
+    log(
       `[WebTransport] Reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`,
     );
     this.emit("reconnecting", { attempt: this.reconnectAttempts, delay });
@@ -171,7 +172,7 @@ export class WebTransportManager extends EventEmitter<
     try {
       const stream = await this.transport.createBidirectionalStream();
       this.emit("streamCreated", "bidirectional");
-      console.log("[WebTransport] Bidirectional stream created");
+      log("[WebTransport] Bidirectional stream created");
       return stream;
     } catch (error) {
       console.error(
@@ -194,7 +195,7 @@ export class WebTransportManager extends EventEmitter<
   //   try {
   //     const stream = await this.transport.createUnidirectionalStream();
   //     this.emit("streamCreated", "unidirectional");
-  //     console.log("[WebTransport] Unidirectional stream created");
+  //     log("[WebTransport] Unidirectional stream created");
   //     return stream;
   //   } catch (error) {
   //     console.error(
@@ -226,12 +227,12 @@ export class WebTransportManager extends EventEmitter<
    */
   async close(closeInfo?: WebTransportCloseInfo): Promise<void> {
     if (!this.transport) {
-      console.log("[WebTransport] No active connection to close");
+      log("[WebTransport] No active connection to close");
       return;
     }
 
     try {
-      console.log("[WebTransport] Closing connection...");
+      log("[WebTransport] Closing connection...");
       this.transport.close(closeInfo);
 
       // Wait for closure
@@ -242,7 +243,7 @@ export class WebTransportManager extends EventEmitter<
       this.reconnectAttempts = 0;
 
       this.emit("closed");
-      console.log("[WebTransport] Connection closed successfully");
+      log("[WebTransport] Connection closed successfully");
     } catch (error) {
       console.error("[WebTransport] Error during close:", error);
       throw error;

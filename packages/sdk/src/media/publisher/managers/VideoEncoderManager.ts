@@ -5,6 +5,7 @@ import type {
   VideoEncoderConfig,
   VideoEncoderObject,
 } from "../../../types/media/publisher.types";
+import {log} from "../../../utils";
 
 /**
  * VideoEncoderManager - Manages video encoding for multiple qualities
@@ -102,7 +103,7 @@ export class VideoEncoderManager extends EventEmitter<{
       videoDecoderConfig: null,
     });
 
-    console.log(
+    log(
       `[VideoEncoder] Created encoder "${name}" for ${channelName}:`,
       encoderConfig,
     );
@@ -200,7 +201,7 @@ export class VideoEncoderManager extends EventEmitter<{
       encoderObj.config = newConfig;
       encoderObj.metadataReady = false;
 
-      console.log(`[VideoEncoder] Reconfigured ${name}:`, newConfig);
+      log(`[VideoEncoder] Reconfigured ${name}:`, newConfig);
       this.emit("encoderReconfigured", { name, config: newConfig });
     } catch (error) {
       console.error(`[VideoEncoder] Failed to reconfigure ${name}:`, error);
@@ -220,7 +221,7 @@ export class VideoEncoderManager extends EventEmitter<{
       encoderObj.metadataReady = true;
       encoderObj.videoDecoderConfig = decoderConfig;
       this.emit("metadataReady", { name, decoderConfig });
-      console.log(`[VideoEncoder] Metadata ready for ${name}`);
+      log(`[VideoEncoder] Metadata ready for ${name}`);
     }
   }
 
@@ -269,7 +270,7 @@ export class VideoEncoderManager extends EventEmitter<{
 
     try {
       await encoderObj.encoder.flush();
-      console.log(`[VideoEncoder] Flushed ${name}`);
+      log(`[VideoEncoder] Flushed ${name}`);
     } catch (error) {
       console.error(`[VideoEncoder] Failed to flush ${name}:`, error);
       throw error;
@@ -294,7 +295,7 @@ export class VideoEncoderManager extends EventEmitter<{
       }
 
       this.encoders.delete(name);
-      console.log(`[VideoEncoder] Closed encoder ${name}`);
+      log(`[VideoEncoder] Closed encoder ${name}`);
       this.emit("encoderClosed", name);
     } catch (error) {
       console.error(`[VideoEncoder] Error closing ${name}:`, error);
@@ -315,7 +316,7 @@ export class VideoEncoderManager extends EventEmitter<{
     this.encoders.clear();
     this.frameCounter = 0;
 
-    console.log("[VideoEncoder] All encoders closed");
+    log("[VideoEncoder] All encoders closed");
     this.emit("allEncodersClosed");
   }
 
@@ -371,7 +372,7 @@ export class VideoEncoderManager extends EventEmitter<{
    */
   resetFrameCounter(): void {
     this.frameCounter = 0;
-    console.log("[VideoEncoder] Frame counter reset");
+    log("[VideoEncoder] Frame counter reset");
   }
 
   /**
@@ -381,7 +382,7 @@ export class VideoEncoderManager extends EventEmitter<{
    */
   setKeyframeInterval(interval: number): void {
     this.keyframeInterval = interval;
-    console.log(`[VideoEncoder] Keyframe interval set to ${interval}`);
+    log(`[VideoEncoder] Keyframe interval set to ${interval}`);
   }
 
   /**

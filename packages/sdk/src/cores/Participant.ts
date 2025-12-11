@@ -14,6 +14,7 @@ import type {
 import type { Publisher } from "../media/publisher/Publisher";
 import type { Subscriber } from "../media/subscriber/Subscriber";
 import { ParticipantPermissions } from "../types/media/publisher.types";
+import {log} from "../utils";
 
 export class Participant extends EventEmitter {
   // Identity
@@ -190,9 +191,9 @@ export class Participant extends EventEmitter {
         participant: this,
         enabled: this.isHandRaised,
       });
-      console.log("toggleRaiseHand", this.isHandRaised);
+      log("toggleRaiseHand", this.isHandRaised);
     } catch (error) {
-      console.log("toggleRaiseHand error", error);
+      log("toggleRaiseHand error", error);
       this.emit("error", {
         participant: this,
         error: error instanceof Error ? error : new Error(String(error)),
@@ -268,7 +269,7 @@ export class Participant extends EventEmitter {
         hasVideo: videoTracks.length > 0,
       });
 
-      console.log("Media stream updated successfully");
+      log("Media stream updated successfully");
     } catch (error) {
       console.error("Failed to update media stream:", error);
       this.emit("error", {

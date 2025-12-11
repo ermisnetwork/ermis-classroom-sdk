@@ -16,6 +16,7 @@ import { VideoEncoderManager } from "./managers/VideoEncoderManager";
 import { AudioEncoderManager } from "./managers/AudioEncoderManager";
 import { VideoProcessor } from "./processors/VideoProcessor";
 import { AudioProcessor } from "./processors/AudioProcessor";
+import {log} from "../../utils";
 
 interface PublisherEvents extends Record<string, unknown> {
   statusUpdate: { message: string; isError: boolean };
@@ -126,7 +127,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       }
 
       this.InitAudioRecorder = audioModule.initAudioRecorder;
-      console.log("[Publisher] Dependencies loaded, initAudioRecorder type:", typeof this.InitAudioRecorder);
+      log("[Publisher] Dependencies loaded, initAudioRecorder type:", typeof this.InitAudioRecorder);
     } catch (error) {
       console.error("[Publisher] Failed to load dependencies:", error);
       throw error;
@@ -136,21 +137,21 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private async loadPolyfills(): Promise<void> {
     // Only load MSTP polyfill (same as original JS version)
     // MSTG polyfill is loaded by Subscriber when needed
-    console.log("[Publisher] 🔧 loadPolyfills() v2.0 - TypeScript version");
+    log("[Publisher] 🔧 loadPolyfills() v2.0 - TypeScript version");
     if (!document.querySelector('script[src*="MSTP_polyfill.js"]')) {
-      console.log("[Publisher] Loading MSTP polyfill from /polyfills/MSTP_polyfill.js");
+      log("[Publisher] Loading MSTP polyfill from /polyfills/MSTP_polyfill.js");
       await new Promise<void>((resolve, reject) => {
         const script = document.createElement("script");
         script.src = "/polyfills/MSTP_polyfill.js";
         script.onload = () => {
-          console.log("[Publisher] Polyfill loaded successfully");
+          log("[Publisher] Polyfill loaded successfully");
           resolve();
         };
         script.onerror = () => reject(new Error("Failed to load MSTP polyfill"));
         document.head.appendChild(script);
       });
     } else {
-      console.log("[Publisher] ℹ️ MSTP polyfill already loaded");
+      log("[Publisher] ℹ️ MSTP polyfill already loaded");
     }
   }
 
@@ -181,11 +182,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // If track exists but is disabled, set our state accordingly
       if (this.hasVideo) {
         this.videoEnabled = videoTracks[0].enabled;
-        console.log("[Publisher] Initial video enabled state:", this.videoEnabled);
+        log("[Publisher] Initial video enabled state:", this.videoEnabled);
       }
       if (this.hasAudio) {
         this.audioEnabled = audioTracks[0].enabled;
-        console.log("[Publisher] Initial audio enabled state:", this.audioEnabled);
+        log("[Publisher] Initial audio enabled state:", this.audioEnabled);
       }
 
       if (this.options.useWebRTC) {
@@ -226,14 +227,14 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       if (this.hasVideo) {
         const cameraEvent = this.videoEnabled ? MEETING_EVENTS.CAMERA_ON : MEETING_EVENTS.CAMERA_OFF;
         await this.sendMeetingEvent(cameraEvent);
-        console.log("[Publisher] Sent initial camera state:", this.videoEnabled ? "ON" : "OFF");
+        log("[Publisher] Sent initial camera state:", this.videoEnabled ? "ON" : "OFF");
       }
 
       // Send mic state if audio is available
       if (this.hasAudio) {
         const micEvent = this.audioEnabled ? MEETING_EVENTS.MIC_ON : MEETING_EVENTS.MIC_OFF;
         await this.sendMeetingEvent(micEvent);
-        console.log("[Publisher] Sent initial mic state:", this.audioEnabled ? "ON" : "OFF");
+        log("[Publisher] Sent initial mic state:", this.audioEnabled ? "ON" : "OFF");
       }
     } catch (error) {
       console.error("[Publisher] Failed to send initial state:", error);
@@ -340,8 +341,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     });
 
     // StreamManager now emits to globalEventBus directly - no need to re-emit
-    console.warn("[Publisher] Initializing publisher with permissions:", this.permissions);
-    console.warn("[Publisher] Sub streams for WebTransport:", this.subStreams);
     const channelNames: ChannelName[] = [
       ...this.subStreams.map(s => s.channelName as ChannelName),
     ];
@@ -387,7 +386,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     // Get all channel names from subStreams (already includes MEETING_CONTROL, MIC_AUDIO, and video channels)
     const channelNames: ChannelName[] = this.subStreams.map(s => s.channelName as ChannelName);
 
-    console.log("[Publisher] Setting up WebRTC for channels:", channelNames);
+    log("[Publisher] Setting up WebRTC for channels:", channelNames);
 
     // Connect all channels (WebRTCManager handles creating multiple peer connections)
     await this.webRtcManager.connectMultipleChannels(channelNames, this.streamManager);
@@ -419,7 +418,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         this.updateStatus("Video processing error", true);
       });
 
-      console.log("[Publisher] Video processor initialized");
+      log("[Publisher] Video processor initialized");
     }
 
     if (this.hasAudio) {
@@ -449,7 +448,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         this.updateStatus("Audio encoder error", true);
       });
 
-      console.log("[Publisher] Audio processor initialized");
+      log("[Publisher] Audio processor initialized");
     }
   }
 
@@ -471,7 +470,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
         await this.videoProcessor.initialize(videoTrack, baseConfig);
         await this.videoProcessor.start();
-        console.log("[Publisher] Video processing started");
+        log("[Publisher] Video processing started");
       }
     }
 
@@ -481,7 +480,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         const audioStream = new MediaStream([audioTrack]);
         await this.audioProcessor.initialize(audioStream);
         await this.audioProcessor.start();
-        console.log("[Publisher] Audio processing started");
+        log("[Publisher] Audio processing started");
       }
     }
   }
@@ -503,7 +502,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     const eventType = this.options.streamType === "display" ? MEETING_EVENTS.STOP_SCREEN_SHARE : MEETING_EVENTS.CAMERA_OFF;
     await this.sendMeetingEvent(eventType);
 
-    console.log("[Publisher] Video turned off");
+    log("[Publisher] Video turned off");
   }
 
   async turnOnVideo(): Promise<void> {
@@ -515,7 +514,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     const eventType = this.options.streamType === "display" ? MEETING_EVENTS.START_SCREEN_SHARE : MEETING_EVENTS.CAMERA_ON;
     await this.sendMeetingEvent(eventType);
 
-    console.log("[Publisher] Video turned on");
+    log("[Publisher] Video turned on");
   }
 
   async toggleAudio(): Promise<void> {
@@ -533,7 +532,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.audioEnabled = false;
     await this.sendMeetingEvent(MEETING_EVENTS.MIC_OFF);
 
-    console.log("[Publisher] Audio turned off");
+    log("[Publisher] Audio turned off");
   }
 
   async turnOnAudio(): Promise<void> {
@@ -543,7 +542,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.audioEnabled = true;
     await this.sendMeetingEvent(MEETING_EVENTS.MIC_ON);
 
-    console.log("[Publisher] Audio turned on");
+    log("[Publisher] Audio turned on");
   }
 
   async toggleMic(): Promise<void> {
@@ -589,7 +588,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         }
         this.currentStream?.addTrack(newVideoTrack);
 
-        console.log("[Publisher] Video device switched");
+        log("[Publisher] Video device switched");
 
         const videoOnlyStream = new MediaStream([newVideoTrack]);
         return { videoOnlyStream };
@@ -627,7 +626,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         }
         this.currentStream?.addTrack(newAudioTrack);
 
-        console.log("[Publisher] Audio device switched");
+        log("[Publisher] Audio device switched");
       }
     } catch (error) {
       console.error("[Publisher] Failed to switch audio device:", error);
@@ -640,7 +639,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     this.isHandRaised = true;
     await this.sendMeetingEvent(MEETING_EVENTS.RAISE_HAND);
-    console.log("[Publisher] Hand raised");
+    log("[Publisher] Hand raised");
   }
 
   async lowerHand(): Promise<void> {
@@ -648,7 +647,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     this.isHandRaised = false;
     await this.sendMeetingEvent(MEETING_EVENTS.LOWER_HAND);
-    console.log("[Publisher] Hand lowered");
+    log("[Publisher] Hand lowered");
   }
 
   // private async sendMeetingEvent(eventType: string, data?: any): Promise<void> {
@@ -748,7 +747,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         this.options.onStreamStop();
       }
 
-      console.log("[Publisher] Stopped successfully");
+      log("[Publisher] Stopped successfully");
     } catch (error: any) {
       console.error("[Publisher] Error during stop:", error);
       this.updateStatus("Error stopping publisher", true);
@@ -771,7 +770,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private isScreenSharing = false;
 
   async startShareScreen(screenMediaStream: MediaStream): Promise<void> {
-    console.log("[Publisher] Starting screen sharing with provided MediaStream:", screenMediaStream);
+    log("[Publisher] Starting screen sharing with provided MediaStream:", screenMediaStream);
 
     if (this.isScreenSharing) {
       this.updateStatus("Already sharing screen", true);
@@ -803,7 +802,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       const videoTrack = this.screenStream.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.onended = () => {
-          console.log("[Publisher] Screen share stopped by user");
+          log("[Publisher] Screen share stopped by user");
           this.stopShareScreen();
         };
       }
@@ -811,13 +810,13 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       this.isScreenSharing = true;
 
 
-      console.log(`[Publisher] Creating screen share streams...`);
+      log(`[Publisher] Creating screen share streams...`);
       await this.streamManager.addStream(ChannelName.SCREEN_SHARE_720P);
       
       if (hasAudio) {
         await this.streamManager.addStream(ChannelName.SCREEN_SHARE_AUDIO);
       }
-      console.log(`[Publisher] Screen share streams created successfully`);
+      log(`[Publisher] Screen share streams created successfully`);
 
       await this.startScreenVideoCapture();
 
@@ -837,7 +836,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         videoOnlyStream.addTrack(videoTracks[0]);
       }
 
-      console.log("[Publisher] Emitting localScreenShareReady event");
+      log("[Publisher] Emitting localScreenShareReady event");
 
       const screenShareData = {
         stream: this.screenStream,
@@ -856,7 +855,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       // Emit to global event bus
       globalEventBus.emit(GlobalEvents.LOCAL_SCREEN_SHARE_READY, screenShareData);
-      console.log("[Publisher] localScreenShareReady event emitted");
+      log("[Publisher] localScreenShareReady event emitted");
 
       // Also emit screenShareStarted for backward compatibility
       this.emit("screenShareStarted", {
@@ -913,7 +912,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     await this.screenVideoProcessor.initialize(videoTrack, baseConfig);
     await this.screenVideoProcessor.start();
 
-    console.log("[Publisher] Screen video processing started");
+    log("[Publisher] Screen video processing started");
   }
 
   private async startScreenAudioStreaming(): Promise<void> {
@@ -955,7 +954,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     await this.screenAudioProcessor.initialize(screenAudioStream);
     await this.screenAudioProcessor.start();
 
-    console.log("[Publisher] Screen audio processing started");
+    log("[Publisher] Screen audio processing started");
   }
 
   async stopShareScreen(): Promise<void> {
@@ -1020,7 +1019,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     }
 
     try {
-      console.log("[Publisher] Replacing media stream...");
+      log("[Publisher] Replacing media stream...");
       this.updateStatus("Replacing media stream...");
 
       const videoTracks = newStream.getVideoTracks();
@@ -1043,19 +1042,19 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       // Restart video processor with new track
       if (hasVideo && this.videoProcessor) {
-        console.log("[Publisher] Switching video track...");
+        log("[Publisher] Switching video track...");
         await this.videoProcessor.switchCamera(videoTracks[0]);
       }
 
       // Restart audio processor with new track
       if (hasAudio && this.audioProcessor) {
-        console.log("[Publisher] Switching audio track...");
+        log("[Publisher] Switching audio track...");
         await this.audioProcessor.switchAudioTrack(audioTracks[0]);
       }
 
       // Clean up old stream
       if (oldStream) {
-        console.log("[Publisher] Cleaning up old stream...");
+        log("[Publisher] Cleaning up old stream...");
         oldStream.getTracks().forEach((track) => track.stop());
       }
 
@@ -1073,7 +1072,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         hasAudio,
       });
 
-      console.log("[Publisher] Media stream replaced successfully");
+      log("[Publisher] Media stream replaced successfully");
       this.updateStatus("Media stream replaced successfully");
 
       return {
@@ -1090,7 +1089,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   }
 
   private updateStatus(message: string, isError: boolean = false): void {
-    console.log(`[Publisher] ${message}`);
+    log(`[Publisher] ${message}`);
     this.emit("statusUpdate", { message, isError });
   }
 

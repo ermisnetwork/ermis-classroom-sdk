@@ -1,6 +1,6 @@
 // Check if EncodedAudioChunk is not supported
 if (!globalThis.EncodedAudioChunk) {
-  console.log("EncodedAudioChunk not supported, using polyfill");
+  console.warn("EncodedAudioChunk not supported, using polyfill");
 
   self.EncodedAudioChunk = class EncodedAudioChunk {
     #type;

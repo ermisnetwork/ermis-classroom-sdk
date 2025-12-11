@@ -12,6 +12,7 @@ import type {
   AudioMixer,
   AudioWorkletNodeWithPort,
 } from "../../../types/media/subscriber.types";
+import {log} from "../../../utils";
 
 /**
  * Audio processor events
@@ -60,7 +61,7 @@ export class AudioProcessor extends EventEmitter<AudioProcessorEvents> {
     try {
       // Skip audio setup for own stream to prevent echo
       if (this.isOwnStream) {
-        console.log("Skipping audio for own stream to prevent echo");
+        log("Skipping audio for own stream to prevent echo");
         this.emit("skipped", { reason: "Own stream - preventing echo" });
         return null;
       }
@@ -70,7 +71,7 @@ export class AudioProcessor extends EventEmitter<AudioProcessorEvents> {
         throw new Error("Audio mixer not set");
       }
 
-      console.log("Adding subscriber to audio mixer:", this.subscriberId);
+      log("Adding subscriber to audio mixer:", this.subscriberId);
 
       // Add subscriber to audio mixer
       this.audioWorkletNode = await this.audioMixer.addSubscriber(
@@ -88,7 +89,7 @@ export class AudioProcessor extends EventEmitter<AudioProcessorEvents> {
         };
       }
 
-      console.log("Audio system initialized");
+      log("Audio system initialized");
       this.emit("initialized", { workletNode: this.audioWorkletNode });
 
       return this.audioWorkletNode;
@@ -107,7 +108,7 @@ export class AudioProcessor extends EventEmitter<AudioProcessorEvents> {
   cleanup(): void {
     if (this.audioMixer) {
       this.audioMixer.removeSubscriber(this.subscriberId);
-      console.log("Removed from audio mixer:", this.subscriberId);
+      log("Removed from audio mixer:", this.subscriberId);
     }
 
     this.audioWorkletNode = null;

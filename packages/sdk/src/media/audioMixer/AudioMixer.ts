@@ -9,6 +9,7 @@ import type {
   AudioWorkletMessage,
   SubscriberAudioNode,
 } from "../../types/media/audioMixer.types";
+import {log} from "../../utils";
 
 export class AudioMixer {
   private audioContext: AudioContext | null = null;
@@ -96,8 +97,6 @@ export class AudioMixer {
     isOwnAudio = false,
     channelWorkletPort?: MessagePort,
   ): Promise<AudioWorkletNode | null> {
-    console.warn(`Adding subscriber ${subscriberId} to audio mixer`);
-
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -401,8 +400,7 @@ export class AudioMixer {
       this._debug("Audio worklet already loaded:", audioWorkletUrl);
       return;
     }
-
-    console.warn("Loading audio worklet from:", audioWorkletUrl);
+    
     try {
       await this.audioContext.audioWorklet.addModule(audioWorkletUrl);
       this.loadedWorklets.add(audioWorkletUrl);
@@ -503,7 +501,7 @@ export class AudioMixer {
    */
   private _debug(...args: any[]): void {
     if (this.debug) {
-      console.log("[AudioMixer]", ...args);
+      log("[AudioMixer]", ...args);
     }
   }
 }

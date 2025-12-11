@@ -61,7 +61,6 @@ export function CustomEventModal({ isOpen, onClose }: CustomEventModalProps) {
     if (!currentRoom) return
 
     const unsubscribe = currentRoom.onCustomEvent((event) => {
-      console.log('Received custom event via Room.onCustomEvent:', event);
       setReceivedEvents(prev => [{
         id: `${Date.now()}-${Math.random()}`,
         timestamp: Date.now(),

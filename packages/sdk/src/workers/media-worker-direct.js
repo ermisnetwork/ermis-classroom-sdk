@@ -2,6 +2,7 @@
 import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
+import {log} from "../utils/index.ts";
 
 let videoDecoder360p;
 let videoDecoder720p;
@@ -89,7 +90,7 @@ const audioInit = {
 
 function logStats() {
   setInterval(() => {
-    console.log(
+    log(
       "Buffer stats:",
       videoFrameBuffer.length,
       audioFrameBuffer.length
@@ -213,18 +214,18 @@ self.onmessage = async function (e) {
   switch (type) {
     case "init":
       baseUrl = data.baseUrl;
-      console.log("Media Worker: Initializing with base URL:", baseUrl);
+      log("Media Worker: Initializing with base URL:", baseUrl);
       await initializeDecoders();
       setupWebSockets(quality || "360p");
       if (port && port instanceof MessagePort) {
-        console.log("Media Worker: Received port to connect to Audio Worklet.");
+        log("Media Worker: Received port to connect to Audio Worklet.");
         workletPort = port;
       }
       break;
 
     case "toggleAudio":
       audioEnabled = !audioEnabled;
-      console.log(
+      log(
         "Media Worker: Toggling audio. Now audioEnabled =",
         audioEnabled
       );
@@ -236,12 +237,12 @@ self.onmessage = async function (e) {
       break;
 
     case "reset":
-      console.log("Media Worker: Resetting decoders and buffers.");
+      log("Media Worker: Resetting decoders and buffers.");
       resetWebsockets();
       break;
 
     case "stop":
-      console.log("Media Worker: Stopping all operations.");
+      log("Media Worker: Stopping all operations.");
       stop();
       break;
   }
@@ -288,14 +289,14 @@ function setupWebSockets(initialQuality = "360p") {
 
 function setupVideoWebSocket(quality) {
   const wsUrl = `${baseUrl}/cam_${quality}`;
-  console.log(`Setting up video WebSocket for ${quality}:`, wsUrl);
+  log(`Setting up video WebSocket for ${quality}:`, wsUrl);
 
   try {
     const ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
-      console.log(`Video ${quality} WebSocket connected`);
+      log(`Video ${quality} WebSocket connected`);
       self.postMessage({
         type: "log",
         level: "info",
@@ -330,14 +331,14 @@ function setupVideoWebSocket(quality) {
 
 function setupAudioWebSocket() {
   const wsUrl = `${baseUrl}/mic_48k`;
-  console.log("Setting up audio WebSocket:", wsUrl);
+  log("Setting up audio WebSocket:", wsUrl);
 
   try {
     wsAudio = new WebSocket(wsUrl);
     wsAudio.binaryType = "arraybuffer";
 
     wsAudio.onopen = () => {
-      console.log("Audio WebSocket connected");
+      log("Audio WebSocket connected");
       self.postMessage({
         type: "log",
         level: "info",
@@ -369,7 +370,7 @@ function handleVideoMessage(event, quality) {
     const dataJson = JSON.parse(event.data);
 
     if (dataJson.type === "StreamConfig") {
-      console.log(`Received video config for ${quality}:`, dataJson);
+      log(`Received video config for ${quality}:`, dataJson);
 
       const configData = dataJson.config;
       const description = base64ToUint8Array(configData.description);
@@ -397,7 +398,7 @@ function handleVideoMessage(event, quality) {
     }
 
     if (dataJson.type === "TotalViewerCount") {
-      console.log(
+      log(
         "[Media worker]: TotalViewerCount received:",
         dataJson.total_viewers
       );
@@ -461,7 +462,7 @@ function handleAudioMessage(event) {
     const dataJson = JSON.parse(event.data);
 
     if (dataJson.type === "StreamConfig") {
-      console.log("Received audio config:", dataJson);
+      log("Received audio config:", dataJson);
 
       const configData = dataJson.config;
       const description = base64ToUint8Array(configData.description);
@@ -603,7 +604,7 @@ function handleBitrateSwitch(quality) {
     return;
   }
 
-  console.log(`Switching bitrate from ${currentQuality} to ${quality}`);
+  log(`Switching bitrate from ${currentQuality} to ${quality}`);
 
   // Close old WebSocket and setup new one
   if (quality === "360p" && ws720p) {

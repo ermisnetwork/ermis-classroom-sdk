@@ -1,4 +1,4 @@
-import { FRAME_TYPE, CHANNEL_NAME, CLIENT_COMMANDS, STREAM_TYPE } from "./publisherConstants.js";
+import {CHANNEL_NAME, CLIENT_COMMANDS, FRAME_TYPE, STREAM_TYPE} from "./publisherConstants.js";
 
 class CommandSender {
   constructor(config) {
@@ -9,7 +9,7 @@ class CommandSender {
   }
 
   async _sendPublisherCommand(channelName, type, data = null) {
-    const command = { type };
+    const command = {type};
     if (data !== null) {
       command.data = data;
     }
@@ -25,18 +25,16 @@ class CommandSender {
   }
 
   async _sendSubscriberCommand(type, data = null) {
-    const command = { type };
+    const command = {type};
     if (data !== null) {
       command.data = data;
     }
 
     const json = JSON.stringify(command);
     if (this.protocol === "webtransport") {
-      console.warn("[Client Command]Sending subscriber command via WebTransport:", "command:", command);
       const bytes = new TextEncoder().encode(json);
       await this.sendData(bytes);
     } else {
-      console.warn("[Client Command]Sending subscriber command via WebSocket:", "command:", command);
       await this.sendData(json);
     }
   }
@@ -61,20 +59,12 @@ class CommandSender {
   }
 
   async sendMediaConfig(channelName, config) {
-    console.warn("[Client Command]Sending media config to server:", "channel name:", channelName, "config:", config);
     await this._sendPublisherCommand(channelName, "media_config", config);
   }
 
   async initSubscribeChannelStream(subscriberType) {
-    console.log('init subscribe channel', this.localStreamId);
     const initQuality =
       subscriberType === STREAM_TYPE.SCREEN_SHARE ? CHANNEL_NAME.SCREEN_SHARE_720P : CHANNEL_NAME.VIDEO_720P;
-    console.log(
-      "[Client Command]Initializing subscribe channel stream with type:",
-      subscriberType,
-      "and quality:",
-      initQuality
-    );
     await this._sendSubscriberCommand("init_channel_stream", {
       subscriber_stream_id: this.localStreamId,
       stream_type: subscriberType,

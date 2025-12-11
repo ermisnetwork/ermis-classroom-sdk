@@ -23,7 +23,7 @@ import {
 import {MediaDeviceManager} from '../media/devices/MediaDeviceManager';
 import {ConnectionStatus as ConnectionStatusConst} from '../constants/connectionStatus';
 import {ParticipantRoles, VERSION} from '../constants';
-import {BrowserDetection} from '../utils';
+import {BrowserDetection, log} from '../utils';
 
 export class ErmisClient extends EventEmitter {
   // Configuration
@@ -473,7 +473,7 @@ export class ErmisClient extends EventEmitter {
       const joinResult = await room.join(this.state.user!.id, mediaStream);
 
       // Update state after join completes
-      console.log("Room joined successfully:", room.getInfo());
+      log("Room joined successfully:", room.getInfo());
       this.state.rooms.set(room.id, room);
 
       this.emit('roomJoined', {room, joinResult});
@@ -840,14 +840,14 @@ export class ErmisClient extends EventEmitter {
    */
   async cleanup(): Promise<void> {
     try {
-      console.log('[MeetingClient] Starting cleanup...');
+      log('[MeetingClient] Starting cleanup...');
 
       // Cleanup global event listeners
       this._cleanupGlobalEventListeners();
 
       // Leave current room
       if (this.state.currentRoom) {
-        console.log('[MeetingClient] Leaving current room...');
+        log('[MeetingClient] Leaving current room...');
         await this.state.currentRoom.leave();
       }
 
@@ -874,7 +874,7 @@ export class ErmisClient extends EventEmitter {
    * Use this when React component unmounts but user is still in meeting
    */
   cleanupListeners(): void {
-    console.log('[MeetingClient] Cleaning up listeners only (soft cleanup)...');
+    log('[MeetingClient] Cleaning up listeners only (soft cleanup)...');
 
     // Cleanup global event listeners
     this._cleanupGlobalEventListeners();
@@ -882,7 +882,7 @@ export class ErmisClient extends EventEmitter {
     // Remove all local listeners
     this.removeAllListeners();
 
-    console.log('[MeetingClient] Listener cleanup completed');
+    log('[MeetingClient] Listener cleanup completed');
   }
 
   /**
@@ -899,23 +899,23 @@ export class ErmisClient extends EventEmitter {
   private _setupGlobalEventListeners(): void {
     // Handle server events
     const handleServerEvent = async (event: any) => {
-      console.log('[MeetingClient] Received SERVER_EVENT from globalEventBus:', event);
+      log('[MeetingClient] Received SERVER_EVENT from globalEventBus:', event);
       // Server events are already handled by Room, just log for debugging
     };
 
     // Handle local stream ready
     const handleLocalStreamReady = (data: any) => {
-      console.log('[MeetingClient] Received LOCAL_STREAM_READY from globalEventBus', {
+      log('[MeetingClient] Received LOCAL_STREAM_READY from globalEventBus', {
         hasCurrentRoom: !!this.state.currentRoom,
         dataStreamId: data.streamId,
       });
 
       if (!this.state.currentRoom) {
-        console.warn('[MeetingClient] No currentRoom when LOCAL_STREAM_READY received');
+        log('[MeetingClient] No currentRoom when LOCAL_STREAM_READY received');
         return;
       }
 
-      console.log('[MeetingClient] ✅ Emitting localStreamReady to UI');
+      log('[MeetingClient] ✅ Emitting localStreamReady to UI');
 
       // Enrich with room context and emit
       this.emit('localStreamReady', {
@@ -927,7 +927,7 @@ export class ErmisClient extends EventEmitter {
 
     // Handle local screen share ready
     const handleLocalScreenShareReady = (data: any) => {
-      console.log('[MeetingClient] Received LOCAL_SCREEN_SHARE_READY from globalEventBus');
+      log('[MeetingClient] Received LOCAL_SCREEN_SHARE_READY from globalEventBus');
 
       if (!this.state.currentRoom) return;
 
@@ -940,14 +940,14 @@ export class ErmisClient extends EventEmitter {
 
     // Handle remote stream ready
     const handleRemoteStreamReady = (data: any) => {
-      console.log('[MeetingClient] Received REMOTE_STREAM_READY from globalEventBus', {
+      log('[MeetingClient] Received REMOTE_STREAM_READY from globalEventBus', {
         streamId: data.streamId,
         subscribeType: data.subscribeType,
         hasCurrentRoom: !!this.state.currentRoom,
       });
 
       if (!this.state.currentRoom) {
-        console.warn('[MeetingClient] No currentRoom, cannot process REMOTE_STREAM_READY');
+        log('[MeetingClient] No currentRoom, cannot process REMOTE_STREAM_READY');
         return;
       }
 
@@ -957,14 +957,14 @@ export class ErmisClient extends EventEmitter {
       );
 
       if (participant) {
-        console.log('[MeetingClient] ✅ Found participant for stream:', participant.userId);
+        log('[MeetingClient] ✅ Found participant for stream:', participant.userId);
         this.emit('remoteStreamReady', {
           ...data,
           participant: participant.getInfo(),
           roomId: this.state.currentRoom.id,
         });
       } else {
-        console.warn('[MeetingClient] ❌ Participant not found for streamId:', data.streamId, {
+        log('[MeetingClient] ❌ Participant not found for streamId:', data.streamId, {
           participantsCount: this.state.currentRoom.participants.size,
           participantIds: Array.from(this.state.currentRoom.participants.keys()),
         });
@@ -985,7 +985,7 @@ export class ErmisClient extends EventEmitter {
       () => globalEventBus.off(GlobalEvents.REMOTE_STREAM_READY, handleRemoteStreamReady),
     );
 
-    console.log('[MeetingClient] ✅ Global event listeners setup complete');
+    log('[MeetingClient] ✅ Global event listeners setup complete');
   }
 
   /**
@@ -994,7 +994,7 @@ export class ErmisClient extends EventEmitter {
   private _cleanupGlobalEventListeners(): void {
     this.globalEventCleanups.forEach(cleanup => cleanup());
     this.globalEventCleanups = [];
-    console.log('[MeetingClient] ✅ Global event listeners cleaned up');
+    log('[MeetingClient] ✅ Global event listeners cleaned up');
   }
 
   /**
@@ -1036,7 +1036,7 @@ export class ErmisClient extends EventEmitter {
 
     eventsToForward.forEach((event) => {
       room.on(event, (data: any) => {
-        console.log(`[MeetingClient] Forwarding room event: ${event}`, data);
+        log(`[MeetingClient] Forwarding room event: ${event}`, data);
         this.emit(event, data);
       });
     });
@@ -1044,8 +1044,8 @@ export class ErmisClient extends EventEmitter {
 
 
   async sendCustomEvent(targets: string[], eventData: object): Promise<void> {
-    console.log("[MeetingClient] Sending custom event:", eventData);
-    console.log("Current room:", this.state.currentRoom?.getInfo());
+    log("[MeetingClient] Sending custom event:", eventData);
+    log("Current room:", this.state.currentRoom?.getInfo());
     if (!this.state.currentRoom) {
       return;
     }
@@ -1124,7 +1124,7 @@ export class ErmisClient extends EventEmitter {
    */
   private _debug(...args: any[]): void {
     if (this.config.debug) {
-      console.log('[ErmisClient]', ...args);
+      log('[ErmisClient]', ...args);
     }
   }
 }

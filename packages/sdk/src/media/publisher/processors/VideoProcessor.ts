@@ -6,6 +6,7 @@ import type {
 } from "../../../types/media/publisher.types";
 import { VideoEncoderManager } from "../managers/VideoEncoderManager";
 import { StreamManager } from "../transports/StreamManager";
+import {log} from "../../../utils";
 
 /**
  * VideoProcessor - Manages video frame processing and encoding pipeline
@@ -95,15 +96,15 @@ export class VideoProcessor extends EventEmitter<{
     }
 
     try {
-      console.log("[VideoProcessor] Initializing...");
-      console.log("[VideoProcessor] Sub-streams:", this.subStreams.length, this.subStreams.map(s => s.name));
+      log("[VideoProcessor] Initializing...");
+      log("[VideoProcessor] Sub-streams:", this.subStreams.length, this.subStreams.map(s => s.name));
 
       // Store track reference for enabling/disabling
       this.videoTrack = videoTrack;
 
       // Sync initial cameraEnabled state with track's enabled state
       this.cameraEnabled = videoTrack.enabled;
-      console.log("[VideoProcessor] Initial camera enabled state:", this.cameraEnabled);
+      log("[VideoProcessor] Initial camera enabled state:", this.cameraEnabled);
 
       // Create encoders for each sub-stream
       for (const subStream of this.subStreams) {
@@ -115,7 +116,7 @@ export class VideoProcessor extends EventEmitter<{
           bitrate: subStream.bitrate!,
         };
 
-        console.log(`[VideoProcessor] Creating encoder for ${subStream.name}:`, encoderConfig);
+        log(`[VideoProcessor] Creating encoder for ${subStream.name}:`, encoderConfig);
 
         this.videoEncoderManager.createEncoder(
           subStream.name,
@@ -127,7 +128,7 @@ export class VideoProcessor extends EventEmitter<{
         );
       }
 
-      console.log("[VideoProcessor] Setting up video processor with trigger worker...");
+      log("[VideoProcessor] Setting up video processor with trigger worker...");
 
       // Setup video processor with trigger worker
       this.triggerWorker = new Worker("/polyfills/triggerWorker.js");
@@ -141,7 +142,7 @@ export class VideoProcessor extends EventEmitter<{
 
       this.videoReader = this.videoProcessor.readable.getReader();
 
-      console.log("[VideoProcessor] Initialized successfully, videoReader:", !!this.videoReader);
+      log("[VideoProcessor] Initialized successfully, videoReader:", !!this.videoReader);
       this.emit("initialized", { subStreams: this.subStreams });
     } catch (error) {
       console.error("[VideoProcessor] Initialization failed:", error);
@@ -173,12 +174,12 @@ export class VideoProcessor extends EventEmitter<{
       // If camera is initially disabled, enable config capture mode
       // This will temporarily encode frames to get video config, then stop
       if (!this.cameraEnabled) {
-        console.log("[VideoProcessor] Camera disabled, enabling config capture mode...");
+        log("[VideoProcessor] Camera disabled, enabling config capture mode...");
         this.isCapturingConfig = true;
         this.configCaptureComplete = false;
       }
 
-      console.log("[VideoProcessor] Starting frame processing...");
+      log("[VideoProcessor] Starting frame processing...");
       this.emit("started");
 
       // Start processing loop in background (fire-and-forget)
@@ -200,7 +201,7 @@ export class VideoProcessor extends EventEmitter<{
     }
 
     try {
-      console.log("[VideoProcessor] Stopping...");
+      log("[VideoProcessor] Stopping...");
       this.isProcessing = false;
 
       // Cancel video reader
@@ -231,7 +232,7 @@ export class VideoProcessor extends EventEmitter<{
       this.frameCounter = 0;
       (window as any).videoBaseTimestamp = undefined;
 
-      console.log("[VideoProcessor] Stopped successfully");
+      log("[VideoProcessor] Stopped successfully");
       this.emit("stopped");
     } catch (error) {
       console.error("[VideoProcessor] Error stopping:", error);
@@ -243,14 +244,14 @@ export class VideoProcessor extends EventEmitter<{
    * Process video frames loop
    */
   private async processFrames(): Promise<void> {
-    console.log("[VideoProcessor] processFrames() started, isProcessing:", this.isProcessing, "videoReader:", !!this.videoReader);
+    log("[VideoProcessor] processFrames() started, isProcessing:", this.isProcessing, "videoReader:", !!this.videoReader);
     try {
       let frameCount = 0;
       while (this.isProcessing && this.videoReader) {
         const result = await this.videoReader.read();
 
         if (result.done) {
-          console.log("[VideoProcessor] Frame reading completed");
+          log("[VideoProcessor] Frame reading completed");
           break;
         }
 
@@ -260,7 +261,7 @@ export class VideoProcessor extends EventEmitter<{
         // Set base timestamp on first frame
         if (!(window as any).videoBaseTimestamp) {
           (window as any).videoBaseTimestamp = frame.timestamp;
-          console.log(
+          log(
             "[VideoProcessor] Base timestamp set:",
             frame.timestamp,
           );
@@ -268,7 +269,7 @@ export class VideoProcessor extends EventEmitter<{
 
         // Log first few frames
         if (frameCount <= 5) {
-          console.log(`[VideoProcessor] Processing frame ${frameCount}, timestamp:`, frame.timestamp);
+          log(`[VideoProcessor] Processing frame ${frameCount}, timestamp:`, frame.timestamp);
         }
 
         // Determine if we should encode this frame
@@ -295,13 +296,13 @@ export class VideoProcessor extends EventEmitter<{
             (s) => this.videoEncoderManager.isMetadataReady(s.name)
           );
           if (allConfigsCaptured) {
-            console.log("[VideoProcessor] Config capture complete, all encoder configs captured");
+            log("[VideoProcessor] Config capture complete, all encoder configs captured");
             this.configCaptureComplete = true;
             this.isCapturingConfig = false;
           }
         }
       }
-      console.log("[VideoProcessor] processFrames() ended, total frames:", frameCount);
+      log("[VideoProcessor] processFrames() ended, total frames:", frameCount);
     } catch (error) {
       console.error("[VideoProcessor] Frame processing error:", error);
       this.emit("processingError", error);
@@ -406,7 +407,7 @@ export class VideoProcessor extends EventEmitter<{
     }
 
     try {
-      console.log("[VideoProcessor] Switching camera...");
+      log("[VideoProcessor] Switching camera...");
 
       // Temporarily stop processing
       const wasProcessing = this.isProcessing;
@@ -447,7 +448,7 @@ export class VideoProcessor extends EventEmitter<{
         void this.processFrames();
       }
 
-      console.log("[VideoProcessor] Camera switched successfully");
+      log("[VideoProcessor] Camera switched successfully");
       this.emit("cameraSwitched", { track: newVideoTrack });
     } catch (error) {
       console.error("[VideoProcessor] Failed to switch camera:", error);
@@ -468,10 +469,10 @@ export class VideoProcessor extends EventEmitter<{
     // This ensures the video element shows/hides the video properly
     if (this.videoTrack) {
       this.videoTrack.enabled = enabled;
-      console.log(`[VideoProcessor] Video track enabled set to: ${enabled}`);
+      log(`[VideoProcessor] Video track enabled set to: ${enabled}`);
     }
 
-    console.log(`[VideoProcessor] Camera ${enabled ? "enabled" : "disabled"}`);
+    log(`[VideoProcessor] Camera ${enabled ? "enabled" : "disabled"}`);
     this.emit("cameraStateChanged", enabled);
   }
 

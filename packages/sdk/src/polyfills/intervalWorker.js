@@ -1,5 +1,3 @@
-console.log("worker.js loaded, interval for wake processor");
-
 self.onmessage = (e) => {
   const interval = e.data.interval || 500;
 

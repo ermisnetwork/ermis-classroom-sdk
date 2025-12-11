@@ -1,3 +1,14 @@
+const proxyConsole = {
+  log: () => {},
+  error: () => {},
+  warn: () => {},
+  debug: () => {},
+  info: () => {},
+  trace: () => {},
+  group: () => {},
+  groupEnd: () => {},
+};
+
 class JitterResistantProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
@@ -38,7 +49,7 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
               this.numberOfChannels = workerChannels;
               this.fadeInLength = Math.round(workerSampleRate / 100);
               this.resizeBuffers(workerChannels);
-              console.log(
+              proxyConsole.log(
                 `Processor configured from worker: ${workerSampleRate}Hz, ${workerChannels} channels.`
               );
             }
@@ -46,7 +57,7 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
             this.addAudioData(receivedChannelDataBuffers);
           }
         };
-        console.log("Worker port connected to AudioWorklet");
+        proxyConsole.log("Worker port connected to AudioWorklet");
       } else if (type === "reset") {
         this.reset();
       } else if (type === "setBufferSize") {
@@ -130,7 +141,7 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
     this.isPlaying = false;
     this.fadeInSamples = 0;
     this.adaptiveBufferSize = this.bufferSize;
-    console.log("Audio processor reset.");
+    proxyConsole.log("Audio processor reset.");
   }
 
   /**

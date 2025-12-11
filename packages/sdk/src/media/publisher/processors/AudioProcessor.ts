@@ -6,6 +6,7 @@ import type {
 import { AudioConfig } from "../../subscriber";
 import { AudioEncoderManager } from "../managers/AudioEncoderManager";
 import { StreamManager } from "../transports/StreamManager";
+import {log} from "../../../utils";
 
 /**
  * AudioProcessor - Manages audio processing and encoding pipeline
@@ -77,7 +78,7 @@ export class AudioProcessor extends EventEmitter<{
    */
   private setupEncoderHandlers(): void {
     this.audioEncoderManager.on("configReady", async (data) => {
-      console.log("[AudioProcessor] Config ready:", data);
+      log("[AudioProcessor] Config ready:", data);
 
       // Wrap description in packet header.
       const config: AudioConfig = {
@@ -147,7 +148,7 @@ export class AudioProcessor extends EventEmitter<{
     }
 
     try {
-      console.log("[AudioProcessor] Initializing...");
+      log("[AudioProcessor] Initializing...");
 
       // Store audio track reference for enabling/disabling
       const audioTracks = audioStream.getAudioTracks();
@@ -155,12 +156,12 @@ export class AudioProcessor extends EventEmitter<{
         this.audioTrack = audioTracks[0];
         // Sync initial micEnabled state with track's enabled state
         this.micEnabled = this.audioTrack.enabled;
-        console.log("[AudioProcessor] Initial mic enabled state:", this.micEnabled);
+        log("[AudioProcessor] Initial mic enabled state:", this.micEnabled);
       }
 
       await this.audioEncoderManager.initialize(audioStream);
 
-      console.log("[AudioProcessor] Initialized successfully");
+      log("[AudioProcessor] Initialized successfully");
       this.emit("initialized", { channelName: this.channelName });
     } catch (error) {
       console.error("[AudioProcessor] Initialization failed:", error);
@@ -183,7 +184,7 @@ export class AudioProcessor extends EventEmitter<{
 
       await this.audioEncoderManager.start();
 
-      console.log("[AudioProcessor] Started successfully");
+      log("[AudioProcessor] Started successfully");
       this.emit("started", { channelName: this.channelName });
     } catch (error) {
       console.error("[AudioProcessor] Failed to start:", error);
@@ -201,12 +202,12 @@ export class AudioProcessor extends EventEmitter<{
     }
 
     try {
-      console.log("[AudioProcessor] Stopping...");
+      log("[AudioProcessor] Stopping...");
       this.isProcessing = false;
 
       await this.audioEncoderManager.stop();
 
-      console.log("[AudioProcessor] Stopped successfully");
+      log("[AudioProcessor] Stopped successfully");
       this.emit("stopped", { channelName: this.channelName });
     } catch (error) {
       console.error("[AudioProcessor] Error stopping:", error);
@@ -225,7 +226,7 @@ export class AudioProcessor extends EventEmitter<{
     }
 
     try {
-      console.log("[AudioProcessor] Switching microphone...");
+      log("[AudioProcessor] Switching microphone...");
 
       // Stop current encoder
       await this.audioEncoderManager.stop();
@@ -239,7 +240,7 @@ export class AudioProcessor extends EventEmitter<{
       // Restart
       await this.audioEncoderManager.start();
 
-      console.log("[AudioProcessor] Microphone switched successfully");
+      log("[AudioProcessor] Microphone switched successfully");
       this.emit("microphoneSwitched", { stream: audioStream });
     } catch (error) {
       console.error("[AudioProcessor] Failed to switch microphone:", error);
@@ -264,7 +265,7 @@ export class AudioProcessor extends EventEmitter<{
     }
 
     try {
-      console.log("[AudioProcessor] Switching audio track...");
+      log("[AudioProcessor] Switching audio track...");
 
       // Create new stream with the track
       const newStream = new MediaStream([track]);
@@ -273,7 +274,7 @@ export class AudioProcessor extends EventEmitter<{
       // TODO: In future, implement direct track replacement in encoder
       await this.switchMicrophone(newStream);
 
-      console.log("[AudioProcessor] Audio track switched successfully");
+      log("[AudioProcessor] Audio track switched successfully");
     } catch (error) {
       console.error("[AudioProcessor] Failed to switch audio track:", error);
       this.emit("microphoneSwitchError", error);
@@ -292,10 +293,10 @@ export class AudioProcessor extends EventEmitter<{
     // Also toggle the actual MediaStreamTrack's enabled property
     if (this.audioTrack) {
       this.audioTrack.enabled = enabled;
-      console.log(`[AudioProcessor] Audio track enabled set to: ${enabled}`);
+      log(`[AudioProcessor] Audio track enabled set to: ${enabled}`);
     }
 
-    console.log(`[AudioProcessor] Microphone ${enabled ? "enabled" : "disabled"}`);
+    log(`[AudioProcessor] Microphone ${enabled ? "enabled" : "disabled"}`);
     this.emit("micStateChanged", enabled);
   }
 

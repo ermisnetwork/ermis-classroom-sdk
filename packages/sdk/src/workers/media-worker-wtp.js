@@ -30,6 +30,18 @@ let keyFrameReceived = false;
 
 const channelStreams = new Map();
 
+
+const proxyConsole = {
+  log: () => {},
+  error: () => {},
+  warn: () => {},
+  debug: () => {},
+  info: () => {},
+  trace: () => {},
+  group: () => {},
+  groupEnd: () => {},
+};
+
 // ------------------------------
 // Decoder setup
 // ------------------------------
@@ -39,7 +51,7 @@ const createVideoInit = (quality) => ({
     self.postMessage({ type: "videoData", frame, quality }, [frame]);
   },
   error: (e) => {
-    console.error(`Video decoder error (${quality}):`, e);
+    proxyConsole.error(`Video decoder error (${quality}):`, e);
     self.postMessage({
       type: "error",
       message: `${quality} decoder: ${e.message}`,
@@ -92,7 +104,7 @@ self.onmessage = async function (e) {
 
     case "attachStream":
       if (readable && writable && channelName) {
-        console.warn(`[Publisher worker]: Attaching stream for ${channelName}`);
+        proxyConsole.warn(`[Publisher worker]: Attaching stream for ${channelName}`);
         attachWebTransportStream(channelName, readable, writable);
       }
       break;
@@ -125,9 +137,9 @@ async function attachWebTransportStream(channelName, readable, writable) {
   const writer = writable.getWriter();
 
   channelStreams.set(channelName, { reader, writer });
-  console.log(`Attached WebTransport stream for ${channelName}`);
+  proxyConsole.log(`Attached WebTransport stream for ${channelName}`);
   const initText = `subscribe:${channelName}`;
-  console.log(`Sending init message for ${channelName}:`, initText);
+  proxyConsole.log(`Sending init message for ${channelName}:`, initText);
 
   const initData = new TextEncoder().encode(initText);
 
@@ -145,7 +157,7 @@ async function attachWebTransportStream(channelName, readable, writable) {
 }
 
 async function readVideoStream(channelName, reader) {
-  console.warn(`Starting to read video stream: ${channelName}`);
+  proxyConsole.warn(`Starting to read video stream: ${channelName}`);
   const quality = channelName.includes("360p") ? "360p" : "720p";
 
   const delimitedReader = new LengthDelimitedReader(reader);
@@ -155,21 +167,21 @@ async function readVideoStream(channelName, reader) {
     while (true) {
       const message = await delimitedReader.readMessage();
       if (message === null) {
-        console.log("Stream closed");
+        proxyConsole.log("Stream closed");
         break;
       }
 
       try {
         const text = textDecoder.decode(message);
         if (text.startsWith("{")) {
-          console.log("Received Video text message", text);
+          proxyConsole.log("Received Video text message", text);
           let dataJson;
           try {
             dataJson = JSON.parse(text);
           } catch (error) {
-            console.error("error while parse config", error);
+            proxyConsole.error("error while parse config", error);
           }
-          console.log("Received video config", dataJson);
+          proxyConsole.log("Received video config", dataJson);
           if (dataJson.type === "StreamConfig") {
             const cfg = dataJson.config;
             const desc = base64ToUint8Array(cfg.description);
@@ -193,7 +205,7 @@ async function readVideoStream(channelName, reader) {
       handleVideoBinaryPacket(message.buffer, quality);
     }
   } catch (error) {
-    console.error("Stream error:", error);
+    proxyConsole.error("Stream error:", error);
   }
 }
 
@@ -209,8 +221,8 @@ function handleVideoBinaryPacket(dataBuffer, quality) {
     frameType !== 2 &&
     frameType !== 3
   ) {
-    console.warn("Unknown video frame type:", frameType);
-    console.warn("Data buffer:", dataBuffer);
+    proxyConsole.warn("Unknown video frame type:", frameType);
+    proxyConsole.warn("Data buffer:", dataBuffer);
     return;
   }
 
@@ -262,7 +274,7 @@ function handleVideoBinaryPacket(dataBuffer, quality) {
 }
 
 async function readAudioStream(reader) {
-  console.warn(`Starting to read audio stream`);
+  proxyConsole.warn(`Starting to read audio stream`);
   const delimitedReader = new LengthDelimitedReader(reader);
   const textDecoder = new TextDecoder();
 
@@ -270,7 +282,7 @@ async function readAudioStream(reader) {
     while (true) {
       const message = await delimitedReader.readMessage();
       if (message === null) {
-        console.log("Stream closed");
+        proxyConsole.log("Stream closed");
         break;
       }
 
@@ -278,15 +290,15 @@ async function readAudioStream(reader) {
         const text = textDecoder.decode(message);
 
         if (text.startsWith("{")) {
-          console.log("receiver message in audio channel ", text);
+          proxyConsole.log("receiver message in audio channel ", text);
           try {
             let dataJson;
             try {
               dataJson = JSON.parse(text);
             } catch (error) {
-              console.error("error while parse config", error);
+              proxyConsole.error("error while parse config", error);
             }
-            console.log("received audio config", dataJson);
+            proxyConsole.log("received audio config", dataJson);
             if (dataJson.type === "StreamConfig") {
               const cfg = dataJson.config;
               const desc = base64ToUint8Array(cfg.description);
@@ -311,14 +323,14 @@ async function readAudioStream(reader) {
                 });
                 audioDecoder.decode(chunk);
               } catch (error) {
-                console.log("Error decoding first audio frame:", error);
+                proxyConsole.log("Error decoding first audio frame:", error);
               }
 
               // configureAudioDecoder();
               continue;
             }
           } catch {
-            console.warn("Non-JSON text message:", msg);
+            proxyConsole.warn("Non-JSON text message:", msg);
           }
         }
       } catch (e) {}
@@ -327,7 +339,7 @@ async function readAudioStream(reader) {
       }
     }
   } catch (error) {
-    console.error("Stream error:", error);
+    proxyConsole.error("Stream error:", error);
   }
 }
 
@@ -346,7 +358,7 @@ function handleAudioBinaryPacket(dataBuffer) {
   try {
     audioDecoder.decode(chunk);
   } catch (err) {
-    console.error("Audio decode error:", err);
+    proxyConsole.error("Audio decode error:", err);
   }
 }
 
@@ -355,7 +367,7 @@ function handleAudioBinaryPacket(dataBuffer) {
 // ------------------------------
 
 async function initializeDecoders() {
-  console.log("Initializing decoders...");
+  proxyConsole.log("Initializing decoders...");
   videoDecoder360p = new VideoDecoder(createVideoInit("360p"));
   videoDecoder720p = new VideoDecoder(createVideoInit("720p"));
   currentVideoDecoder = videoDecoder360p;
@@ -363,7 +375,7 @@ async function initializeDecoders() {
   try {
     audioDecoder = new OpusAudioDecoder(audioInit);
   } catch (error) {
-    console.error("Failed to initialize OpusAudioDecoder:", error);
+    proxyConsole.error("Failed to initialize OpusAudioDecoder:", error);
   }
 
   curVideoInterval = { speed: 0, rate: 1000 / 30 };
@@ -389,7 +401,7 @@ function configureVideoDecoders(quality) {
       video720pConfig,
     });
   } catch (error) {
-    console.error("Failed to configure video decoder:", error);
+    proxyConsole.error("Failed to configure video decoder:", error);
   }
 }
 
@@ -408,7 +420,7 @@ function configureAudioDecoder() {
       audioConfig,
     });
   } catch (error) {
-    console.error("Failed to configure audio decoder:", error);
+    proxyConsole.error("Failed to configure audio decoder:", error);
   }
 }
 
@@ -432,7 +444,7 @@ function configureAudioDecoder() {
 
 async function handleBitrateSwitch(quality) {
   if (quality === currentQuality) {
-    console.log(`[Bitrate] Already at ${quality}, no switch needed.`);
+    proxyConsole.log(`[Bitrate] Already at ${quality}, no switch needed.`);
     return;
   }
 
@@ -440,7 +452,7 @@ async function handleBitrateSwitch(quality) {
   const targetStream = channelStreams.get(`cam_${quality}`);
 
   if (!targetStream) {
-    console.warn(`[Bitrate] Target stream cam_${quality} not attached.`);
+    proxyConsole.warn(`[Bitrate] Target stream cam_${quality} not attached.`);
     return;
   }
 
@@ -448,12 +460,12 @@ async function handleBitrateSwitch(quality) {
     const encoder = new TextEncoder();
 
     if (currentStream && currentStream.writer) {
-      console.log(`[Bitrate] Sending "pause" to cam_${currentQuality}`);
+      proxyConsole.log(`[Bitrate] Sending "pause" to cam_${currentQuality}`);
       await currentStream.writer.write(encoder.encode("pause"));
     }
 
     if (targetStream && targetStream.writer) {
-      console.log(`[Bitrate] Sending "resume" to cam_${quality}`);
+      proxyConsole.log(`[Bitrate] Sending "resume" to cam_${quality}`);
       await targetStream.writer.write(encoder.encode("resume"));
     }
 
@@ -467,9 +479,9 @@ async function handleBitrateSwitch(quality) {
       quality,
     });
 
-    console.log(`[Bitrate] Switched from ${currentQuality} to ${quality}`);
+    proxyConsole.log(`[Bitrate] Switched from ${currentQuality} to ${quality}`);
   } catch (err) {
-    console.error(`[Bitrate] Failed to switch to ${quality}:`, err);
+    proxyConsole.error(`[Bitrate] Failed to switch to ${quality}:`, err);
     self.postMessage({
       type: "error",
       message: `Failed to switch bitrate: ${err.message}`,

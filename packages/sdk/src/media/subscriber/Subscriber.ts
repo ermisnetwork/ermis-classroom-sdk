@@ -20,6 +20,7 @@ import { PolyfillManager } from "./managers/PolyfillManager";
 import { VideoProcessor } from "./processors/VideoProcessor";
 import { AudioProcessor } from "./processors/AudioProcessor";
 import { ConnectionStatus } from "../../types/core/ermisClient.types";
+import {log} from "../../utils";
 
 // Event type definitions
 interface SubscriberEvents extends Record<string, unknown> {
@@ -152,7 +153,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       onStatus: config.onStatus,
     };
 
-    console.log("Subscriber config protocol:", this.config.protocol);
+    log("Subscriber config protocol:", this.config.protocol);
 
     // Set protocol and subscribeType
     this.protocol = this.config.protocol;
@@ -209,11 +210,11 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     // Transport manager events
     if (this.transportManager) {
       this.transportManager.on("connected", () => {
-        console.log("Transport connected");
+        log("Transport connected");
       });
 
       this.transportManager.on("disconnected", ({ reason, error }) => {
-        console.log("Transport disconnected:", reason, error);
+        log("Transport disconnected:", reason, error);
         this.updateConnectionStatus("disconnected");
       });
 
@@ -252,7 +253,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     // Video processor events
     if (this.videoProcessor) {
       this.videoProcessor.on("initialized", ({ stream }) => {
-        console.log("[Subscriber] VideoProcessor initialized with stream:", {
+        log("[Subscriber] VideoProcessor initialized with stream:", {
           streamId: this.config.streamId,
           tracks: stream.getTracks().length,
         });
@@ -309,7 +310,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     }
 
     try {
-      console.log("Starting subscriber:", this.subscriberId, "protocol:", this.protocol);
+      log("Starting subscriber:", this.subscriberId, "protocol:", this.protocol);
       this.emit("starting", { subscriber: this });
       this.updateConnectionStatus("connecting");
 
@@ -346,9 +347,9 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       // Initialize video system if needed (not for screen sharing streams)
       // MATCH SubscriberDev.js: _initVideoSystem() is NOT awaited
       if (this.videoProcessor) {
-        console.log("[Subscriber] Initializing video processor for:", this.subscriberId);
+        log("[Subscriber] Initializing video processor for:", this.subscriberId);
         this.videoProcessor.init(); // ❗ NO await
-        console.log("[Subscriber] Video processor init() called");
+        log("[Subscriber] Video processor init() called");
       }
 
       // Attach streams to worker (WebTransport, WebRTC, or WebSocket)
@@ -508,7 +509,6 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     if (!this.workerManager) {
       throw new Error("Worker manager not initialized");
     }
-    console.warn("[Subscriber] Attaching streams using protocol:", this.protocol);
 
     try {
       if (this.protocol === "webtransport") {
@@ -533,16 +533,16 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       throw new Error("Managers not initialized");
     }
 
-    console.log("Attaching WebTransport streams...");
+    log("Attaching WebTransport streams...");
 
     // Use the subcribeUrl from config (already constructed in Room.ts with correct webtpUrl)
     const webTpUrl = this.config.subcribeUrl;
     if (!webTpUrl) {
       throw new Error("Subscribe URL not provided");
     }
-    console.log("Trying to connect to WebTransport to subscribe:", webTpUrl);
+    log("Trying to connect to WebTransport to subscribe:", webTpUrl);
     
-    console.log('this.config', this.config);
+    log('this.config', this.config);
 
     const wt = new WebTransport(webTpUrl);
     await wt.ready;
@@ -555,7 +555,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       mediaStream.writable,
       this.config.localStreamId
     );
-    console.log("✅ WebTransport stream attached");
+    log("✅ WebTransport stream attached");
   }
 
   /**
@@ -566,12 +566,12 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       throw new Error("Worker manager not initialized");
     }
 
-    console.log("Using WebSocket for media transport");
+    log("Using WebSocket for media transport");
 
     const wsUrl = `wss://${this.config.host}/meeting/${this.config.roomId}/${this.config.streamId}`;
     this.workerManager.attachWebSocket(wsUrl, this.config.localStreamId);
 
-    console.log("WebSocket attached successfully");
+    log("WebSocket attached successfully");
   }
 
   /**
@@ -588,7 +588,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
    * Emit remote stream ready event
    */
   private emitRemoteStreamReady(stream: MediaStream): void {
-    console.log("[Subscriber] Emitting REMOTE_STREAM_READY:", {
+    log("[Subscriber] Emitting REMOTE_STREAM_READY:", {
       streamId: this.config.streamId,
       subscribeType: this.config.subscribeType,
       hasTracks: stream.getTracks().length,
@@ -601,7 +601,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     };
 
     globalEventBus.emit(GlobalEvents.REMOTE_STREAM_READY, eventData);
-    console.log("[Subscriber] ✅ REMOTE_STREAM_READY emitted successfully");
+    log("[Subscriber] ✅ REMOTE_STREAM_READY emitted successfully");
   }
 
   /**
@@ -632,7 +632,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     if (this.webRtc) {
       this.webRtc.close();
       this.webRtc = null;
-      console.log("WebRTC connection closed");
+      log("WebRTC connection closed");
     }
 
     // Clear references

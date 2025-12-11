@@ -1,5 +1,6 @@
 export * from './browserDetection';
 export * from './signParticipantToken';
+export * from './logger';
 
 export const formatMessage = (message: string): string => {
   return `[SDK] ${message}`;

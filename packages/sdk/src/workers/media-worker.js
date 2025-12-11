@@ -32,6 +32,17 @@ let videoCodecReceived = false;
 let audioCodecReceived = false;
 let keyFrameReceived = false;
 
+const proxyConsole = {
+  log: () => {},
+  error: () => {},
+  warn: () => {},
+  debug: () => {},
+  info: () => {},
+  trace: () => {},
+  group: () => {},
+  groupEnd: () => {},
+};
+
 const videoInit = {
   output: (frame) => {
     self.postMessage(
@@ -43,14 +54,14 @@ const videoInit = {
     );
   },
   error: (e) => {
-    console.error("Video decoder error:", e);
+    proxyConsole.error("Video decoder error:", e);
     self.postMessage({ type: "error", message: e.message });
   },
 };
 
 function logStats() {
   setInterval(() => {
-    console.log(
+    proxyConsole.log(
       "Buffer stats:",
       videoFrameBuffer.length,
       audioFrameBuffer.length
@@ -205,18 +216,18 @@ self.onmessage = async function (e) {
   switch (type) {
     case "init":
       mediaUrl = data.mediaUrl;
-      console.log("Media Worker: Initializing with stream url:", mediaUrl);
+      proxyConsole.log("Media Worker: Initializing with stream url:", mediaUrl);
       await initializeDecoders();
       setupWebSocket();
       if (port && port instanceof MessagePort) {
-        console.log("Media Worker: Received port to connect to Audio Worklet.");
+        proxyConsole.log("Media Worker: Received port to connect to Audio Worklet.");
         workletPort = port;
       }
       break;
 
     case "toggle-audio":
       audioEnabled = !audioEnabled;
-      console.log(
+      proxyConsole.log(
         "Media Worker: Toggling audio. Now audioEnabled =",
         audioEnabled
       );
@@ -224,11 +235,11 @@ self.onmessage = async function (e) {
       break;
 
     case "reset":
-      console.log("Media Worker: Resetting decoders and buffers.");
+      proxyConsole.log("Media Worker: Resetting decoders and buffers.");
       resetWebsocket();
       break;
     case "stop":
-      console.log("Media Worker: Stopping all operations.");
+      proxyConsole.log("Media Worker: Stopping all operations.");
       stop();
       break;
   }
@@ -257,7 +268,7 @@ async function initializeDecoders() {
       event: "opus-decoder-init-fail",
       message: "Failed to initialize OpusAudioDecoder: " + error.message,
     });
-    console.error("Failed to initialize OpusAudioDecoder:", error);
+    proxyConsole.error("Failed to initialize OpusAudioDecoder:", error);
   }
 }
 
@@ -280,7 +291,7 @@ function handleMediaWsMessage(event) {
   if (typeof event.data === "string") {
     const dataJson = JSON.parse(event.data);
     if (dataJson.type === "TotalViewerCount") {
-      console.log(
+      proxyConsole.log(
         "[Media worker]: TotalViewerCount received from websocket:",
         dataJson.total_viewers
       );
@@ -320,9 +331,9 @@ function handleMediaWsMessage(event) {
           data,
         });
         audioDecoder.decode(chunk);
-        console.log("Decoded first audio frame to initialize decoder.");
+        proxyConsole.log("Decoded first audio frame to initialize decoder.");
       } catch (error) {
-        console.log("Error decoding first audio frame:", error);
+        proxyConsole.log("Error decoding first audio frame:", error);
       }
       videoCodecReceived = true;
       audioCodecReceived = true;
@@ -396,7 +407,7 @@ function handleMediaWsMessage(event) {
       }
     } else if (type === "config") {
       // Config data
-      console.warn("[Media worker]: Received config data (unexpected):", data);
+      proxyConsole.warn("[Media worker]: Received config data (unexpected):", data);
       return;
     }
     // Unknown type
@@ -404,7 +415,7 @@ function handleMediaWsMessage(event) {
 }
 
 function handleMediaWsClose() {
-  console.warn("Media WebSocket closed");
+  proxyConsole.warn("Media WebSocket closed");
   self.postMessage({
     type: "connectionClosed",
     stream: "media",

@@ -6,13 +6,10 @@ const hasAudioWorklet = () => {
   );
 };
 
-console.log(`AudioWorklet supported: ${hasAudioWorklet()}`);
 if (!self.MediaStreamTrackProcessor) {
   self.MediaStreamTrackProcessor = class MediaStreamTrackProcessor {
     constructor(track, triggerWorker, init) {
-      console.log("track:", track, "worker:", triggerWorker);
       if (track.kind == "video") {
-        console.log("using MediaStreamTrackProcessor polyfill, create worker");
         this.readable = new ReadableStream({
           async start(controller) {
             this.video = document.createElement("video");
@@ -26,13 +23,8 @@ if (!self.MediaStreamTrackProcessor) {
               this.video.videoWidth,
               this.video.videoHeight
             );
-            this.ctx = this.canvas.getContext("2d", { desynchronized: true });
+            this.ctx = this.canvas.getContext("2d", {desynchronized: true});
             this.t1 = performance.now();
-            // send frameRate to worker
-            console.log(
-              "send frameRate to worker, init frameRate:",
-              track.getSettings().frameRate
-            );
             //todo: move this triggerWorker.postMessage to pull function, only trigger when window is hidden, add logic stop interval when window is visible
             triggerWorker.postMessage({
               frameRate: track.getSettings().frameRate,
@@ -41,39 +33,27 @@ if (!self.MediaStreamTrackProcessor) {
             document.addEventListener("visibilitychange", async () => {
               init = false;
               if (document.hidden) {
-                console.log(
-                  "document hidden, using worker to trigger frame, frameRate:",
-                  track.getSettings().frameRate,
-                  "init:",
-                  init
-                );
                 return new Promise((resolve) => {
                   triggerWorker.onmessage = (event) => {
                     this.t1 = event.data;
                     this.ctx.drawImage(this.video, 0, 0);
                     controller.enqueue(
-                      new VideoFrame(this.canvas, { timestamp: this.t1 })
+                      new VideoFrame(this.canvas, {timestamp: this.t1})
                     );
                     resolve();
                   };
                 });
               } else if (!document.hidden) {
-                console.log(
-                  "document visible, using requestAnimationFrame to trigger frame, frameRate:",
-                  track.getSettings().frameRate,
-                  "init:",
-                  init
-                );
                 while (
                   performance.now() - this.t1 <
                   1000 / track.getSettings().frameRate
-                ) {
+                  ) {
                   await new Promise((r) => requestAnimationFrame(r));
                 }
                 this.t1 = performance.now();
                 this.ctx.drawImage(this.video, 0, 0);
                 controller.enqueue(
-                  new VideoFrame(this.canvas, { timestamp: this.t1 })
+                  new VideoFrame(this.canvas, {timestamp: this.t1})
                 );
               }
             });
@@ -84,19 +64,18 @@ if (!self.MediaStreamTrackProcessor) {
               while (
                 performance.now() - this.t1 <
                 1000 / track.getSettings().frameRate
-              ) {
+                ) {
                 await new Promise((r) => requestAnimationFrame(r));
               }
               this.t1 = performance.now();
               this.ctx.drawImage(this.video, 0, 0);
               controller.enqueue(
-                new VideoFrame(this.canvas, { timestamp: this.t1 })
+                new VideoFrame(this.canvas, {timestamp: this.t1})
               );
             }
           },
         });
       } else if (track.kind == "audio") {
-        console.log("using MediaStreamTrackProcessor polyfill");
 
         this.readable = new ReadableStream({
           async start(controller) {
@@ -227,7 +206,7 @@ if (!self.MediaStreamTrackProcessor) {
                 .connect(this.node);
 
               // Set up message handling
-              this.node.port.addEventListener("message", ({ data }) => {
+              this.node.port.addEventListener("message", ({data}) => {
                 if (data[0][0]) {
                   this.arrays.push(data);
                 }
@@ -235,7 +214,6 @@ if (!self.MediaStreamTrackProcessor) {
 
               this.node.port.start(); // Ensure port is started
             } catch (err) {
-              console.log("AudioWorklet failed", err.message);
               // Fall back to ScriptProcessorNode if AudioWorklet fails
               // (Implementation would be same as the one above)
             }
@@ -301,7 +279,6 @@ if (!self.MediaStreamTrackProcessor) {
                 })
               );
             } catch (err) {
-              console.log(`[Safari] Error in pull: ${err.message}`);
               controller.error(err);
             }
           },
@@ -310,7 +287,6 @@ if (!self.MediaStreamTrackProcessor) {
             if (this.ac && this.ac.state !== "closed") {
               this.ac.close();
             }
-            console.log("ReadableStream cancelled");
           },
         });
       }

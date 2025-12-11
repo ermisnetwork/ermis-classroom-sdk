@@ -9,11 +9,8 @@
  */
 
 import EventEmitter from "../../../events/EventEmitter";
-import type {
-  WorkerMessageData,
-  QualityLevel,
-  SubscribeType,
-} from "../../../types/media/subscriber.types";
+import type {QualityLevel, SubscribeType, WorkerMessageData,} from "../../../types/media/subscriber.types";
+import {log} from "../../../utils";
 
 /**
  * Worker manager events
@@ -51,8 +48,6 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
     subscribeType: SubscribeType = "camera"
   ): Promise<void> {
     try {
-      console.warn("[Subscriber] Initializing media worker:", this.workerUrl, "with subscribeType:", subscribeType);
-
       // Create worker with cache busting
       this.worker = new Worker(`${this.workerUrl}?t=${Date.now()}`, {
         type: "module",
@@ -65,7 +60,6 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
 
       // Setup error handler
       this.worker.onerror = (error: ErrorEvent) => {
-        console.error("Media Worker error:", error.message);
         this.emit("error", {
           error: new Error(error.message),
           context: "worker",
@@ -87,12 +81,10 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       this.isInitialized = true;
       this.emit("workerReady", undefined);
 
-      console.log("Media worker initialized successfully");
+      log("Media worker initialized successfully");
     } catch (error) {
-      const err =
-        error instanceof Error ? error : new Error("Worker initialization failed");
-      console.error("Failed to initialize worker:", err);
-      this.emit("error", { error: err, context: "init" });
+      const err = error instanceof Error ? error : new Error("Worker initialization failed");
+      this.emit("error", {error: err, context: "init"});
       throw err;
     }
   }
@@ -110,7 +102,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       throw new Error("Worker not initialized");
     }
 
-    console.log(`Attaching stream to worker: ${channelName}`);
+    log(`Attaching stream to worker: ${channelName}`);
 
     this.worker.postMessage(
       {
@@ -135,7 +127,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       throw new Error("Worker not initialized");
     }
 
-    console.log(`Attaching data channel to worker: ${channelName}`);
+    log(`Attaching data channel to worker: ${channelName}`);
 
     this.worker.postMessage(
       {
@@ -155,7 +147,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       throw new Error("Worker not initialized");
     }
 
-    console.log(`Attaching WebSocket to worker: ${wsUrl}`);
+    log(`Attaching WebSocket to worker: ${wsUrl}`);
 
     this.worker.postMessage({
       type: "attachWebSocket",
@@ -172,7 +164,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       throw new Error("Worker not initialized");
     }
 
-    this.worker.postMessage({ type: "toggleAudio" });
+    this.worker.postMessage({type: "toggleAudio"});
   }
 
   /**
@@ -183,8 +175,8 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       throw new Error("Worker not initialized");
     }
 
-    console.log(`Switching bitrate to ${quality}`);
-    this.worker.postMessage({ type: "switchBitrate", quality });
+    log(`Switching bitrate to ${quality}`);
+    this.worker.postMessage({type: "switchBitrate", quality});
   }
 
   /**
@@ -195,7 +187,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       this.worker.terminate();
       this.worker = null;
       this.isInitialized = false;
-      console.log("Media worker terminated");
+      log("Media worker terminated");
     }
   }
 
@@ -203,24 +195,24 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
    * Handle messages from worker
    */
   private handleWorkerMessage(data: WorkerMessageData): void {
-    const { type, frame, message, audioEnabled } = data;
+    const {type, frame, message, audioEnabled} = data;
 
     switch (type) {
       case "videoData":
         if (frame) {
-          this.emit("videoData", { frame });
+          this.emit("videoData", {frame});
         }
         break;
 
       case "status":
         if (message) {
-          this.emit("status", { message, isError: false });
+          this.emit("status", {message, isError: false});
         }
         break;
 
       case "error":
         if (message) {
-          this.emit("status", { message, isError: true });
+          this.emit("status", {message, isError: true});
           this.emit("error", {
             error: new Error(message),
             context: "workerMessage",
@@ -230,7 +222,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
 
       case "audio-toggled":
         if (audioEnabled !== undefined) {
-          this.emit("audioToggled", { enabled: audioEnabled });
+          this.emit("audioToggled", {enabled: audioEnabled});
         }
         break;
 
@@ -243,7 +235,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
         break;
 
       default:
-        console.log(`Unknown worker message type: ${type}`, data);
+        log(`Unknown worker message type: ${type}`, data);
     }
   }
 

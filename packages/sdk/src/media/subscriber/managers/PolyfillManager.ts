@@ -8,6 +8,7 @@
  */
 
 import EventEmitter from "../../../events/EventEmitter";
+import {log} from "../../../utils";
 
 /**
  * Polyfill manager events
@@ -36,18 +37,18 @@ export class PolyfillManager extends EventEmitter<PolyfillManagerEvents> {
   async load(): Promise<void> {
     // Skip if browser already supports it
     if (typeof MediaStreamTrackGenerator === "function") {
-      console.log("✅ Browser already supports MediaStreamTrackGenerator");
+      log("✅ Browser already supports MediaStreamTrackGenerator");
       this.emit("alreadySupported", undefined);
       return;
     }
 
     // Determine the polyfill URL (absolute)
     const url = this.polyfillUrl || `${location.origin}/polyfills/MSTG_polyfill.js`;
-    console.log("⚙️ Loading MSTG polyfill from:", url);
+    log("⚙️ Loading MSTG polyfill from:", url);
 
     // Prevent loading twice
     if (document.querySelector(`script[src="${url}"]`)) {
-      console.log("ℹ️ MSTG polyfill already loaded");
+      log("ℹ️ MSTG polyfill already loaded");
       this.isLoaded = true;
       return;
     }
@@ -75,7 +76,7 @@ export class PolyfillManager extends EventEmitter<PolyfillManagerEvents> {
       script.async = true;
 
       script.onload = () => {
-        console.log("✅ MSTG polyfill loaded successfully");
+        log("✅ MSTG polyfill loaded successfully");
         resolve();
       };
 

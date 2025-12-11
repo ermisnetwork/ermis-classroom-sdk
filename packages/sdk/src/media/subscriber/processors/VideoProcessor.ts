@@ -8,6 +8,7 @@
  */
 
 import EventEmitter from "../../../events/EventEmitter";
+import {log} from "../../../utils";
 
 /**
  * Video processor events
@@ -31,7 +32,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
    */
   init(): MediaStream {
     try {
-      console.log("[VideoProcessor] Initializing video system...");
+      log("[VideoProcessor] Initializing video system...");
 
       // Check for MediaStreamTrackGenerator support
       if (typeof MediaStreamTrackGenerator !== "function") {
@@ -41,7 +42,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
         );
       }
 
-      console.log("[VideoProcessor] Creating MediaStreamTrackGenerator...");
+      log("[VideoProcessor] Creating MediaStreamTrackGenerator...");
       // Create video track generator
       this.videoGenerator = new MediaStreamTrackGenerator({
         kind: "video",
@@ -52,7 +53,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       // Create MediaStream with video track only
       this.mediaStream = new MediaStream([this.videoGenerator]);
 
-      console.log("[VideoProcessor] ✅ Video system initialized, emitting 'initialized' event");
+      log("[VideoProcessor] ✅ Video system initialized, emitting 'initialized' event");
       this.emit("initialized", { stream: this.mediaStream });
 
       return this.mediaStream;
@@ -125,7 +126,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
 
       this.mediaStream = null;
 
-      console.log("Video system cleaned up");
+      log("Video system cleaned up");
     } catch (error) {
       console.warn("Error cleaning video system:", error);
     }

@@ -110,8 +110,6 @@ export function getSubStreams(
     can_publish_sources: [string, boolean][];
   },
 ): SubStream[] {
-  console.log('Getting sub streams for type:', streamType);
-
   if (!permissions.can_publish) {
     return [];
   }

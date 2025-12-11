@@ -34,6 +34,18 @@ let keyFrameReceived = false;
 
 let isScreenSharing = false;
 
+
+const proxyConsole = {
+  log: () => {},
+  error: () => {},
+  warn: () => {},
+  debug: () => {},
+  info: () => {},
+  trace: () => {},
+  group: () => {},
+  groupEnd: () => {},
+};
+
 const createVideoInit = (quality) => ({
   output: (frame) => {
     self.postMessage(
@@ -46,7 +58,7 @@ const createVideoInit = (quality) => ({
     );
   },
   error: (e) => {
-    console.error(`Video decoder error (${quality}):`, e);
+    proxyConsole.error(`Video decoder error (${quality}):`, e);
     self.postMessage({
       type: "error",
       message: `${quality} decoder: ${e.message}`,
@@ -56,7 +68,7 @@ const createVideoInit = (quality) => ({
 
 function logStats() {
   setInterval(() => {
-    console.log("Buffer stats:", videoFrameBuffer.length, audioFrameBuffer.length);
+    proxyConsole.log("Buffer stats:", videoFrameBuffer.length, audioFrameBuffer.length);
   }, 5000);
 }
 
@@ -207,20 +219,20 @@ self.onmessage = async function (e) {
   switch (type) {
     case "init":
       mediaUrl = data.mediaUrl;
-      console.log("Media Worker: Initializing with stream url:", mediaUrl);
+      proxyConsole.log("Media Worker: Initializing with stream url:", mediaUrl);
       isScreenSharing = isShare;
       await initializeDecoders(isScreenSharing);
 
       setupWebSocket(quality);
       if (port && port instanceof MessagePort) {
-        console.log("Media Worker: Received port to connect to Audio Worklet.");
+        proxyConsole.log("Media Worker: Received port to connect to Audio Worklet.");
         workletPort = port;
       }
       break;
 
     case "toggleAudio":
       audioEnabled = !audioEnabled;
-      console.log("Media Worker: Toggling audio. Now audioEnabled =", audioEnabled);
+      proxyConsole.log("Media Worker: Toggling audio. Now audioEnabled =", audioEnabled);
       self.postMessage({ type: "audio-toggled", audioEnabled });
       break;
 
@@ -229,11 +241,11 @@ self.onmessage = async function (e) {
       break;
 
     case "reset":
-      console.log("Media Worker: Resetting decoders and buffers.");
+      proxyConsole.log("Media Worker: Resetting decoders and buffers.");
       resetWebsocket();
       break;
     case "stop":
-      console.log("Media Worker: Stopping all operations.");
+      proxyConsole.log("Media Worker: Stopping all operations.");
       stop();
       break;
   }
@@ -275,7 +287,7 @@ async function initializeDecoders(isScreenSharing = false) {
       event: "opus-decoder-init-fail",
       message: "Failed to initialize OpusAudioDecoder: " + error.message,
     });
-    console.error("Failed to initialize OpusAudioDecoder:", error);
+    proxyConsole.error("Failed to initialize OpusAudioDecoder:", error);
   }
 }
 
@@ -303,7 +315,7 @@ function handleBitrateSwitch(quality) {
     const message = {
       quality,
     };
-    console.log(`Switching bitrate to ${quality}, message:`, message);
+    proxyConsole.log(`Switching bitrate to ${quality}, message:`, message);
     mediaWebsocket.send(JSON.stringify(message));
 
     // Chuyển decoder
@@ -330,7 +342,7 @@ function handleBitrateSwitch(quality) {
       quality: quality,
     });
   } else {
-    console.error("WebSocket not ready for bitrate switch");
+    proxyConsole.error("WebSocket not ready for bitrate switch");
   }
 }
 
@@ -338,7 +350,7 @@ function handleMediaWsMessage(event) {
   if (typeof event.data === "string") {
     const dataJson = JSON.parse(event.data);
     if (dataJson.type === "TotalViewerCount") {
-      console.log("[Media worker]: TotalViewerCount received from websocket:", dataJson.total_viewers);
+      proxyConsole.log("[Media worker]: TotalViewerCount received from websocket:", dataJson.total_viewers);
       self.postMessage({
         type: "TotalViewerCount",
         count: dataJson.total_viewers,
@@ -384,9 +396,9 @@ function handleMediaWsMessage(event) {
           data,
         });
         audioDecoder.decode(chunk);
-        console.log("Decoded first audio frame to initialize decoder.");
+        proxyConsole.log("Decoded first audio frame to initialize decoder.");
       } catch (error) {
-        console.log("Error decoding first audio frame:", error);
+        proxyConsole.log("Error decoding first audio frame:", error);
       }
 
       videoCodecReceived = true;
@@ -528,14 +540,14 @@ function handleMediaWsMessage(event) {
       return;
     } else if (frameType === 7) {
       // Config data
-      console.warn("[Media worker]: Received config data (unexpected):", data);
+      proxyConsole.warn("[Media worker]: Received config data (unexpected):", data);
       return;
     }
   }
 }
 
 function handleMediaWsClose() {
-  console.warn("Media WebSocket closed");
+  proxyConsole.warn("Media WebSocket closed");
   self.postMessage({
     type: "connectionClosed",
     stream: "media",

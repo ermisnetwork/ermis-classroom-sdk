@@ -10,6 +10,7 @@ import type { RaptorQConfig } from "../../shared/utils/PacketBuilder";
 import { FrameTypeHelper } from "../../shared/utils/FrameTypeHelper";
 import { LengthDelimitedReader } from "../../shared/utils/LengthDelimitedReader";
 import CommandSender, {PublisherState} from "../ClientCommand";
+import {log} from "../../../utils";
 
 // Default publisher state - will be updated by Publisher
 const DEFAULT_PUBLISHER_STATE: PublisherState = {
@@ -107,7 +108,7 @@ export class StreamManager extends EventEmitter<{
    */
   setPublisherState(state: Partial<PublisherState>): void {
     this.publisherState = { ...this.publisherState, ...state };
-    console.log("[StreamManager] Publisher state updated:", this.publisherState);
+    log("[StreamManager] Publisher state updated:", this.publisherState);
   }
 
   /**
@@ -145,7 +146,7 @@ export class StreamManager extends EventEmitter<{
         .then(() => {
           this.wasmInitialized = true;
           this.wasmInitializing = false;
-          console.log("[StreamManager] WASM encoder module loaded successfully");
+          log("[StreamManager] WASM encoder module loaded successfully");
         })
         .catch((err: unknown) => {
           this.wasmInitializing = false;
@@ -175,7 +176,7 @@ export class StreamManager extends EventEmitter<{
       await this.createBidirectionalStream(channelName);
     }
 
-    console.log(
+    log(
       `[StreamManager] Initialized ${channelNames.length} WebTransport streams`,
     );
   }
@@ -188,7 +189,7 @@ export class StreamManager extends EventEmitter<{
    */
   async addStream(channelName: ChannelName): Promise<void> {
     if (this.streams.has(channelName)) {
-      console.log(`[StreamManager] Stream ${channelName} already exists`);
+      log(`[StreamManager] Stream ${channelName} already exists`);
       return;
     }
 
@@ -234,13 +235,13 @@ export class StreamManager extends EventEmitter<{
         if (streamData) {
 
           this.commandSender?.sendPublisherState(streamData, this.publisherState);
-          console.log("[StreamManager] Sent initial publisher state (WebTransport):", this.publisherState);
+          log("[StreamManager] Sent initial publisher state (WebTransport):", this.publisherState);
           this.commandSender?.startHeartbeat(streamData);
         }
         this.setupEventStreamReader(reader);
       }
 
-      console.log(
+      log(
         `[StreamManager] Created bidirectional stream for ${channelName}`,
       );
       this.emit("streamReady", { channelName });
@@ -280,7 +281,7 @@ export class StreamManager extends EventEmitter<{
     out.set(commandBytes, 4);
 
     await streamData.writer.write(out.slice());
-    console.log(`[StreamManager] Sent init_channel_stream for ${channelName}`);
+    log(`[StreamManager] Sent init_channel_stream for ${channelName}`);
   }
 
   /**
@@ -295,13 +296,13 @@ export class StreamManager extends EventEmitter<{
     // Start reading loop in background
     (async () => {
       try {
-        console.log(`[StreamManager] Starting event reader`);
+        log(`[StreamManager] Starting event reader`);
 
         while (true) {
           const message = await delimitedReader.readMessage();
 
           if (message === null) {
-            console.log(`[StreamManager] Event stream ended`);
+            log(`[StreamManager] Event stream ended`);
             break;
           }
 
@@ -310,12 +311,12 @@ export class StreamManager extends EventEmitter<{
 
           try {
             const event = JSON.parse(messageStr);
-            console.log(`[StreamManager] Received server event:`, event);
+            log(`[StreamManager] Received server event:`, event);
 
             // Emit to global event bus
             globalEventBus.emit(GlobalEvents.SERVER_EVENT, event);
           } catch (e) {
-            console.log(
+            log(
               `[StreamManager] Non-JSON event message:`,
               messageStr,
             );
@@ -349,23 +350,23 @@ export class StreamManager extends EventEmitter<{
       try {
         const messageStr = new TextDecoder().decode(data);
         const serverEvent = JSON.parse(messageStr);
-        console.log(`[StreamManager] Received server event via data channel (${channelName}):`, serverEvent);
+        log(`[StreamManager] Received server event via data channel (${channelName}):`, serverEvent);
 
         // Emit to global event bus
         globalEventBus.emit(GlobalEvents.SERVER_EVENT, serverEvent);
       } catch (e) {
-        console.log(`[StreamManager] Error parsing server event from ${channelName}:`, e);
+        log(`[StreamManager] Error parsing server event from ${channelName}:`, e);
       }
     };
 
-    console.log(`[StreamManager] Setup event listener for data channel ${channelName}`);
+    log(`[StreamManager] Setup event listener for data channel ${channelName}`);
   }
 
   /**
    * Create WebRTC data channel (public method for direct use, same as JS)
    */
   async createDataChannelDirect(channelName: ChannelName, peerConnection: RTCPeerConnection): Promise<void> {
-    console.log(`[StreamManager] Creating data channel: ${channelName}`);
+    log(`[StreamManager] Creating data channel: ${channelName}`);
 
     let ordered = false;
     if (channelName === ChannelName.MEETING_CONTROL) {
@@ -379,7 +380,7 @@ export class StreamManager extends EventEmitter<{
       negotiated: true,
     });
 
-    console.log(`[StreamManager] Data channel created for ${channelName}, readyState: ${dataChannel.readyState}`);
+    log(`[StreamManager] Data channel created for ${channelName}, readyState: ${dataChannel.readyState}`);
 
     const bufferAmounts = {
       SMALL: 8192,
@@ -420,11 +421,11 @@ export class StreamManager extends EventEmitter<{
     };
 
     dataChannel.onclose = () => {
-      console.log(`[StreamManager] Data channel ${channelName} closed`);
+      log(`[StreamManager] Data channel ${channelName} closed`);
     };
 
     dataChannel.onopen = async () => {
-      console.log(`[StreamManager] Data channel ${channelName} OPENED! readyState: ${dataChannel.readyState}`);
+      log(`[StreamManager] Data channel ${channelName} OPENED! readyState: ${dataChannel.readyState}`);
 
       // Match JS Publisher exactly
       this.streams.set(channelName, {
@@ -440,7 +441,7 @@ export class StreamManager extends EventEmitter<{
         const streamData = this.streams.get(channelName);
         if (streamData) {
           await this.commandSender?.sendPublisherState(streamData, this.publisherState);
-          console.log("[StreamManager] Sent initial publisher state (WebRTC):", this.publisherState);
+          log("[StreamManager] Sent initial publisher state (WebRTC):", this.publisherState);
 
           //       {
           //   "type": "event",
@@ -480,14 +481,14 @@ export class StreamManager extends EventEmitter<{
         this.setupEventDataChannelListener(channelName);
       }
 
-      console.log(`WebRTC data channel (${channelName}) established`);
+      log(`WebRTC data channel (${channelName}) established`);
     };
 
 
 
     // Monitor ICE connection state for debugging
     peerConnection.oniceconnectionstatechange = () => {
-      console.log(`[StreamManager] ${channelName} ICE connection state: ${peerConnection.iceConnectionState}`);
+      log(`[StreamManager] ${channelName} ICE connection state: ${peerConnection.iceConnectionState}`);
       if (peerConnection.iceConnectionState === 'failed') {
         console.error(`[StreamManager] ${channelName} ICE connection FAILED!`);
       }
@@ -646,8 +647,8 @@ export class StreamManager extends EventEmitter<{
     streamData.configSent = true;
     streamData.config = config as any;
 
-    console.log(`[StreamManager] Config sent for ${channelName}`);
-    console.log(`[StreamManager] Config packet:`, configPacket);
+    log(`[StreamManager] Config sent for ${channelName}`);
+    log(`[StreamManager] Config packet:`, configPacket);
     this.emit("configSent", { channelName });
   }
 
@@ -941,7 +942,7 @@ export class StreamManager extends EventEmitter<{
       }
 
       this.streams.delete(channelName);
-      console.log(`[StreamManager] Closed stream ${channelName}`);
+      log(`[StreamManager] Closed stream ${channelName}`);
     } catch (error) {
       console.error(
         `[StreamManager] Error closing stream ${channelName}:`,
@@ -962,7 +963,7 @@ export class StreamManager extends EventEmitter<{
 
     await Promise.all(closePromises);
     this.streams.clear();
-    console.log("[StreamManager] All streams closed");
+    log("[StreamManager] All streams closed");
   }
 
   /**

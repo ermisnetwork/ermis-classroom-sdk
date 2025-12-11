@@ -1,5 +1,6 @@
 import {ChannelName, CLIENT_COMMANDS, FrameType} from "../../constants/publisherConstants";
 import {StreamData} from "../../types/media/publisher.types";
+import {log} from "../../utils";
 
 // Define separate config types for each protocol
 type WebRTCConfig = {
@@ -43,14 +44,14 @@ export class CommandSender {
   private sendData: CommandSenderConfig['sendDataFn'];
   private protocol: CommandSenderConfig['protocol'];
   private commandType: string;
-    private HEARTBEAT_INTERVAL_MS = 2000; // 2 seconds
-    private heartbeatInterval: ReturnType<typeof setInterval> | null;
+  private HEARTBEAT_INTERVAL_MS = 2000; // 2 seconds
+  private heartbeatInterval: ReturnType<typeof setInterval> | null;
 
   constructor(config: CommandSenderConfig) {
     this.sendData = config.sendDataFn;
     this.protocol = config.protocol;
     this.commandType = config.commandType || 'publisher_command';
-      this.heartbeatInterval = null;
+    this.heartbeatInterval = null;
   }
 
   private async _sendPublisherCommand(
@@ -69,7 +70,6 @@ export class CommandSender {
 
     if (this.protocol === 'webrtc') {
       const frameType = type === 'media_config' ? FrameType.PUBLISHER_COMMAND : FrameType.EVENT;
-      console.warn('[Client Command]Sending publisher command via WebRTC:', 'channel name:', channelName, 'command:', command, 'frame type:', frameType);
       await (this.sendData as WebRTCConfig['sendDataFn'])(
         channelName as ChannelName,
         streamData,
@@ -77,10 +77,8 @@ export class CommandSender {
         frameType
       );
     } else if (this.protocol === 'webtransport') {
-      console.warn('[Client Command]Sending publisher command via WebTransport:', 'command:', command);
       await (this.sendData as WebTransportConfig['sendDataFn'])(streamData, bytes);
     } else {
-      console.warn('[Client Command]Sending publisher command via WebSocket:', 'command:', command);
       await (this.sendData as WebSocketConfig['sendDataFn'])(bytes);
     }
   }
@@ -136,7 +134,6 @@ export class CommandSender {
   }
 
   async sendMediaConfig(channelName: string, streamData: StreamData, config: any): Promise<void> {
-    console.warn('[Client Command]Sending media config to server:', 'channel name:', channelName, 'config:', config);
     await this._sendPublisherCommand(channelName, streamData, 'media_config', config);
   }
 
@@ -166,36 +163,36 @@ export class CommandSender {
   }
 
 
-    async sendHeartbeat(streamData: StreamData): Promise<void> {
-        await this._sendPublisherCommand(
-            ChannelName.MEETING_CONTROL,
-            streamData,
-            'ping'
-        );
+  async sendHeartbeat(streamData: StreamData): Promise<void> {
+    await this._sendPublisherCommand(
+      ChannelName.MEETING_CONTROL,
+      streamData,
+      'ping'
+    );
+  }
+
+  startHeartbeat(streamData: StreamData): void {
+    this.stopHeartbeat();
+
+    log('[CommandSender] Starting heartbeat interval');
+
+    this.heartbeatInterval = setInterval(async () => {
+      try {
+        await this.sendHeartbeat(streamData);
+        log('[CommandSender] Heartbeat sent');
+      } catch (error) {
+        console.error('[CommandSender] Failed to send heartbeat:', error);
+      }
+    }, this.HEARTBEAT_INTERVAL_MS);
+  }
+
+  stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+      log('[CommandSender] Heartbeat stopped');
     }
-
-    startHeartbeat(streamData: StreamData): void {
-        this.stopHeartbeat();
-
-        console.log('[CommandSender] Starting heartbeat interval');
-
-        this.heartbeatInterval = setInterval(async () => {
-            try {
-                await this.sendHeartbeat(streamData);
-                console.log('[CommandSender] Heartbeat sent');
-            } catch (error) {
-                console.error('[CommandSender] Failed to send heartbeat:', error);
-            }
-        }, this.HEARTBEAT_INTERVAL_MS);
-    }
-
-    stopHeartbeat(): void {
-        if (this.heartbeatInterval) {
-            clearInterval(this.heartbeatInterval);
-            this.heartbeatInterval = null;
-            console.log('[CommandSender] Heartbeat stopped');
-        }
-    }
+  }
 }
 
 export default CommandSender;
