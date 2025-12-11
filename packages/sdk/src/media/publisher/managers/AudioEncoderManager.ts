@@ -6,7 +6,7 @@ import type {
   InitAudioRecorder,
   AudioRecorder,
 } from "../../../types/media/publisher.types";
-import {log} from "../../../utils";
+import { log } from "../../../utils";
 
 /**
  * AudioEncoderManager - Manages audio encoding using Opus codec
@@ -89,6 +89,7 @@ export class AudioEncoderManager extends EventEmitter<{
         encoderComplexity: 0, // Lowest complexity for real-time
         encoderFrameSize: 20, // 20ms frames
         timeSlice: 100, // Send data every 100ms
+        numberOfChannels: AUDIO_CONFIG.CHANNEL_COUNT,
       };
 
       log(
