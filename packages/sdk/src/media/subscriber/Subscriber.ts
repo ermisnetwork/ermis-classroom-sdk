@@ -130,7 +130,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       localStreamId: config.localStreamId || "",
       streamId: config.streamId || "",
       roomId: config.roomId || "",
-      host: config.host || "admin.bandia.vn:9995",
+      host: config.host,
       userMediaWorker:
         config.userMediaWorker ||
         "sfu-adaptive-trung.ermis-network.workers.dev",

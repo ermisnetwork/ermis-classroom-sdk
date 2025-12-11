@@ -115,6 +115,7 @@ export function ErmisClassroomProvider({
         setScreenShareStreams((prev) => {
           const updated = new Map(prev);
           updated.set(event.participant.userId, {
+            id: event.participant.userId,
             stream: event.videoOnlyStream,
             userName: event.participant.name || event.participant.userId,
           });
@@ -205,6 +206,7 @@ export function ErmisClassroomProvider({
         setScreenShareStreams((prev) => {
           const updated = new Map(prev);
           updated.set(participant.userId, {
+            id: participant.userId,
             stream: videoOnlyStream.getTracks().length > 0 ? videoOnlyStream : stream,
             userName: participant.name || participant.userId,
           });
@@ -259,6 +261,7 @@ export function ErmisClassroomProvider({
         setScreenShareStreams((prev) => {
           const updated = new Map(prev);
           updated.set(data.participant.userId, {
+            id: data.participant.userId,
             stream: data.stream,
             userName: data.participant.name || data.participant.userId,
           });

@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Mic, MicOff, Video, VideoOff, Settings } from "lucide-react"
+import { IconLoader2, IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconSettings } from "@tabler/icons-react"
 
 interface PreJoinScreenProps {
   onJoined: () => void
@@ -141,7 +141,7 @@ export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
                 />
                 {!cameraEnabled && (
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <VideoOff className="h-16 w-16 text-slate-600" />
+                    <IconVideoOff className="h-16 w-16 text-slate-600" />
                   </div>
                 )}
               </div>
@@ -152,7 +152,7 @@ export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
                   onClick={toggleMic}
                   className="h-12 w-12 rounded-full"
                 >
-                  {micEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+                  {micEnabled ? <IconMicrophone className="h-5 w-5" /> : <IconMicrophoneOff className="h-5 w-5" />}
                 </Button>
                 <Button
                   variant={cameraEnabled ? "secondary" : "destructive"}
@@ -160,7 +160,7 @@ export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
                   onClick={toggleCamera}
                   className="h-12 w-12 rounded-full"
                 >
-                  {cameraEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
+                  {cameraEnabled ? <IconVideo className="h-5 w-5" /> : <IconVideoOff className="h-5 w-5" />}
                 </Button>
               </div>
             </CardContent>
@@ -170,7 +170,7 @@ export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
           <Card className="bg-slate-800 border-slate-700">
             <CardHeader>
               <CardTitle className="text-white flex items-center gap-2">
-                <Settings className="h-5 w-5" />
+                <IconSettings className="h-5 w-5" />
                 Settings
               </CardTitle>
               <CardDescription className="text-slate-400">
@@ -248,7 +248,7 @@ export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
                     Joining...
                   </>
                 ) : (

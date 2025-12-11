@@ -1,65 +1,44 @@
-import { signRoomServiceToken } from "../utils/signRoomServiceToken";
-import {
-  HttpMethod,
-  CreateRoomResponse,
-  ListQuery,
-  ListConditions,
-  JoinRoomRequest,
-} from "../types";
+import { signRoomServiceToken } from '../utils/signRoomServiceToken';
 import {
   BreakoutRequest,
   BreakoutRoomResponse,
+  CreateRoomResponse,
   CustomEventRequest,
+  GetServiceTokenRequest,
   GetTokenResponse,
+  GetUserTokenRequest,
+  HttpMethod,
+  JoinRoomRequest,
+  ListConditions,
+  ListQuery,
   PaginatedParticipantResponse,
+  ParticipantPermissions,
   ParticipantResponse,
   PermissionChanged,
   RoomServiceDetailResponse,
   UpdateParticipantRequest,
-  GetServiceTokenRequest,
-  GetUserTokenRequest,
-} from "../types/api/roomServiceClient.types";
-import { ParticipantPermissions } from "../types/media/publisher.types";
+} from '../types';
 
 export class RoomServiceClient {
-  private serviceToken: string = "";
+  private serviceToken: string = '';
   private apiHost: string;
 
-  /**
-   * Private constructor - use RoomServiceClient.create() instead
-   */
   constructor(apiHost: string, serviceToken: string) {
     this.serviceToken = serviceToken;
-    this.apiHost = apiHost.replace(/\/$/, "");
+    this.apiHost = apiHost.replace(/\/$/, '');
   }
-
-  /**
-   * Create a new RoomServiceClient instance.
-   *
-   * @param apiHost - The API host URL
-   * @param privateKeyPem - Raw PEM string of the private key (PKCS8 format)
-   * @returns Promise resolving to a RoomServiceClient instance
-   *
-   * @example
-   * ```typescript
-   * const client = await RoomServiceClient.create('https://api.example.com', privateKeyPem);
-   * ```
-   */
+  
   static async create(apiHost: string, privateKeyPem: string): Promise<RoomServiceClient> {
     const serviceToken = await signRoomServiceToken(privateKeyPem);
     return new RoomServiceClient(apiHost, serviceToken);
   }
 
-  private async call<T>(
-    method: HttpMethod,
-    endpoint: string,
-    body?: unknown
-  ): Promise<T> {
+  private async call<T>(method: HttpMethod, endpoint: string, body?: unknown): Promise<T> {
     const options: RequestInit = {
       method,
       headers: {
         Authorization: `Bearer ${this.serviceToken}`,
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
     };
     if (body !== undefined) {
@@ -77,22 +56,19 @@ export class RoomServiceClient {
 
   async getServiceToken(issuer: string): Promise<GetTokenResponse> {
     const req: GetServiceTokenRequest = { issuer };
-    return this.call<GetTokenResponse>("POST", "/meeting/get-service-token", req);
+    return this.call<GetTokenResponse>('POST', '/meeting/get-service-token', req);
   }
 
-  async getUserToken(
-    sub: string,
-    permissions: ParticipantPermissions
-  ): Promise<GetTokenResponse> {
+  async getUserToken(sub: string, permissions: ParticipantPermissions): Promise<GetTokenResponse> {
     const req: GetUserTokenRequest = { sub, permissions };
-    return this.call<GetTokenResponse>("POST", "/meeting/get-user-token", req);
+    return this.call<GetTokenResponse>('POST', '/meeting/get-user-token', req);
   }
 
   async createRoom(
     roomName: string,
-    options?: { parentId?: string; roomType?: string }
+    options?: { parentId?: string; roomType?: string },
   ): Promise<CreateRoomResponse> {
-    return this.call<CreateRoomResponse>("POST", "/meeting/rooms", {
+    return this.call<CreateRoomResponse>('POST', '/meeting/rooms', {
       room_name: roomName,
       parent_id: options?.parentId,
       room_type: options?.roomType,
@@ -101,39 +77,39 @@ export class RoomServiceClient {
 
   async listRooms(
     listQuery: ListQuery,
-    conditions?: ListConditions
+    conditions?: ListConditions,
   ): Promise<CreateRoomResponse[]> {
-    return this.call<CreateRoomResponse[]>("POST", "/meeting/rooms/list", {
+    return this.call<CreateRoomResponse[]>('POST', '/meeting/rooms/list', {
       list_query: listQuery,
       conditions,
     });
   }
 
   async getRoom(roomId: string): Promise<RoomServiceDetailResponse> {
-    return this.call<RoomServiceDetailResponse>("GET", `/meeting/rooms/${roomId}`);
+    return this.call<RoomServiceDetailResponse>('GET', `/meeting/rooms/${roomId}`);
   }
 
   async joinRoom(request: JoinRoomRequest): Promise<ParticipantResponse> {
-    return this.call<ParticipantResponse>("POST", "/meeting/rooms/join", request);
+    return this.call<ParticipantResponse>('POST', '/meeting/rooms/join', request);
   }
 
   async createBreakoutRooms(request: BreakoutRequest): Promise<BreakoutRoomResponse | null> {
-    return this.call<BreakoutRoomResponse | null>("POST", "/meeting/rooms/breakout", request);
+    return this.call<BreakoutRoomResponse | null>('POST', '/meeting/rooms/breakout', request);
   }
 
   async closeBreakoutRooms(mainRoomId: string): Promise<void> {
-    await this.call<null>("PUT", `/meeting/rooms/${mainRoomId}/breakout/close`);
+    await this.call<null>('PUT', `/meeting/rooms/${mainRoomId}/breakout/close`);
   }
 
   async sendCustomEvent(request: CustomEventRequest): Promise<void> {
-    await this.call<null>("POST", "/meeting/rooms/custom-event", request);
+    await this.call<null>('POST', '/meeting/rooms/custom-event', request);
   }
 
   async listParticipants(
     roomId: string,
-    listQuery: ListQuery
+    listQuery: ListQuery,
   ): Promise<PaginatedParticipantResponse> {
-    return this.call<PaginatedParticipantResponse>("POST", "/meeting/participants/list", {
+    return this.call<PaginatedParticipantResponse>('POST', '/meeting/participants/list', {
       room_id: roomId,
       list_query: listQuery,
     });
@@ -142,17 +118,17 @@ export class RoomServiceClient {
   async updateParticipant(
     roomId: string,
     streamId: string,
-    permissionChanged: PermissionChanged
+    permissionChanged: PermissionChanged,
   ): Promise<UpdateParticipantRequest> {
     const req: UpdateParticipantRequest = {
       room_id: roomId,
       stream_id: streamId,
       permission_changed: permissionChanged,
     };
-    return this.call<UpdateParticipantRequest>("POST", "/meeting/participants/update", req);
+    return this.call<UpdateParticipantRequest>('POST', '/meeting/participants/update', req);
   }
 
   async removeParticipant(streamId: string): Promise<void> {
-    await this.call<null>("DELETE", `/meeting/participants/remove/${streamId}`);
+    await this.call<null>('DELETE', `/meeting/participants/remove/${streamId}`);
   }
 }

@@ -50,3 +50,8 @@ export {
   type RoomActions,
 } from './useRoom';
 
+// Layout hooks
+export { useSize, type Size } from './useSize';
+export { useGridLayout } from './useGridLayout';
+export { usePagination, useParticipantPagination, type UsePaginationResult } from './usePagination';
+

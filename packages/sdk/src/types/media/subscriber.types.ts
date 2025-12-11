@@ -24,7 +24,7 @@ export interface SubscriberConfig {
   localStreamId: string;
   streamId: string;
   roomId?: string;
-  host?: string;
+  host: string;
   userMediaWorker?: string;
   screenShareWorker?: string;
   isOwnStream?: boolean;

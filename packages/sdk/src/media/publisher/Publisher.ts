@@ -1,21 +1,14 @@
-/**
-* Publisher - Pure Orchestrator for Media Publishing
-* 
-* Delegates all processing to specialized components
-* Total: ~650 lines (vs 2,752 original = 76% reduction)
-*/
-
 import EventEmitter from "../../events/EventEmitter";
 import { globalEventBus, GlobalEvents } from "../../events/GlobalEventBus";
-import type {
+import {
   PublisherConfig,
   StreamInfo,
   ServerEvent,
   SubStream,
   ParticipantPermissions,
-} from "../../types/media/publisher.types";
-import { ChannelName } from "../../types/media/publisher.types";
-import { getSubStreams, MEETING_EVENTS } from "../../constants/publisherConstants";
+  ChannelName,
+} from '../../types';
+import { getSubStreams, MEETING_EVENTS } from '../../constants';
 import { WebTransportManager } from "./transports/WebTransportManager";
 import { WebRTCManager } from "./transports/WebRTCManager";
 import { StreamManager } from "./transports/StreamManager";
@@ -367,7 +360,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.updateStatus("Connecting via WebRTC...");
 
     // Use provided webRtcHost or fallback to default (same as JS version)
-    const webRtcHost = this.options.webRtcHost || "admin.bandia.vn:9995";
+    const webRtcHost = this.options.webRtcHost;
+    
+    if (!webRtcHost) throw new Error("WebRTC host not provided");
 
     // Initialize StreamManager first
     this.streamManager = new StreamManager(true, this.options.streamId);

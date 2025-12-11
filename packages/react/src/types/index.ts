@@ -39,10 +39,12 @@ export interface ErmisClassroomProviderProps {
  * Screen share data
  */
 export interface ScreenShareData {
+  /** Unique identifier for the screen share */
+  id: string;
   /** User name of the screen sharer */
   userName: string;
   /** Screen share stream */
-  stream: MediaStream | null;
+  stream: MediaStream;
 }
 
 /**

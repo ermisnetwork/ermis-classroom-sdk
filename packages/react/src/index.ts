@@ -1,36 +1,3 @@
-/**
- * @ermisnetwork/ermis-classroom-react
- * 
- * React hooks and components for Ermis Classroom SDK
- * 
- * @example
- * ```tsx
- * import { 
- *   ErmisClassroomProvider, 
- *   useParticipants, 
- *   useLocalMedia,
- *   useRoom 
- * } from '@ermisnetwork/ermis-classroom-react';
- * 
- * function App() {
- *   return (
- *     <ErmisClassroomProvider config={{ host: 'your-host', webtpUrl: 'wss://...' }}>
- *       <VideoMeeting />
- *     </ErmisClassroomProvider>
- *   );
- * }
- * 
- * function VideoMeeting() {
- *   const { joinRoom, leaveRoom, inRoom } = useRoom();
- *   const participants = useParticipants();
- *   const { toggleMicrophone, toggleCamera } = useLocalMedia();
- *   
- *   // ...
- * }
- * ```
- */
-
-// Context and Provider
 export { ErmisClassroomContext, ErmisClassroomProvider } from './context';
 
 // All hooks
@@ -60,7 +27,29 @@ export {
   useRemoteStream,
   usePinState,
   useCustomEvents,
+  // Layout hooks
+  useSize,
+  useGridLayout,
+  usePagination,
+  useParticipantPagination,
 } from './hooks';
+
+// Layout components
+export {
+  GridLayout,
+  useGridLayoutContext,
+  CarouselLayout,
+  useCarouselLayoutContext,
+  FocusLayout,
+  FocusLayoutContainer,
+  useFocusLayoutContext,
+} from './components/layouts';
+
+// Tile components
+export {
+  ParticipantTile,
+  ScreenShareTile,
+} from './components/tiles';
 
 // Types
 export type {
@@ -77,6 +66,21 @@ export type {
   PinState,
 } from './types';
 
+// Layout types
+export type {
+  ParticipantData,
+  ScreenShareData as LayoutScreenShareData,
+  GridLayoutInfo,
+  GridLayoutProps,
+  CarouselLayoutProps,
+  FocusLayoutProps,
+  FocusLayoutContainerProps,
+  ParticipantTileProps,
+  ScreenShareTileProps,
+  PaginationState,
+  PaginationActions,
+} from './components/layouts';
+
 // Re-export hook types
 export type {
   MediaDeviceInfo,
@@ -90,4 +94,12 @@ export type {
 export type {
   RoomActions,
 } from './hooks/useRoom';
+
+export type {
+  Size,
+} from './hooks/useSize';
+
+export type {
+  UsePaginationResult,
+} from './hooks/usePagination';
 

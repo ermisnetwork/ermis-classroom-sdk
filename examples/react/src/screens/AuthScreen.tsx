@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import { Loader2, Video } from "lucide-react"
+import { IconLoader2, IconVideo } from "@tabler/icons-react"
 
 interface AuthScreenProps {
   onAuthenticated: () => void
@@ -46,7 +46,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary">
-            <Video className="h-6 w-6 text-primary-foreground" />
+            <IconVideo className="h-6 w-6 text-primary-foreground" />
           </div>
           <CardTitle className="text-2xl">Ermis Classroom</CardTitle>
           <CardDescription>Enter your user ID to get started</CardDescription>
@@ -75,7 +75,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           >
             {isLoading ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
                 Authenticating...
               </>
             ) : (
