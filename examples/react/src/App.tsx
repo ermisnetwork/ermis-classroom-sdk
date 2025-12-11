@@ -5,6 +5,7 @@ import { MeetingRoom } from "./screens/MeetingRoom"
 import { ErmisClassroomProvider } from '@ermisnetwork/ermis-classroom-react';
 import { CustomEventModal } from "./components/CustomEventModal"
 import { IconBolt } from "@tabler/icons-react"
+import {useAppContext} from "@/components/AppContext.tsx";
 
 type AppScreen = "auth" | "prejoin" | "meeting"
 
@@ -42,11 +43,12 @@ function AppContent() {
 }
 
 function App() {
+  const {apiHost, node} = useAppContext();
   return (
     <ErmisClassroomProvider
       config={{
-        host: "daibo.ermis.network:9935",
-        webtpUrl: "https://admin.bandia.vn:9995/meeting/wt",
+        host: apiHost,
+        webtpUrl: `https://${node}/meeting/wt`,
       }}
     >
       <AppContent />
