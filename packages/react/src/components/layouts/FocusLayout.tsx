@@ -1,18 +1,14 @@
 import React, { useRef, useMemo, createContext, useContext, useEffect, useState } from 'react';
-import type { FocusLayoutProps, FocusLayoutContainerProps, ParticipantData, ScreenShareData } from './types';
-
-export type FocusTileItem =
-  | { type: 'participant'; data: ParticipantData }
-  | { type: 'screenShare'; data: ScreenShareData };
+import type { FocusLayoutProps, FocusLayoutContainerProps, TileData } from './types';
 
 interface FocusLayoutContextValue {
-  focusedTile: FocusTileItem | null;
-  sidebarTiles: FocusTileItem[];
+  focusedTile: TileData | null;
+  sidebarTiles: TileData[];
   mainWidth: number;
   mainHeight: number;
   sidebarTileWidth: number;
   sidebarTileHeight: number;
-  visibleTiles: FocusTileItem[];
+  visibleTiles: TileData[];
   overflowCount: number;
 }
 
@@ -56,17 +52,15 @@ export function FocusLayoutContainer({
 }
 
 export function FocusLayout({
-  participants,
-  screenShares = [],
+  tiles,
   children,
-  focusedParticipantId,
+  focusedTileId,
   sidebarWidth: sidebarWidthProp,
   sidebarTileHeight: sidebarTileHeightProp,
   gap = 8,
   className = '',
   style,
-  renderParticipant,
-  renderScreenShare,
+  renderTile,
   renderOverflow,
   ...props
 }: FocusLayoutProps) {
@@ -76,32 +70,20 @@ export function FocusLayout({
   const [mainSize, setMainSize] = useState({ width: 0, height: 0 });
   const [sidebarSize, setSidebarSize] = useState({ width: 0, height: 0 });
 
-  const allTiles = useMemo<FocusTileItem[]>(() => {
-    const participantTiles: FocusTileItem[] = participants.map((p) => ({ type: 'participant', data: p }));
-    const screenShareTiles: FocusTileItem[] = screenShares.map((ss) => ({ type: 'screenShare', data: ss }));
-    return [...screenShareTiles, ...participantTiles];
-  }, [participants, screenShares]);
-
-  const focusedTile = useMemo<FocusTileItem | null>(() => {
-    if (focusedParticipantId) {
-      const found = allTiles.find((t) =>
-        (t.type === 'participant' && t.data.id === focusedParticipantId) ||
-        (t.type === 'screenShare' && t.data.id === focusedParticipantId)
-      );
+  const focusedTile = useMemo<TileData | null>(() => {
+    if (focusedTileId) {
+      const found = tiles.find((t) => t.id === focusedTileId);
       if (found) return found;
     }
-    const pinned = allTiles.find((t) =>
-      (t.type === 'participant' && t.data.isPinned) ||
-      (t.type === 'screenShare' && t.data.isPinned)
-    );
+    const pinned = tiles.find((t) => t.isPinned);
     if (pinned) return pinned;
-    return allTiles[0] || null;
-  }, [allTiles, focusedParticipantId]);
+    return tiles[0] || null;
+  }, [tiles, focusedTileId]);
 
-  const sidebarTiles = useMemo<FocusTileItem[]>(() => {
-    if (!focusedTile) return allTiles;
-    return allTiles.filter((t) => t.data.id !== focusedTile.data.id);
-  }, [allTiles, focusedTile]);
+  const sidebarTiles = useMemo<TileData[]>(() => {
+    if (!focusedTile) return tiles;
+    return tiles.filter((t) => t.id !== focusedTile.id);
+  }, [tiles, focusedTile]);
 
   const sidebarWidth = useMemo(() => {
     if (sidebarWidthProp) return sidebarWidthProp;
@@ -252,16 +234,6 @@ export function FocusLayout({
   const mainTileSize = { width: mainSize.width, height: mainSize.height };
   const sidebarTileSize = { width: sidebarWidth, height: sidebarTileHeight };
 
-  const renderTile = (tile: FocusTileItem, size: { width: number; height: number }) => {
-    if (tile.type === 'participant' && renderParticipant) {
-      return renderParticipant(tile.data, size);
-    }
-    if (tile.type === 'screenShare' && renderScreenShare) {
-      return renderScreenShare(tile.data, size);
-    }
-    return null;
-  };
-
   return (
     <FocusLayoutContext.Provider value={contextValue}>
       <div
@@ -272,12 +244,12 @@ export function FocusLayout({
         {...props}
       >
         <div ref={mainRef} className="ermis-focus-layout-main" style={mainAreaStyle}>
-          {focusedTile && renderTile(focusedTile, mainTileSize)}
+          {focusedTile && renderTile?.(focusedTile, mainTileSize)}
         </div>
         <div ref={sidebarRef} className="ermis-focus-layout-sidebar" style={sidebarStyle}>
           {visibleTiles.map((tile) => (
-            <React.Fragment key={tile.data.id}>
-              {renderTile(tile, sidebarTileSize)}
+            <React.Fragment key={tile.id}>
+              {renderTile?.(tile, sidebarTileSize)}
             </React.Fragment>
           ))}
           {overflowCount > 0 && (

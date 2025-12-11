@@ -70,12 +70,12 @@ export type {
 export type {
   ParticipantData,
   ScreenShareData as LayoutScreenShareData,
+  TileData,
   GridLayoutInfo,
   GridLayoutProps,
   CarouselLayoutProps,
   FocusLayoutProps,
   FocusLayoutContainerProps,
-  FocusTileItem,
   ParticipantTileProps,
   ScreenShareTileProps,
   PaginationState,

@@ -6,6 +6,7 @@ import {
   FocusLayout,
   type ParticipantData,
   type ScreenShareData as LayoutScreenShareData,
+  type TileData,
 } from "@ermisnetwork/ermis-classroom-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -111,35 +112,103 @@ function CustomParticipantTile({
   )
 }
 
-function CustomScreenShareTile({
-  screenShare,
+function CustomTile({
+  tile,
   size,
+  onPin,
+  canPin,
 }: {
-  screenShare: LayoutScreenShareData
+  tile: TileData
   size: { width: number; height: number }
+  onPin?: (id: string) => void
+  canPin: boolean
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
-    if (videoRef.current && screenShare.stream) {
-      videoRef.current.srcObject = screenShare.stream
+    if (videoRef.current && tile.stream) {
+      videoRef.current.srcObject = tile.stream
     }
-  }, [screenShare.stream])
+  }, [tile.stream])
+
+  const handlePinClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    onPin?.(tile.id)
+  }
+
+  const isScreenShare = tile.type === 'screenShare'
 
   return (
     <div
-      className="relative bg-slate-900 rounded-lg overflow-hidden"
+      className={cn(
+        "relative rounded-lg overflow-hidden group",
+        isScreenShare ? "bg-slate-900" : "bg-slate-800",
+        tile.isPinned && "ring-2 ring-blue-500"
+      )}
       style={{ width: size.width, height: size.height }}
     >
       <video
         ref={videoRef}
         autoPlay
         playsInline
-        className="w-full h-full object-contain"
+        muted={tile.isLocal}
+        className={cn(
+          "w-full h-full",
+          isScreenShare ? "object-contain" : "object-cover",
+          !isScreenShare && tile.isVideoOff && "hidden"
+        )}
       />
-      <div className="absolute top-2 left-2 px-2 py-1 bg-blue-600 rounded text-white text-sm flex items-center gap-1">
-        <IconScreenShare className="h-4 w-4" />
-        {screenShare.userName}'s screen
+      {!isScreenShare && tile.isVideoOff && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-700">
+          <div className="h-16 w-16 rounded-full bg-slate-600 flex items-center justify-center">
+            <span className="text-2xl font-semibold text-white">
+              {tile.name.charAt(0).toUpperCase()}
+            </span>
+          </div>
+        </div>
+      )}
+      {canPin && onPin && (
+        <button
+          onClick={handlePinClick}
+          className={cn(
+            "absolute top-2 right-2 p-1.5 rounded-full transition-opacity",
+            "bg-black/50 hover:bg-black/70",
+            tile.isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          )}
+          title={tile.isPinned ? "Unpin" : "Pin"}
+        >
+          {tile.isPinned ? (
+            <IconPinnedOff className="h-4 w-4 text-white" />
+          ) : (
+            <IconPin className="h-4 w-4 text-white" />
+          )}
+        </button>
+      )}
+      <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/70 to-transparent">
+        <div className="flex items-center justify-between">
+          <span className="text-white text-sm font-medium truncate flex items-center gap-1">
+            {isScreenShare && <IconScreenShare className="h-4 w-4" />}
+            {tile.name} {tile.isLocal && "(You)"}
+            {isScreenShare && "'s screen"}
+          </span>
+          <div className="flex items-center gap-1">
+            {tile.isPinned && (
+              <div className="p-1 rounded bg-blue-500">
+                <IconPin className="h-3 w-3 text-white" />
+              </div>
+            )}
+            {tile.isHandRaised && (
+              <div className="p-1 rounded bg-yellow-500">
+                <IconHandStop className="h-3 w-3 text-white" />
+              </div>
+            )}
+            {tile.isMuted && (
+              <div className="p-1 rounded bg-red-500">
+                <IconMicrophoneOff className="h-3 w-3 text-white" />
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -216,13 +285,26 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     togglePin(participantId, 'local')
   }, [localPinnedUserId, togglePin, canPin])
 
-  const allParticipants: ParticipantData[] = useMemo(() => {
-    const list: ParticipantData[] = []
+  const allTiles: TileData[] = useMemo(() => {
+    const tiles: TileData[] = []
 
-    list.push({
+    Array.from(screenShareStreams.entries())
+      .filter(([, data]) => data.stream)
+      .forEach(([id, data]) => {
+        tiles.push({
+          id: `screen-${id}`,
+          stream: data.stream!,
+          name: data.userName,
+          type: 'screenShare',
+          isPinned: pinnedUserId === `screen-${id}`,
+        })
+      })
+
+    tiles.push({
       id: userId || 'local',
       stream: localStream,
       name: userId || 'You',
+      type: 'participant',
       isLocal: true,
       isMuted: !micEnabled,
       isVideoOff: !videoEnabled,
@@ -233,10 +315,11 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     participantList
       .filter((p) => p.userId !== userId)
       .forEach((participant) => {
-        list.push({
+        tiles.push({
           id: participant.userId,
           stream: remoteStreams.get(participant.userId) || null,
           name: participant.userId,
+          type: 'participant',
           isLocal: false,
           isMuted: !participant.isAudioEnabled,
           isVideoOff: !participant.isVideoEnabled,
@@ -245,8 +328,12 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         })
       })
 
-    return list
-  }, [userId, localStream, micEnabled, videoEnabled, participantList, remoteStreams, pinnedUserId])
+    return tiles
+  }, [userId, localStream, micEnabled, videoEnabled, participantList, remoteStreams, pinnedUserId, screenShareStreams])
+
+  const allParticipants: ParticipantData[] = useMemo(() => {
+    return allTiles.filter(t => t.type === 'participant') as ParticipantData[]
+  }, [allTiles])
 
   const screenShares: LayoutScreenShareData[] = useMemo(() => {
     return Array.from(screenShareStreams.entries())
@@ -257,6 +344,18 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         userName: data.userName,
       }))
   }, [screenShareStreams])
+
+  const renderTile = useCallback(
+    (tile: TileData, size: { width: number; height: number }) => (
+      <CustomTile
+        tile={tile}
+        size={size}
+        onPin={handlePin}
+        canPin={canPin}
+      />
+    ),
+    [handlePin, canPin]
+  )
 
   const renderParticipant = useCallback(
     (participant: ParticipantData, size: { width: number; height: number }) => (
@@ -272,9 +371,20 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
 
   const renderScreenShare = useCallback(
     (screenShare: LayoutScreenShareData, size: { width: number; height: number }) => (
-      <CustomScreenShareTile screenShare={screenShare} size={size} />
+      <CustomTile
+        tile={{
+          id: `screen-${screenShare.id}`,
+          stream: screenShare.stream,
+          name: screenShare.userName,
+          type: 'screenShare',
+          isPinned: pinnedUserId === `screen-${screenShare.id}`,
+        }}
+        size={size}
+        onPin={handlePin}
+        canPin={canPin}
+      />
     ),
-    []
+    [handlePin, canPin, pinnedUserId]
   )
 
   return (
@@ -285,11 +395,9 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
       >
         {pinnedUserId ? (
           <FocusLayout
-            participants={allParticipants}
-            screenShares={screenShares}
-            focusedParticipantId={pinnedUserId}
-            renderParticipant={renderParticipant}
-            renderScreenShare={renderScreenShare}
+            tiles={allTiles}
+            focusedTileId={pinnedUserId}
+            renderTile={renderTile}
           />
         ) : (
           <GridLayout

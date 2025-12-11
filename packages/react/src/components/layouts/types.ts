@@ -18,6 +18,18 @@ export interface ScreenShareData {
   isPinned?: boolean;
 }
 
+export interface TileData {
+  id: string;
+  stream: MediaStream | null;
+  name: string;
+  type: 'participant' | 'screenShare';
+  isLocal?: boolean;
+  isMuted?: boolean;
+  isVideoOff?: boolean;
+  isHandRaised?: boolean;
+  isPinned?: boolean;
+}
+
 export interface GridLayoutInfo {
   columns: number;
   rows: number;
@@ -51,16 +63,14 @@ export interface CarouselLayoutProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 export interface FocusLayoutProps extends HTMLAttributes<HTMLDivElement> {
-  participants: ParticipantData[];
-  screenShares?: ScreenShareData[];
+  tiles: TileData[];
   children?: ReactNode;
-  focusedParticipantId?: string;
+  focusedTileId?: string;
   sidebarWidth?: number;
   sidebarTileHeight?: number;
   gap?: number;
-  onParticipantClick?: (participant: ParticipantData) => void;
-  renderParticipant?: (participant: ParticipantData, size: { width: number; height: number }) => ReactNode;
-  renderScreenShare?: (screenShare: ScreenShareData, size: { width: number; height: number }) => ReactNode;
+  onTileClick?: (tile: TileData) => void;
+  renderTile?: (tile: TileData, size: { width: number; height: number }) => ReactNode;
   renderOverflow?: (count: number, size: { width: number; height: number }) => ReactNode;
 }
 
@@ -79,6 +89,7 @@ export interface ScreenShareTileProps extends HTMLAttributes<HTMLDivElement> {
   screenShare: ScreenShareData;
   width?: number;
   height?: number;
+  onPin?: (screenShareId: string) => void;
 }
 
 export interface PaginationState {
