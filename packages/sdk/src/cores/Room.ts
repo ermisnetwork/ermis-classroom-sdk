@@ -1192,10 +1192,6 @@ export class Room extends EventEmitter {
       const participant = this.participants.get(leaveEvent.participant.user_id);
       if (participant) {
         this.removeParticipant(leaveEvent.participant.user_id);
-
-        if (!this.pinnedParticipant && this.localParticipant) {
-          this.pinParticipant(this.localParticipant.userId);
-        }
       }
     }
 
