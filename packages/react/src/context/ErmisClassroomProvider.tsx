@@ -109,7 +109,7 @@ export function ErmisClassroomProvider({
     });
 
     // Local screen share ready
-    on('localScreenShareReady', (event: any) => {
+    on(events.LOCAL_SCREEN_SHARE_READY, (event: any) => {
       if (event.videoOnlyStream && event.participant) {
         setIsScreenSharing(true);
         setScreenShareStreams((prev) => {
@@ -172,21 +172,21 @@ export function ErmisClassroomProvider({
     });
 
     // Audio toggled (local)
-    on('audioToggled', (data: any) => {
+    on(events.AUDIO_TOGGLED, (data: any) => {
       if (data.participant.isLocal) {
         setMicEnabled(data.enabled);
       }
     });
 
     // Video toggled (local)
-    on('videoToggled', (data: any) => {
+    on(events.VIDEO_TOGGLED, (data: any) => {
       if (data.participant.isLocal) {
         setVideoEnabled(data.enabled);
       }
     });
 
     // Hand raise toggled
-    on('handRaiseToggled', (data: any) => {
+    on(events.HAND_RAISE_TOGGLED, (data: any) => {
       if (data.participant.isLocal) {
         setHandRaised(data.enabled);
       }
@@ -290,17 +290,17 @@ export function ErmisClassroomProvider({
     });
 
     // Sub-room events
-    on('subRoomCreated', (data: any) => {
+    on(events.SUB_ROOM_CREATED, (data: any) => {
       setCurrentRoom(data.room);
       setParticipants(data.room.participants);
     });
 
-    on('subRoomJoined', (data: any) => {
+    on(events.SUB_ROOM_JOINED, (data: any) => {
       setCurrentRoom(data.room);
       setParticipants(data.room.currentSubRoom?.participants || new Map());
     });
 
-    on('subRoomLeft', (data: any) => {
+    on(events.SUB_ROOM_LEFT, (data: any) => {
       setCurrentRoom(data.room);
       setParticipants(data.room.participants);
     });
@@ -343,8 +343,7 @@ export function ErmisClassroomProvider({
 
     const client = ErmisClassroom.create(cfg);
     clientRef.current = client;
-    const off = setupEventListeners(client);
-    unsubRef.current = off;
+    unsubRef.current = setupEventListeners(client);
 
     // Initialize MediaDeviceManager
     const deviceManager = new MediaDeviceManager();

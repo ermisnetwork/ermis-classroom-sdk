@@ -25,6 +25,7 @@ import type {
   RoomApiData,
   ServerEvent,
   MediaConfig,
+  CustomEventData,
 } from "../types/core/room.types";
 
 export class Room extends EventEmitter {
@@ -60,6 +61,9 @@ export class Room extends EventEmitter {
   // Chat management
   messages: ChatMessage[] = [];
   typingUsers = new Map<string, TypingUser>();
+
+  // Custom event listeners
+  private customEventListeners: Array<(event: CustomEventData) => void> = [];
 
   // Global event subscriptions cleanup
   private globalEventCleanups: Array<() => void> = [];
@@ -680,6 +684,32 @@ export class Room extends EventEmitter {
       await this.localParticipant.publisher.sendCustomEvent(targets, eventData);
     } catch (error) {
       console.error("Failed to send custom event:", error);
+    }
+  }
+
+  /**
+   * Register a listener for custom events
+   * @param listener - Callback function to handle custom events
+   * @returns Unsubscribe function to remove the listener
+   */
+  onCustomEvent(listener: (event: CustomEventData) => void): () => void {
+    this.customEventListeners.push(listener);
+    return () => {
+      const index = this.customEventListeners.indexOf(listener);
+      if (index !== -1) {
+        this.customEventListeners.splice(index, 1);
+      }
+    };
+  }
+
+  /**
+   * Remove a custom event listener
+   * @param listener - The listener to remove
+   */
+  offCustomEvent(listener: (event: CustomEventData) => void): void {
+    const index = this.customEventListeners.indexOf(listener);
+    if (index !== -1) {
+      this.customEventListeners.splice(index, 1);
     }
   }
 
@@ -1371,6 +1401,31 @@ export class Room extends EventEmitter {
           participant,
         });
       }
+    }
+
+    // Handle custom events
+    if ((event as any).type === "custom") {
+      const customEvent = event as any;
+      const customEventData: CustomEventData = {
+        senderStreamId: customEvent.sender_stream_id || "",
+        value: customEvent.value || {},
+        raw: customEvent,
+      };
+
+      // Notify all registered custom event listeners
+      for (const listener of this.customEventListeners) {
+        try {
+          listener(customEventData);
+        } catch (error) {
+          console.error("[Room] Error in custom event listener:", error);
+        }
+      }
+
+      // Also emit as a regular event for flexibility
+      this.emit("customEvent", {
+        room: this,
+        event: customEventData,
+      });
     }
   }
 

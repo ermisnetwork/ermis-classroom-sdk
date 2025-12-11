@@ -9,6 +9,7 @@ import type {
   ErmisClientConfig,
   MediaDevices,
   SelectedDevices,
+  ErmisClient,
 } from '@ermisnetwork/ermis-classroom-sdk';
 
 /**
@@ -131,7 +132,7 @@ export interface PinState {
  */
 export interface ErmisClassroomContextValue {
   // Client
-  client: any;
+  client: ErmisClient | null;
 
   // Connection state
   isAuthenticated: boolean;

@@ -340,6 +340,18 @@ export interface MessageEvent {
 }
 
 /**
+ * Custom event data received from server
+ */
+export interface CustomEventData {
+  /** Sender's stream ID */
+  senderStreamId: string;
+  /** Event value/payload */
+  value: Record<string, unknown>;
+  /** Raw event data */
+  raw?: unknown;
+}
+
+/**
  * Room event payloads
  */
 export interface RoomEventMap {
