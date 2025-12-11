@@ -1,6 +1,7 @@
 import { useEffect, useRef, useMemo, useState, useCallback } from "react"
 import {
   useErmisClassroom,
+  useMediaDevices,
   GridLayout,
   FocusLayout,
   type ParticipantData,
@@ -8,8 +9,9 @@ import {
 } from "@ermisnetwork/ermis-classroom-react"
 import { Button } from "@/components/ui/button"
 import {
-  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff
+  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp
 } from "@tabler/icons-react"
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { cn } from "@/lib/utils"
 
 interface MeetingRoomProps {
@@ -164,6 +166,15 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     togglePin,
   } = useErmisClassroom()
 
+  const {
+    microphones,
+    cameras,
+    selectedMicrophone,
+    selectedCamera,
+    selectMicrophone,
+    selectCamera,
+  } = useMediaDevices()
+
   const [localPinnedUserId, setLocalPinnedUserId] = useState<string | null>(null)
 
   const remotePinnedUserId = currentRoom?.pinnedParticipant?.userId || null
@@ -292,24 +303,104 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
 
       <div className="flex-shrink-0 bg-slate-800 border-t border-slate-700 p-4">
         <div className="flex items-center justify-center gap-2 sm:gap-3">
-          <Button
-            variant={micEnabled ? "secondary" : "destructive"}
-            size="icon"
-            onClick={toggleMicrophone}
-            className="h-10 w-10 sm:h-12 sm:w-12 rounded-full"
-            title={micEnabled ? "Mute microphone" : "Unmute microphone"}
-          >
-            {micEnabled ? <IconMicrophone className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconMicrophoneOff className="h-4 w-4 sm:h-5 sm:w-5" />}
-          </Button>
+          <div className="flex items-center bg-slate-700 rounded-full">
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 sm:h-12 sm:w-12 rounded-full hover:bg-slate-600"
+                  title="Select microphone"
+                >
+                  <IconChevronUp className="h-4 w-4" />
+                </Button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="min-w-[200px] bg-slate-800 rounded-lg p-1 shadow-lg border border-slate-600 z-50"
+                  sideOffset={8}
+                  side="top"
+                >
+                  {microphones.map((mic) => (
+                    <DropdownMenu.Item
+                      key={mic.deviceId}
+                      className={cn(
+                        "px-3 py-2 text-sm text-white rounded cursor-pointer outline-none",
+                        "hover:bg-slate-700 focus:bg-slate-700",
+                        selectedMicrophone === mic.deviceId && "bg-slate-600"
+                      )}
+                      onSelect={() => selectMicrophone(mic.deviceId)}
+                    >
+                      {mic.label}
+                    </DropdownMenu.Item>
+                  ))}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+            <Button
+              variant={micEnabled ? "secondary" : "destructive"}
+              size="icon"
+              onClick={toggleMicrophone}
+              className="h-10 w-10 sm:h-12 sm:w-12 rounded-full"
+              title={micEnabled ? "Mute microphone" : "Unmute microphone"}
+            >
+              {micEnabled ? <IconMicrophone className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconMicrophoneOff className="h-4 w-4 sm:h-5 sm:w-5" />}
+            </Button>
+          </div>
+
+          <div className="flex items-center bg-slate-700 rounded-full">
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 sm:h-12 sm:w-12 rounded-full hover:bg-slate-600"
+                  title="Select camera"
+                >
+                  <IconChevronUp className="h-4 w-4" />
+                </Button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="min-w-[200px] bg-slate-800 rounded-lg p-1 shadow-lg border border-slate-600 z-50"
+                  sideOffset={8}
+                  side="top"
+                >
+                  {cameras.map((cam) => (
+                    <DropdownMenu.Item
+                      key={cam.deviceId}
+                      className={cn(
+                        "px-3 py-2 text-sm text-white rounded cursor-pointer outline-none",
+                        "hover:bg-slate-700 focus:bg-slate-700",
+                        selectedCamera === cam.deviceId && "bg-slate-600"
+                      )}
+                      onSelect={() => selectCamera(cam.deviceId)}
+                    >
+                      {cam.label}
+                    </DropdownMenu.Item>
+                  ))}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+            <Button
+              variant={videoEnabled ? "secondary" : "destructive"}
+              size="icon"
+              onClick={toggleCamera}
+              className="h-10 w-10 sm:h-12 sm:w-12 rounded-full"
+              title={videoEnabled ? "Turn off camera" : "Turn on camera"}
+            >
+              {videoEnabled ? <IconVideo className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconVideoOff className="h-4 w-4 sm:h-5 sm:w-5" />}
+            </Button>
+          </div>
 
           <Button
-            variant={videoEnabled ? "secondary" : "destructive"}
+            variant={handRaised ? "default" : "secondary"}
             size="icon"
-            onClick={toggleCamera}
-            className="h-10 w-10 sm:h-12 sm:w-12 rounded-full"
-            title={videoEnabled ? "Turn off camera" : "Turn on camera"}
+            onClick={toggleRaiseHand}
+            className={cn("h-10 w-10 sm:h-12 sm:w-12 rounded-full", handRaised && "bg-yellow-500 hover:bg-yellow-600")}
+            title={handRaised ? "Lower hand" : "Raise hand"}
           >
-            {videoEnabled ? <IconVideo className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconVideoOff className="h-4 w-4 sm:h-5 sm:w-5" />}
+            <IconHandStop className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
 
           <Button
@@ -320,16 +411,6 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
             title={isScreenSharing ? "Stop sharing" : "Share screen"}
           >
             {isScreenSharing ? <IconScreenShareOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconScreenShare className="h-4 w-4 sm:h-5 sm:w-5" />}
-          </Button>
-
-          <Button
-            variant={handRaised ? "default" : "secondary"}
-            size="icon"
-            onClick={toggleRaiseHand}
-            className={cn("h-10 w-10 sm:h-12 sm:w-12 rounded-full", handRaised && "bg-yellow-500 hover:bg-yellow-600")}
-            title={handRaised ? "Lower hand" : "Raise hand"}
-          >
-            <IconHandStop className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
 
           <Button

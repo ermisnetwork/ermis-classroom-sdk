@@ -568,7 +568,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     return this.audioEnabled;
   }
 
-  async switchVideoDevice(deviceId: string): Promise<void> {
+  async switchVideoDevice(deviceId: string): Promise<{ videoOnlyStream: MediaStream } | null> {
     if (!this.hasVideo || !this.videoProcessor) {
       throw new Error("Video not available");
     }
@@ -590,7 +590,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         this.currentStream?.addTrack(newVideoTrack);
 
         console.log("[Publisher] Video device switched");
+
+        const videoOnlyStream = new MediaStream([newVideoTrack]);
+        return { videoOnlyStream };
       }
+      return null;
     } catch (error) {
       console.error("[Publisher] Failed to switch video device:", error);
       throw error;
@@ -989,7 +993,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       this.updateStatus("Screen sharing stopped");
 
-      // Emit event
+      // Emit to global event bus so Room can update state
+      globalEventBus.emit(GlobalEvents.SCREEN_SHARE_STOPPED);
+
+      // Emit event for backward compatibility
       this.emit("screenShareStopped");
 
     } catch (error) {

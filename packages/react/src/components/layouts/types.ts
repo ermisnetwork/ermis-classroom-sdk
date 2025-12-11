@@ -15,6 +15,7 @@ export interface ScreenShareData {
   id: string;
   stream: MediaStream;
   userName: string;
+  isPinned?: boolean;
 }
 
 export interface GridLayoutInfo {
@@ -60,6 +61,7 @@ export interface FocusLayoutProps extends HTMLAttributes<HTMLDivElement> {
   onParticipantClick?: (participant: ParticipantData) => void;
   renderParticipant?: (participant: ParticipantData, size: { width: number; height: number }) => ReactNode;
   renderScreenShare?: (screenShare: ScreenShareData, size: { width: number; height: number }) => ReactNode;
+  renderOverflow?: (count: number, size: { width: number; height: number }) => ReactNode;
 }
 
 export interface FocusLayoutContainerProps extends HTMLAttributes<HTMLDivElement> {

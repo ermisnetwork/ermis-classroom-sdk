@@ -1,0 +1,5 @@
+# These files should be automatically copied by the vite-plugin
+public/workers/**/*
+public/opus_decoder/**/*
+public/polyfills/**/*
+public/raptorQ/**/*

@@ -217,11 +217,11 @@ export function ErmisClassroomProvider({
 
     on(events.SCREEN_SHARE_STOPPED, (data: any) => {
       setIsScreenSharing(false);
-      if (data.room && data.room.localParticipant) {
-        const localUserId = data.room.localParticipant.userId;
+      const participantUserId = data.participant?.userId || data.room?.localParticipant?.userId;
+      if (participantUserId) {
         setScreenShareStreams((prev) => {
           const updated = new Map(prev);
-          updated.delete(localUserId);
+          updated.delete(participantUserId);
           return updated;
         });
       }
@@ -526,13 +526,12 @@ export function ErmisClassroomProvider({
       if (!deviceManagerRef.current) return;
       try {
         deviceManagerRef.current.selectCamera(deviceId);
-        setSelectedDevices(deviceManagerRef.current.getSelectedDevices());
+        setSelectedDevices({ ...deviceManagerRef.current.getSelectedDevices() });
 
-        // If in a room, also switch the publisher's camera
         if (currentRoom) {
           const local = currentRoom.localParticipant as any;
           if (local?.publisher) {
-            const result = await local.publisher.switchCamera(deviceId);
+            const result = await local.publisher.switchVideoDevice(deviceId);
             if (result?.videoOnlyStream) {
               setLocalStream(result.videoOnlyStream);
             }
@@ -550,16 +549,12 @@ export function ErmisClassroomProvider({
       if (!deviceManagerRef.current) return;
       try {
         deviceManagerRef.current.selectMicrophone(deviceId);
-        setSelectedDevices(deviceManagerRef.current.getSelectedDevices());
+        setSelectedDevices({ ...deviceManagerRef.current.getSelectedDevices() });
 
-        // If in a room, also switch the publisher's microphone
         if (currentRoom) {
           const local = currentRoom.localParticipant as any;
           if (local?.publisher) {
-            const result = await local.publisher.switchMicrophone(deviceId);
-            if (result?.videoOnlyStream) {
-              setLocalStream(result.videoOnlyStream);
-            }
+            await local.publisher.switchAudioDevice(deviceId);
           }
         }
       } catch (error) {

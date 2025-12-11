@@ -1,15 +1,18 @@
 import React, { useRef, useMemo, createContext, useContext, useEffect, useState } from 'react';
 import type { FocusLayoutProps, FocusLayoutContainerProps, ParticipantData, ScreenShareData } from './types';
 
+export type FocusTileItem =
+  | { type: 'participant'; data: ParticipantData }
+  | { type: 'screenShare'; data: ScreenShareData };
+
 interface FocusLayoutContextValue {
-  focusedParticipant: ParticipantData | null;
-  sidebarParticipants: ParticipantData[];
-  screenShares: ScreenShareData[];
+  focusedTile: FocusTileItem | null;
+  sidebarTiles: FocusTileItem[];
   mainWidth: number;
   mainHeight: number;
   sidebarTileWidth: number;
   sidebarTileHeight: number;
-  visibleParticipants: ParticipantData[];
+  visibleTiles: FocusTileItem[];
   overflowCount: number;
 }
 
@@ -57,51 +60,95 @@ export function FocusLayout({
   screenShares = [],
   children,
   focusedParticipantId,
-  sidebarWidth = 384,
-  sidebarTileHeight = 216,
+  sidebarWidth: sidebarWidthProp,
+  sidebarTileHeight: sidebarTileHeightProp,
   gap = 8,
   className = '',
   style,
   renderParticipant,
   renderScreenShare,
+  renderOverflow,
   ...props
 }: FocusLayoutProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [mainSize, setMainSize] = useState({ width: 0, height: 0 });
-  const [sidebarHeight, setSidebarHeight] = useState(0);
+  const [sidebarSize, setSidebarSize] = useState({ width: 0, height: 0 });
 
-  const focusedParticipant = useMemo(() => {
+  const allTiles = useMemo<FocusTileItem[]>(() => {
+    const participantTiles: FocusTileItem[] = participants.map((p) => ({ type: 'participant', data: p }));
+    const screenShareTiles: FocusTileItem[] = screenShares.map((ss) => ({ type: 'screenShare', data: ss }));
+    return [...screenShareTiles, ...participantTiles];
+  }, [participants, screenShares]);
+
+  const focusedTile = useMemo<FocusTileItem | null>(() => {
     if (focusedParticipantId) {
-      return participants.find((p) => p.id === focusedParticipantId) || participants[0] || null;
+      const found = allTiles.find((t) =>
+        (t.type === 'participant' && t.data.id === focusedParticipantId) ||
+        (t.type === 'screenShare' && t.data.id === focusedParticipantId)
+      );
+      if (found) return found;
     }
-    return participants.find((p) => p.isPinned) || participants[0] || null;
-  }, [participants, focusedParticipantId]);
+    const pinned = allTiles.find((t) =>
+      (t.type === 'participant' && t.data.isPinned) ||
+      (t.type === 'screenShare' && t.data.isPinned)
+    );
+    if (pinned) return pinned;
+    return allTiles[0] || null;
+  }, [allTiles, focusedParticipantId]);
 
-  const sidebarParticipants = useMemo(() => {
-    if (!focusedParticipant) return participants;
-    return participants.filter((p) => p.id !== focusedParticipant.id);
-  }, [participants, focusedParticipant]);
+  const sidebarTiles = useMemo<FocusTileItem[]>(() => {
+    if (!focusedTile) return allTiles;
+    return allTiles.filter((t) => t.data.id !== focusedTile.data.id);
+  }, [allTiles, focusedTile]);
 
-  const maxVisibleTiles = useMemo(() => {
-    if (sidebarHeight <= 0) return sidebarParticipants.length + screenShares.length;
-    const screenShareCount = screenShares.length;
-    const screenSharesHeight = screenShareCount * (sidebarTileHeight + gap);
-    const availableHeight = sidebarHeight - screenSharesHeight;
-    const overflowIndicatorHeight = 40;
-    const maxParticipants = Math.floor((availableHeight - overflowIndicatorHeight) / (sidebarTileHeight + gap));
-    return Math.max(0, maxParticipants);
-  }, [sidebarHeight, sidebarTileHeight, gap, screenShares.length, sidebarParticipants.length]);
+  const sidebarWidth = useMemo(() => {
+    if (sidebarWidthProp) return sidebarWidthProp;
+    return sidebarSize.width > 0 ? sidebarSize.width : 384;
+  }, [sidebarWidthProp, sidebarSize.width]);
 
-  const { visibleParticipants, overflowCount } = useMemo(() => {
-    if (sidebarParticipants.length <= maxVisibleTiles) {
-      return { visibleParticipants: sidebarParticipants, overflowCount: 0 };
+  const totalSidebarItems = sidebarTiles.length;
+
+  const { sidebarTileHeight, maxVisibleTiles } = useMemo(() => {
+    const containerHeight = sidebarSize.height;
+    const containerWidth = sidebarSize.width;
+    if (containerHeight <= 0 || containerWidth <= 0) {
+      return {
+        sidebarTileHeight: sidebarTileHeightProp ?? 216,
+        maxVisibleTiles: totalSidebarItems
+      };
     }
-    const visible = sidebarParticipants.slice(0, maxVisibleTiles);
-    const overflow = sidebarParticipants.length - maxVisibleTiles;
-    return { visibleParticipants: visible, overflowCount: overflow };
-  }, [sidebarParticipants, maxVisibleTiles]);
+    if (sidebarTileHeightProp) {
+      const maxTiles = Math.floor(containerHeight / (sidebarTileHeightProp + gap));
+      return { sidebarTileHeight: sidebarTileHeightProp, maxVisibleTiles: Math.max(1, maxTiles) };
+    }
+    const aspectRatio = 16 / 9;
+    const maxHeightByAspect = Math.floor(containerWidth / aspectRatio);
+    const minTileHeight = 80;
+    const maxTileHeight = Math.min(maxHeightByAspect, 300);
+    let bestTileHeight = maxTileHeight;
+    let bestVisibleCount = Math.floor(containerHeight / (maxTileHeight + gap));
+    if (bestVisibleCount < totalSidebarItems) {
+      const neededTiles = Math.min(totalSidebarItems, 6);
+      const calculatedHeight = Math.floor((containerHeight - (neededTiles - 1) * gap) / neededTiles);
+      bestTileHeight = Math.max(minTileHeight, Math.min(calculatedHeight, maxTileHeight));
+      bestVisibleCount = Math.floor(containerHeight / (bestTileHeight + gap));
+    }
+    return {
+      sidebarTileHeight: bestTileHeight,
+      maxVisibleTiles: Math.max(1, bestVisibleCount)
+    };
+  }, [sidebarSize.height, sidebarSize.width, sidebarTileHeightProp, gap, totalSidebarItems]);
+
+  const { visibleTiles, overflowCount } = useMemo(() => {
+    if (sidebarTiles.length <= maxVisibleTiles) {
+      return { visibleTiles: sidebarTiles, overflowCount: 0 };
+    }
+    const visible = sidebarTiles.slice(0, Math.max(0, maxVisibleTiles - 1));
+    const overflow = sidebarTiles.length - visible.length;
+    return { visibleTiles: visible, overflowCount: overflow };
+  }, [sidebarTiles, maxVisibleTiles]);
 
   useEffect(() => {
     if (!mainRef.current) return;
@@ -125,13 +172,13 @@ export function FocusLayout({
 
   useEffect(() => {
     if (!sidebarRef.current) return;
-    const updateSidebarHeight = () => {
+    const updateSidebarSize = () => {
       if (!sidebarRef.current) return;
-      const { height } = sidebarRef.current.getBoundingClientRect();
-      setSidebarHeight(height);
+      const { width, height } = sidebarRef.current.getBoundingClientRect();
+      setSidebarSize({ width, height });
     };
-    updateSidebarHeight();
-    const resizeObserver = new ResizeObserver(updateSidebarHeight);
+    updateSidebarSize();
+    const resizeObserver = new ResizeObserver(updateSidebarSize);
     resizeObserver.observe(sidebarRef.current);
     return () => resizeObserver.disconnect();
   }, []);
@@ -160,50 +207,60 @@ export function FocusLayout({
 
   const sidebarStyle = useMemo(
     () => ({
-      width: `${sidebarWidth}px`,
+      width: sidebarWidthProp ? `${sidebarWidthProp}px` : 'clamp(200px, 25%, 400px)',
       flexShrink: 0,
       display: 'flex',
       flexDirection: 'column' as const,
+      justifyContent: 'center',
       gap: `${gap}px`,
       overflow: 'hidden',
     }),
-    [sidebarWidth, gap]
+    [sidebarWidthProp, gap]
   );
 
-  const overflowIndicatorStyle = useMemo(
+  const overflowTileStyle = useMemo(
     () => ({
       width: '100%',
-      height: '40px',
+      height: `${sidebarTileHeight}px`,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: '#334155',
       borderRadius: '8px',
       color: 'white',
-      fontSize: '14px',
-      fontWeight: 500,
+      fontSize: '18px',
+      fontWeight: 600,
       flexShrink: 0,
     }),
-    []
+    [sidebarTileHeight]
   );
 
   const contextValue = useMemo<FocusLayoutContextValue>(
     () => ({
-      focusedParticipant,
-      sidebarParticipants,
-      screenShares,
+      focusedTile,
+      sidebarTiles,
       mainWidth: mainSize.width,
       mainHeight: mainSize.height,
       sidebarTileWidth: sidebarWidth,
       sidebarTileHeight,
-      visibleParticipants,
+      visibleTiles,
       overflowCount,
     }),
-    [focusedParticipant, sidebarParticipants, screenShares, mainSize, sidebarWidth, sidebarTileHeight, visibleParticipants, overflowCount]
+    [focusedTile, sidebarTiles, mainSize, sidebarWidth, sidebarTileHeight, visibleTiles, overflowCount]
   );
 
   const mainTileSize = { width: mainSize.width, height: mainSize.height };
   const sidebarTileSize = { width: sidebarWidth, height: sidebarTileHeight };
+
+  const renderTile = (tile: FocusTileItem, size: { width: number; height: number }) => {
+    if (tile.type === 'participant' && renderParticipant) {
+      return renderParticipant(tile.data, size);
+    }
+    if (tile.type === 'screenShare' && renderScreenShare) {
+      return renderScreenShare(tile.data, size);
+    }
+    return null;
+  };
 
   return (
     <FocusLayoutContext.Provider value={contextValue}>
@@ -215,23 +272,22 @@ export function FocusLayout({
         {...props}
       >
         <div ref={mainRef} className="ermis-focus-layout-main" style={mainAreaStyle}>
-          {focusedParticipant && renderParticipant && renderParticipant(focusedParticipant, mainTileSize)}
+          {focusedTile && renderTile(focusedTile, mainTileSize)}
         </div>
         <div ref={sidebarRef} className="ermis-focus-layout-sidebar" style={sidebarStyle}>
-          {screenShares.map((ss) => renderScreenShare && (
-            <React.Fragment key={`screen-${ss.id}`}>
-              {renderScreenShare(ss, sidebarTileSize)}
-            </React.Fragment>
-          ))}
-          {visibleParticipants.map((p) => renderParticipant && (
-            <React.Fragment key={p.id}>
-              {renderParticipant(p, sidebarTileSize)}
+          {visibleTiles.map((tile) => (
+            <React.Fragment key={tile.data.id}>
+              {renderTile(tile, sidebarTileSize)}
             </React.Fragment>
           ))}
           {overflowCount > 0 && (
-            <div className="ermis-focus-layout-overflow" style={overflowIndicatorStyle}>
-              +{overflowCount} more
-            </div>
+            renderOverflow ? (
+              renderOverflow(overflowCount, sidebarTileSize)
+            ) : (
+              <div className="ermis-focus-layout-overflow" style={overflowTileStyle}>
+                +{overflowCount} more
+              </div>
+            )
           )}
         </div>
         {children}

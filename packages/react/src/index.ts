@@ -75,6 +75,7 @@ export type {
   CarouselLayoutProps,
   FocusLayoutProps,
   FocusLayoutContainerProps,
+  FocusTileItem,
   ParticipantTileProps,
   ScreenShareTileProps,
   PaginationState,
