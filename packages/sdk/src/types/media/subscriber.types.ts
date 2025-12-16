@@ -25,8 +25,6 @@ export interface SubscriberConfig {
   streamId: string;
   roomId?: string;
   host: string;
-  userMediaWorker?: string;
-  screenShareWorker?: string;
   isOwnStream?: boolean;
   protocol?: SubscriberProtocol;
   subscribeType?: SubscribeType;

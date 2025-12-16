@@ -2,7 +2,7 @@
  * ErmisClassroomProvider - React Provider for Ermis Classroom SDK
  */
 
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ErmisClassroom, {
   MediaDeviceManager,
   type MediaDevices,
@@ -11,17 +11,17 @@ import ErmisClassroom, {
   ROOM_EVENTS,
   type SelectedDevices,
 } from '@ermisnetwork/ermis-classroom-sdk';
-import {ErmisClassroomContext} from './ErmisClassroomContext';
-import type {ErmisClassroomContextValue, ErmisClassroomProviderProps, ScreenShareData,} from '../types';
+import { ErmisClassroomContext } from './ErmisClassroomContext';
+import type { ErmisClassroomContextValue, ErmisClassroomProviderProps, ScreenShareData, } from '../types';
 
 /**
  * Provider component that wraps the Ermis Classroom SDK
  * Manages SDK lifecycle, event subscriptions, and state
  */
 export function ErmisClassroomProvider({
-                                         config,
-                                         children,
-                                       }: ErmisClassroomProviderProps) {
+  config,
+  children,
+}: ErmisClassroomProviderProps) {
   // Local media state
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
@@ -29,6 +29,7 @@ export function ErmisClassroomProvider({
   // Memoize config to prevent unnecessary re-renders
   const cfg = {
     host: config.host,
+    hostNode: config.hostNode,
     debug: config.debug,
     webtpUrl: config.webtpUrl,
     apiUrl: config.apiUrl,
@@ -591,17 +592,17 @@ export function ErmisClassroomProvider({
         const constraints: any = {};
         if (cameraId || selectedDevices?.camera) {
           constraints.video = {
-            deviceId: {exact: cameraId || selectedDevices?.camera},
-            width: {ideal: 1280},
-            height: {ideal: 720},
-            frameRate: {ideal: 30},
+            deviceId: { exact: cameraId || selectedDevices?.camera },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 },
           };
         } else {
           constraints.video = true;
         }
         if (micId || selectedDevices?.microphone) {
           constraints.audio = {
-            deviceId: {exact: micId || selectedDevices?.microphone},
+            deviceId: { exact: micId || selectedDevices?.microphone },
             echoCancellation: true,
             noiseSuppression: true,
           };

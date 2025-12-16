@@ -57,10 +57,6 @@ export interface MediaConfig {
   subscribeProtocol?: string;
   /** Publish protocol */
   publishProtocol?: string;
-  /** User media worker URL */
-  userMediaWorker?: string;
-  /** Screen share worker URL */
-  screenShareWorker?: string;
   /** Default video configuration */
   defaultVideoConfig?: VideoConfig;
   /** Default audio configuration */

@@ -9,8 +9,8 @@ import { PacketBuilder } from "../../shared/utils/PacketBuilder";
 import type { RaptorQConfig } from "../../shared/utils/PacketBuilder";
 import { FrameTypeHelper } from "../../shared/utils/FrameTypeHelper";
 import { LengthDelimitedReader } from "../../shared/utils/LengthDelimitedReader";
-import CommandSender, {PublisherState} from "../ClientCommand";
-import {log} from "../../../utils";
+import CommandSender, { PublisherState } from "../ClientCommand";
+import { log } from "../../../utils";
 
 // Default publisher state - will be updated by Publisher
 const DEFAULT_PUBLISHER_STATE: PublisherState = {
@@ -436,6 +436,9 @@ export class StreamManager extends EventEmitter<{
         config: null,
       } as any);
 
+      // Emit streamReady event for this channel
+      this.emit("streamReady", { channelName });
+
       if (channelName === ChannelName.MEETING_CONTROL) {
         // Use the publisher state set by Publisher
         const streamData = this.streams.get(channelName);
@@ -504,19 +507,30 @@ export class StreamManager extends EventEmitter<{
     } else {
       target = { type: "group", ids: targets };
     };
-    const streamData = this.streams.get(ChannelName.MEETING_CONTROL);
-    if (streamData) {
-      const event = {
-        type: "custom",
-        sender_stream_id: this.streamId,
-        target,
-        value
-      };
-      await this.commandSender?.sendEvent(streamData, event);
+
+    let streamData = this.streams.get(ChannelName.MEETING_CONTROL);
+
+    if (!streamData) {
+      log(`[StreamManager] Stream ${ChannelName.MEETING_CONTROL} not ready yet for custom event, waiting...`);
+      try {
+        streamData = await this.waitForStream(ChannelName.MEETING_CONTROL);
+        log(`[StreamManager] Stream ${ChannelName.MEETING_CONTROL} is now ready for custom event`);
+      } catch (error) {
+        console.warn(`[StreamManager] Failed to wait for stream ${ChannelName.MEETING_CONTROL}:`, error);
+        return;
+      }
     }
+
+    const event = {
+      type: "custom",
+      sender_stream_id: this.streamId,
+      target,
+      value
+    };
+    await this.commandSender?.sendEvent(streamData, event);
   }
 
-  
+
   /**
    * Send video chunk (EXACT copy from JS handleVideoChunk logic)
    */
@@ -589,10 +603,17 @@ export class StreamManager extends EventEmitter<{
     config: VideoConfig | AudioConfig,
     mediaType: "video" | "audio",
   ): Promise<void> {
-    const streamData = this.streams.get(channelName);
+    let streamData = this.streams.get(channelName);
+
     if (!streamData) {
-      console.warn(`[StreamManager] Stream ${channelName} not ready yet for config`);
-      return;
+      log(`[StreamManager] Stream ${channelName} not ready yet for config, waiting...`);
+      try {
+        streamData = await this.waitForStream(channelName);
+        log(`[StreamManager] Stream ${channelName} is now ready for config`);
+      } catch (error) {
+        console.warn(`[StreamManager] Failed to wait for stream ${channelName} for config:`, error);
+        return;
+      }
     }
 
     let configPacket: any;
@@ -653,14 +674,56 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
+   * Wait for a stream to be ready
+   */
+  private waitForStream(channelName: ChannelName, timeout = 10000): Promise<StreamData> {
+    return new Promise((resolve, reject) => {
+      // Check if already ready
+      const existingStream = this.streams.get(channelName);
+      if (existingStream) {
+        resolve(existingStream);
+        return;
+      }
+
+      const timeoutId = setTimeout(() => {
+        this.off("streamReady", handleStreamReady);
+        reject(new Error(`Timeout waiting for stream ${channelName} to be ready`));
+      }, timeout);
+
+      const handleStreamReady = (event: { channelName: ChannelName }) => {
+        if (event.channelName === channelName) {
+          clearTimeout(timeoutId);
+          this.off("streamReady", handleStreamReady);
+          const streamData = this.streams.get(channelName);
+          if (streamData) {
+            resolve(streamData);
+          } else {
+            reject(new Error(`Stream ${channelName} not found after ready event`));
+          }
+        }
+      };
+
+      this.on("streamReady", handleStreamReady);
+    });
+  }
+
+  /**
    * Send event message
    */
   async sendEvent(eventData: object): Promise<void> {
-    const streamData = this.streams.get(ChannelName.MEETING_CONTROL);
+    let streamData = this.streams.get(ChannelName.MEETING_CONTROL);
+
     if (!streamData) {
-      console.warn(`[StreamManager] Stream ${ChannelName.MEETING_CONTROL} not ready yet for event`);
-      return;
+      log(`[StreamManager] Stream ${ChannelName.MEETING_CONTROL} not ready yet, waiting...`);
+      try {
+        streamData = await this.waitForStream(ChannelName.MEETING_CONTROL);
+        log(`[StreamManager] Stream ${ChannelName.MEETING_CONTROL} is now ready`);
+      } catch (error) {
+        console.warn(`[StreamManager] Failed to wait for stream ${ChannelName.MEETING_CONTROL}:`, error);
+        return;
+      }
     }
+
     this.commandSender?.sendEvent(streamData, eventData);
   }
 

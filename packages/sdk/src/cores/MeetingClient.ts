@@ -3,10 +3,10 @@
  * Handles authentication, room management, and event coordination
  */
 
-import {EventEmitter} from '../events/EventEmitter';
-import {globalEventBus, GlobalEvents} from '../events/GlobalEventBus';
-import {Room} from './Room';
-import {ApiClient} from '../api/ApiClient';
+import { EventEmitter } from '../events/EventEmitter';
+import { globalEventBus, GlobalEvents } from '../events/GlobalEventBus';
+import { Room } from './Room';
+import { ApiClient } from '../api/ApiClient';
 import {
   ClientState,
   ClientStateSnapshot,
@@ -20,10 +20,10 @@ import {
   TokenResponse,
   User
 } from '../types';
-import {MediaDeviceManager} from '../media/devices/MediaDeviceManager';
-import {ConnectionStatus as ConnectionStatusConst} from '../constants/connectionStatus';
-import {ParticipantRoles, VERSION} from '../constants';
-import {BrowserDetection, log} from '../utils';
+import { MediaDeviceManager } from '../media/devices/MediaDeviceManager';
+import { ConnectionStatus as ConnectionStatusConst } from '../constants/connectionStatus';
+import { ParticipantRoles, VERSION } from '../constants';
+import { BrowserDetection, log } from '../utils';
 
 export class ErmisClient extends EventEmitter {
   // Configuration
@@ -141,8 +141,8 @@ export class ErmisClient extends EventEmitter {
      * Check media permissions
      */
     async checkPermissions(): Promise<{ camera: PermissionState; microphone: PermissionState }> {
-      const cameraPermission = await navigator.permissions.query({name: 'camera' as PermissionName});
-      const microphonePermission = await navigator.permissions.query({name: 'microphone' as PermissionName});
+      const cameraPermission = await navigator.permissions.query({ name: 'camera' as PermissionName });
+      const microphonePermission = await navigator.permissions.query({ name: 'microphone' as PermissionName });
       return {
         camera: cameraPermission.state,
         microphone: microphonePermission.state,
@@ -162,23 +162,27 @@ export class ErmisClient extends EventEmitter {
       reconnectAttempts: config.reconnectAttempts ?? 3,
       reconnectDelay: config.reconnectDelay ?? 2000,
       debug: config.debug ?? false,
-      userMediaWorker: config.userMediaWorker || 'sfu-adaptive-trung.ermis-network.workers.dev',
-      screenShareWorker: config.screenShareWorker || 'sfu-screen-share.ermis-network.workers.dev',
     };
-
+    log('[MeetingClient] Initialized with config:', this.config);
     // Initialize API client
     this.apiClient = new ApiClient({
       host: this.config.host,
       apiUrl: this.config.apiUrl,
+      hostNode: this.config.hostNode,
     });
 
     // Media configuration
+    // Detect browser to determine optimal subscribe protocol
+    // Safari uses websocket (no WebTransport support), other browsers use webtransport
+    const transportInfo = BrowserDetection.determineTransport();
+    const subscribeProtocol = transportInfo.useWebRTC ? 'websocket' : 'webtransport';
+    log(`[MeetingClient] Browser detection - useWebRTC: ${transportInfo.useWebRTC}, subscribeProtocol: ${subscribeProtocol}`);
+
     this.mediaConfig = {
       host: this.config.hostNode || this.config.host,
       hostNode: this.config.hostNode || this.config.host,
       webtpUrl: this.config.webtpUrl,
-      userMediaWorker: this.config.userMediaWorker,
-      screenShareWorker: this.config.screenShareWorker,
+      subscribeProtocol,
       defaultVideoConfig: {
         width: 1280,
         height: 720,
@@ -204,7 +208,7 @@ export class ErmisClient extends EventEmitter {
     }
 
     try {
-      this.emit('authenticating', {userId});
+      this.emit('authenticating', { userId });
       this._setConnectionStatus('connecting');
 
       // Validate email format if it looks like email
@@ -230,7 +234,7 @@ export class ErmisClient extends EventEmitter {
       this.state.isAuthenticated = true;
 
       this._setConnectionStatus('connected');
-      this.emit('authenticated', {user: this.state.user});
+      this.emit('authenticated', { user: this.state.user });
 
       this._debug('User authenticated successfully:', userId);
 
@@ -269,7 +273,7 @@ export class ErmisClient extends EventEmitter {
     this._setConnectionStatus('connected');
 
     // Emit event
-    this.emit('authenticated', {user: this.state.user});
+    this.emit('authenticated', { user: this.state.user });
 
     this._debug('Auth set directly:', this.state.user);
   }
@@ -283,7 +287,7 @@ export class ErmisClient extends EventEmitter {
     }
 
     try {
-      this.emit('loggingOut', {user: this.state.user!});
+      this.emit('loggingOut', { user: this.state.user! });
 
       // Leave current room if any
       if (this.state.currentRoom) {
@@ -316,7 +320,7 @@ export class ErmisClient extends EventEmitter {
     this._ensureAuthenticated();
 
     try {
-      this.emit('creatingRoom', {config});
+      this.emit('creatingRoom', { config });
 
       const roomData = await this.apiClient.createRoom(config.name, config.type);
 
@@ -333,7 +337,7 @@ export class ErmisClient extends EventEmitter {
       this._setupRoomEvents(room);
       this.state.rooms.set(room.id, room);
 
-      this.emit('roomCreated', {room});
+      this.emit('roomCreated', { room });
       this._debug('Room created:', room.getInfo());
 
       // Auto-join if specified
@@ -441,7 +445,7 @@ export class ErmisClient extends EventEmitter {
     this._ensureAuthenticated();
 
     try {
-      this.emit('joiningRoom', {roomCode});
+      this.emit('joiningRoom', { roomCode });
 
       // Leave current room if any
       if (this.state.currentRoom) {
@@ -476,7 +480,7 @@ export class ErmisClient extends EventEmitter {
       log("Room joined successfully:", room.getInfo());
       this.state.rooms.set(room.id, room);
 
-      this.emit('roomJoined', {room, joinResult});
+      this.emit('roomJoined', { room, joinResult });
       this._debug('Joined room:', room.getInfo());
 
       return joinResult;
@@ -499,13 +503,13 @@ export class ErmisClient extends EventEmitter {
 
     try {
       const room = this.state.currentRoom;
-      this.emit('leavingRoom', {room});
+      this.emit('leavingRoom', { room });
 
       await room.leave();
 
       this.state.currentRoom = null;
 
-      this.emit('roomLeft', {room});
+      this.emit('roomLeft', { room });
       this._debug('Left room:', room.getInfo());
     } catch (error) {
       this.emit('error', {
@@ -525,7 +529,7 @@ export class ErmisClient extends EventEmitter {
     try {
       const response = await this.apiClient.listRooms(options.page || 1, options.perPage || 20);
 
-      this.emit('roomsLoaded', {rooms: response.data || []});
+      this.emit('roomsLoaded', { rooms: response.data || [] });
 
       return response.data || [];
     } catch (error) {
@@ -637,14 +641,14 @@ export class ErmisClient extends EventEmitter {
     }
 
     try {
-      this.emit('returningToMainRoom', {subRoom: this.state.currentRoom});
+      this.emit('returningToMainRoom', { subRoom: this.state.currentRoom });
 
       const subRoom = this.state.currentRoom;
       const mainRoom = await (subRoom as any).returnToMainRoom();
 
       this.state.currentRoom = mainRoom;
 
-      this.emit('returnedToMainRoom', {mainRoom, previousSubRoom: subRoom});
+      this.emit('returnedToMainRoom', { mainRoom, previousSubRoom: subRoom });
       this._debug('Returned to main room from sub room');
 
       return mainRoom;
@@ -723,7 +727,7 @@ export class ErmisClient extends EventEmitter {
    * Get client configuration
    */
   getConfig(): ErmisClientConfig {
-    return {...this.config};
+    return { ...this.config };
   }
 
   /**
@@ -740,6 +744,7 @@ export class ErmisClient extends EventEmitter {
       this.apiClient = new ApiClient({
         host: this.config.host,
         apiUrl: this.config.apiUrl,
+        hostNode: this.config.hostNode,
       });
 
       if (this.state.isAuthenticated && this.state.user) {
@@ -747,7 +752,17 @@ export class ErmisClient extends EventEmitter {
       }
     }
 
-    this.emit('configUpdated', {config: this.config});
+    // Update media config if hostNode or webtpUrl changed
+    if (newConfig.hostNode || newConfig.webtpUrl || newConfig.host) {
+      this.mediaConfig = {
+        ...this.mediaConfig,
+        host: this.config.host,
+        hostNode: this.config.hostNode,
+        webtpUrl: this.config.webtpUrl,
+      };
+    }
+
+    this.emit('configUpdated', { config: this.config });
   }
 
   /**
@@ -1062,7 +1077,7 @@ export class ErmisClient extends EventEmitter {
     });
 
     // Handle connection status changes
-    this.on('connectionStatusChanged', ({status}: any) => {
+    this.on('connectionStatusChanged', ({ status }: any) => {
       if (status === 'failed' && this.config.reconnectAttempts > 0) {
         this._attemptReconnect();
       }
@@ -1105,7 +1120,7 @@ export class ErmisClient extends EventEmitter {
   private _setConnectionStatus(status: ConnectionStatus): void {
     if (this.state.connectionStatus !== status) {
       this.state.connectionStatus = status;
-      this.emit('connectionStatusChanged', {status});
+      this.emit('connectionStatusChanged', { status });
       this._debug('Connection status changed:', status);
     }
   }
@@ -1132,4 +1147,4 @@ export class ErmisClient extends EventEmitter {
 export default ErmisClient;
 
 // Keep MeetingClient as alias for backwards compatibility
-export {ErmisClient as MeetingClient};
+export { ErmisClient as MeetingClient };

@@ -5,7 +5,7 @@ import { MeetingRoom } from "./screens/MeetingRoom"
 import { ErmisClassroomProvider } from '@ermisnetwork/ermis-classroom-react';
 import { CustomEventModal } from "./components/CustomEventModal"
 import { IconBolt } from "@tabler/icons-react"
-import {useAppContext} from "@/components/AppContext.tsx";
+import { useAppContext } from "@/components/AppContext.tsx";
 
 type AppScreen = "auth" | "prejoin" | "meeting"
 
@@ -43,11 +43,12 @@ function AppContent() {
 }
 
 function App() {
-  const {apiHost, node} = useAppContext();
+  const { apiHost, node } = useAppContext();
   return (
     <ErmisClassroomProvider
       config={{
         host: apiHost,
+        hostNode: node,
         webtpUrl: `https://${node}/meeting/wt`,
       }}
     >

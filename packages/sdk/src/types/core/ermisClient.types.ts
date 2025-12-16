@@ -33,10 +33,6 @@ export interface ErmisClientConfig {
   reconnectDelay?: number;
   /** Enable debug logging */
   debug?: boolean;
-  /** User media worker URL */
-  userMediaWorker?: string;
-  /** Screen share worker URL */
-  screenShareWorker?: string;
 }
 
 /**

@@ -20,7 +20,7 @@ import { PolyfillManager } from "./managers/PolyfillManager";
 import { VideoProcessor } from "./processors/VideoProcessor";
 import { AudioProcessor } from "./processors/AudioProcessor";
 import { ConnectionStatus } from "../../types/core/ermisClient.types";
-import {log} from "../../utils";
+import { log, BrowserDetection } from "../../utils";
 
 // Event type definitions
 interface SubscriberEvents extends Record<string, unknown> {
@@ -87,8 +87,6 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     streamId: string;
     roomId: string;
     host: string;
-    userMediaWorker: string;
-    screenShareWorker: string;
     isOwnStream: boolean;
     protocol: SubscriberProtocol;
     subscribeType: SubscribeType;
@@ -132,13 +130,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       streamId: config.streamId || "",
       roomId: config.roomId || "",
       host: config.host,
-      userMediaWorker:
-        config.userMediaWorker ||
-        "sfu-adaptive-trung.ermis-network.workers.dev",
-      screenShareWorker:
-        config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev",
       isOwnStream: config.isOwnStream || false,
-      protocol: config.protocol || "webtransport",
+      protocol: config.protocol || this.detectProtocol(),
       subscribeType: config.subscribeType || "camera",
       mediaWorkerUrl: config.mediaWorkerUrl || "/workers/media-worker-dev.js",
       audioWorkletUrl: config.audioWorkletUrl || "/workers/audio-worklet.js",
@@ -175,11 +168,28 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   }
 
   /**
+   * Detect the best protocol based on browser capabilities
+   * Safari uses websocket, other browsers use webtransport
+   */
+  private detectProtocol(): SubscriberProtocol {
+    const transportInfo = BrowserDetection.determineTransport();
+    const protocol = transportInfo.useWebRTC ? 'websocket' : 'webtransport';
+    log(`[Subscriber] Browser detection - useWebRTC: ${transportInfo.useWebRTC}, protocol: ${protocol}`);
+    return protocol;
+  }
+
+  /**
    * Initialize all managers and processors
    */
   private initializeManagers(): void {
-    // Transport manager
-    this.transportManager = new WebTransportManager(this.config.subcribeUrl);
+    // Transport manager - only initialize for webtransport protocol
+    // For websocket protocol, connection is handled differently
+    if (this.protocol === 'webtransport') {
+      this.transportManager = new WebTransportManager(this.config.subcribeUrl);
+    } else {
+      this.transportManager = null;
+      log(`[Subscriber] Skipping WebTransportManager initialization for protocol: ${this.protocol}`);
+    }
 
     // Worker manager
     this.workerManager = new WorkerManager(
@@ -541,7 +551,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       throw new Error("Subscribe URL not provided");
     }
     log("Trying to connect to WebTransport to subscribe:", webTpUrl);
-    
+
     log('this.config', this.config);
 
     const wt = new WebTransport(webTpUrl);

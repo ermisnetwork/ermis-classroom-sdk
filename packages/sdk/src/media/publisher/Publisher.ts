@@ -16,7 +16,7 @@ import { VideoEncoderManager } from "./managers/VideoEncoderManager";
 import { AudioEncoderManager } from "./managers/AudioEncoderManager";
 import { VideoProcessor } from "./processors/VideoProcessor";
 import { AudioProcessor } from "./processors/AudioProcessor";
-import {log} from "../../utils";
+import { log } from "../../utils";
 
 interface PublisherEvents extends Record<string, unknown> {
   statusUpdate: { message: string; isError: boolean };
@@ -87,7 +87,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private videoProcessor: VideoProcessor | null = null;
   private audioProcessor: AudioProcessor | null = null;
   private InitAudioRecorder: any = null;
-  private permissions: ParticipantPermissions ;
+  private permissions: ParticipantPermissions;
 
   constructor(config: PublisherConfig) {
     super();
@@ -360,7 +360,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     // Use provided webRtcHost or fallback to default (same as JS version)
     const webRtcHost = this.options.webRtcHost;
-    
+
     if (!webRtcHost) throw new Error("WebRTC host not provided");
 
     // Initialize StreamManager first
@@ -755,7 +755,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   }
 
   async sendEvent(eventData: any): Promise<void> {
+    log("[Publisher] Sending event:", eventData);
     if (!this.streamManager) {
+      log("[Publisher] ERROR: StreamManager not initialized");
       throw new Error("StreamManager not initialized");
     }
     await this.streamManager.sendEvent(eventData);
@@ -812,7 +814,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       log(`[Publisher] Creating screen share streams...`);
       await this.streamManager.addStream(ChannelName.SCREEN_SHARE_720P);
-      
+
       if (hasAudio) {
         await this.streamManager.addStream(ChannelName.SCREEN_SHARE_AUDIO);
       }
