@@ -6,7 +6,7 @@ import type {
 import { AudioConfig } from "../../subscriber";
 import { AudioEncoderManager } from "../managers/AudioEncoderManager";
 import { StreamManager } from "../transports/StreamManager";
-import {log} from "../../../utils";
+import { log } from "../../../utils";
 
 /**
  * AudioProcessor - Manages audio processing and encoding pipeline
@@ -103,16 +103,23 @@ export class AudioProcessor extends EventEmitter<{
     });
 
     this.audioEncoderManager.on("audioChunk", async (data) => {
+      // DEBUG: Log audio chunk reception
+      log(`[AudioProcessor] 🎤 Audio chunk received - micEnabled: ${this.micEnabled}, timestamp: ${data.timestamp}, size: ${data.data.length}`);
+
       if (!this.micEnabled) {
+        log(`[AudioProcessor] ⏭️ Skipping audio chunk - mic is disabled`);
         return;
       }
 
       // Check if config has been sent
-      if (!this.streamManager.isConfigSent(this.channelName)) {
+      const configSent = this.streamManager.isConfigSent(this.channelName);
+      if (!configSent) {
+        log(`[AudioProcessor] ⏭️ Skipping audio chunk - config not sent yet for ${this.channelName}`);
         return;
       }
 
       try {
+        log(`[AudioProcessor] 📤 Sending audio chunk to StreamManager for ${this.channelName}`);
         // Send audio chunk
         await this.streamManager.sendAudioChunk(
           this.channelName,
@@ -120,6 +127,7 @@ export class AudioProcessor extends EventEmitter<{
           data.timestamp,
         );
 
+        log(`[AudioProcessor] ✅ Audio chunk sent successfully, bytes: ${data.data.length}`);
         this.emit("chunkSent", {
           channelName: this.channelName,
           timestamp: data.timestamp,

@@ -576,12 +576,19 @@ export class StreamManager extends EventEmitter<{
   ): Promise<void> {
     const streamData = this.streams.get(channelName);
     if (!streamData) {
+      log(`[StreamManager] ⚠️ sendAudioChunk: No stream data for ${channelName}`);
       return;
     }
 
     // Skip if config not sent yet
     if (!streamData.configSent) {
+      log(`[StreamManager] ⏭️ sendAudioChunk: Config not sent yet for ${channelName}`);
       return;
+    }
+
+    // DEBUG: Check data channel status for WebRTC
+    if (this.isWebRTC && streamData.dataChannel) {
+      log(`[StreamManager] 🔍 sendAudioChunk: DataChannel ${channelName} state: ${streamData.dataChannel.readyState}, bufferedAmount: ${streamData.dataChannel.bufferedAmount}`);
     }
 
     const sequenceNumber = this.getAndIncrementSequence(channelName);
@@ -592,7 +599,9 @@ export class StreamManager extends EventEmitter<{
       sequenceNumber,
     );
 
+    log(`[StreamManager] 📤 sendAudioChunk: Sending packet for ${channelName}, seq: ${sequenceNumber}, size: ${packet.length}`);
     await this.sendPacket(channelName, packet, FrameType.AUDIO);
+    log(`[StreamManager] ✅ sendAudioChunk: Packet sent for ${channelName}`);
   }
 
   /**
