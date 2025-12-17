@@ -186,7 +186,11 @@ export class AudioEncoderManager extends EventEmitter<{
    * @param typedArray - Encoded audio data
    */
   private handleAudioData(typedArray: Uint8Array): void {
+    // Debug: log every call to handleAudioData
+    // log(`[AudioEncoder] handleAudioData called for ${this.channelName}, size: ${typedArray?.byteLength || 0}, chunk#: ${this.chunkCount + 1}`);
+
     if (!typedArray || typedArray.byteLength === 0) {
+      console.warn(`[AudioEncoder] Empty data received for ${this.channelName}`);
       return;
     }
 

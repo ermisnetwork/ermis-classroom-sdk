@@ -4,14 +4,14 @@ let recorderScriptLoadPromise = null;
 let configNumberOfChannels = 1; // Default to stereo
 
 const proxyConsole = {
-  log: () => {},
-  error: () => {},
-  warn: () => {},
-  debug: () => {},
-  info: () => {},
-  trace: () => {},
-  group: () => {},
-  groupEnd: () => {},
+  log: () => { },
+  error: () => { },
+  warn: () => { },
+  debug: () => { },
+  info: () => { },
+  trace: () => { },
+  group: () => { },
+  groupEnd: () => { },
 };
 
 proxyConsole.log(
@@ -99,6 +99,9 @@ export async function initAudioRecorder(audioStream, options = {}) {
     throw new Error("Browser does not support recording");
   }
 
+  // Detect Safari
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
   try {
     // const audioStream = new MediaStream([source]);
     proxyConsole.log("Using provided MediaStreamTrack");
@@ -107,6 +110,53 @@ export async function initAudioRecorder(audioStream, options = {}) {
     const context = new AudioContext({
       sampleRate: finalOptions.encoderSampleRate,
     });
+
+    // SAFARI FIX: Force ScriptProcessor fallback instead of AudioWorklet
+    // Safari's AudioWorklet conflicts with MediaStreamTrackProcessor (used for video)
+    // causing audio encoding to stop after just 2 chunks
+    if (isSafari && context.audioWorklet) {
+      proxyConsole.log('[OpusDecoder] Safari detected - disabling AudioWorklet to use ScriptProcessor fallback');
+      // Delete audioWorklet to force Recorder.js to use createScriptProcessor fallback
+      Object.defineProperty(context, 'audioWorklet', {
+        value: undefined,
+        writable: false,
+        configurable: true
+      });
+    }
+
+    // Safari requires explicit resume of AudioContext (autoplay policy)
+    if (context.state === 'suspended') {
+      proxyConsole.log('[OpusDecoder] AudioContext is suspended, attempting to resume...');
+      try {
+        await context.resume();
+        proxyConsole.log('[OpusDecoder] AudioContext resumed successfully, state:', context.state);
+      } catch (resumeError) {
+        proxyConsole.error('[OpusDecoder] Failed to resume AudioContext:', resumeError);
+      }
+    }
+
+    // Verify audio track is active
+    const audioTrack = audioStream.getAudioTracks()[0];
+    if (audioTrack) {
+      proxyConsole.log('[OpusDecoder] Audio track status:', {
+        enabled: audioTrack.enabled,
+        muted: audioTrack.muted,
+        readyState: audioTrack.readyState,
+        label: audioTrack.label,
+      });
+
+      // Monitor track ending
+      audioTrack.onended = () => {
+        proxyConsole.error('[OpusDecoder] Audio track ended unexpectedly!');
+      };
+
+      // Monitor track mute
+      audioTrack.onmute = () => {
+        proxyConsole.warn('[OpusDecoder] Audio track muted!');
+      };
+    } else {
+      proxyConsole.error('[OpusDecoder] No audio track found in stream!');
+    }
 
     const sourceNode = context.createMediaStreamSource(audioStream);
 
@@ -128,7 +178,9 @@ export async function initAudioRecorder(audioStream, options = {}) {
 
     const recorder = new Recorder(recorderOptions);
 
-    recorder.onstart = () => proxyConsole.log("Recorder started");
+    recorder.onstart = () => {
+      proxyConsole.log('[OpusDecoder] Recorder started, AudioContext state:', context.state);
+    };
     recorder.onstop = () => proxyConsole.log("Recorder stopped");
     recorder.onpause = () => proxyConsole.log("Recorder paused");
     recorder.onresume = () => proxyConsole.log("Recorder resumed");

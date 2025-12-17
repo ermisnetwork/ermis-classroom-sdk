@@ -11,6 +11,7 @@ import { FrameTypeHelper } from "../../shared/utils/FrameTypeHelper";
 import { LengthDelimitedReader } from "../../shared/utils/LengthDelimitedReader";
 import CommandSender, { PublisherState } from "../ClientCommand";
 import { log } from "../../../utils";
+import type { WebRTCManager } from "./WebRTCManager";
 
 // Default publisher state - will be updated by Publisher
 const DEFAULT_PUBLISHER_STATE: PublisherState = {
@@ -70,6 +71,8 @@ export class StreamManager extends EventEmitter<{
   private dcPacketSendTime = new Map<ChannelName, number>(); // Per-channel send timing
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private webTransport: any | null = null;
+  // WebRTC manager reference for creating screen share data channels
+  private webRtcManager: WebRTCManager | null = null;
   // private peerConnection: RTCPeerConnection | null = null;
 
   // FEC/RaptorQ WASM encoder (same as JS)
@@ -116,6 +119,26 @@ export class StreamManager extends EventEmitter<{
    */
   getPublisherState(): PublisherState {
     return { ...this.publisherState };
+  }
+
+  /**
+   * Set WebRTC manager reference for creating screen share data channels
+   * This should be called by Publisher after WebRTCManager is initialized
+   */
+  setWebRTCManager(manager: WebRTCManager): void {
+    this.webRtcManager = manager;
+    log("[StreamManager] WebRTC manager reference set");
+  }
+
+  /**
+   * Stop heartbeat interval
+   * Should be called during cleanup to prevent errors after connection closes
+   */
+  stopHeartbeat(): void {
+    if (this.commandSender) {
+      this.commandSender.stopHeartbeat();
+      log("[StreamManager] Heartbeat stopped");
+    }
   }
 
   /**
@@ -193,9 +216,35 @@ export class StreamManager extends EventEmitter<{
       return;
     }
 
-    //? create data channel in WebRTC case!
+    if (this.isWebRTC) {
+      // Create WebRTC data channel for screen share
+      await this.createDataChannelForScreenShare(channelName);
+    } else {
+      // Create WebTransport bidirectional stream
+      await this.createBidirectionalStream(channelName);
+    }
+  }
 
-    await this.createBidirectionalStream(channelName);
+  /**
+   * Create WebRTC data channel for screen share streams
+   * Creates a new peer connection specifically for screen share
+   */
+  private async createDataChannelForScreenShare(channelName: ChannelName): Promise<void> {
+    if (!this.webRtcManager) {
+      throw new Error("WebRTC manager not set. Call setWebRTCManager() first.");
+    }
+
+    try {
+      log(`[StreamManager] Creating WebRTC data channel for screen share: ${channelName}`);
+
+      // Use WebRTCManager to create new connection for screen share channel
+      await this.webRtcManager.connectMultipleChannels([channelName], this);
+
+      log(`[StreamManager] Created WebRTC data channel for screen share: ${channelName}`);
+    } catch (error) {
+      console.error(`[StreamManager] Failed to create data channel for ${channelName}:`, error);
+      throw error;
+    }
   }
 
   /**
@@ -574,21 +623,33 @@ export class StreamManager extends EventEmitter<{
     audioData: Uint8Array,
     timestamp: number,
   ): Promise<void> {
-    const streamData = this.streams.get(channelName);
+    let streamData = this.streams.get(channelName);
+
+    // Wait for stream to be ready if not yet available (fixes Safari timing issue)
     if (!streamData) {
-      log(`[StreamManager] ⚠️ sendAudioChunk: No stream data for ${channelName}`);
-      return;
+      // log(`[StreamManager] ⚠️ sendAudioChunk: No stream data for ${channelName}, waiting...`);
+      try {
+        streamData = await this.waitForStream(channelName, 5000); // 5 second timeout
+        log(`[StreamManager] ✅ Stream ${channelName} is now ready for audio`);
+      } catch (error) {
+        console.warn(`[StreamManager] Failed to wait for stream ${channelName} for audio:`, error);
+        return;
+      }
+    }
+
+    // Additional check for WebRTC DataChannel readiness (Safari fix)
+    if (this.isWebRTC && streamData.dataChannel) {
+      if (streamData.dataChannel.readyState !== "open") {
+        log(`[StreamManager] ⏭️ sendAudioChunk: DataChannel ${channelName} not open yet, state: ${streamData.dataChannel.readyState}`);
+        return;
+      }
+      // log(`[StreamManager] 🔍 sendAudioChunk: DataChannel ${channelName} state: ${streamData.dataChannel.readyState}, bufferedAmount: ${streamData.dataChannel.bufferedAmount}`);
     }
 
     // Skip if config not sent yet
     if (!streamData.configSent) {
       log(`[StreamManager] ⏭️ sendAudioChunk: Config not sent yet for ${channelName}`);
       return;
-    }
-
-    // DEBUG: Check data channel status for WebRTC
-    if (this.isWebRTC && streamData.dataChannel) {
-      log(`[StreamManager] 🔍 sendAudioChunk: DataChannel ${channelName} state: ${streamData.dataChannel.readyState}, bufferedAmount: ${streamData.dataChannel.bufferedAmount}`);
     }
 
     const sequenceNumber = this.getAndIncrementSequence(channelName);
@@ -599,9 +660,9 @@ export class StreamManager extends EventEmitter<{
       sequenceNumber,
     );
 
-    log(`[StreamManager] 📤 sendAudioChunk: Sending packet for ${channelName}, seq: ${sequenceNumber}, size: ${packet.length}`);
+    // log(`[StreamManager] 📤 sendAudioChunk: Sending packet for ${channelName}, seq: ${sequenceNumber}, size: ${packet.length}`);
     await this.sendPacket(channelName, packet, FrameType.AUDIO);
-    log(`[StreamManager] ✅ sendAudioChunk: Packet sent for ${channelName}`);
+    // log(`[StreamManager] ✅ sendAudioChunk: Packet sent for ${channelName}`);
   }
 
   /**
@@ -781,6 +842,7 @@ export class StreamManager extends EventEmitter<{
   ): Promise<void> {
     const streamData = this.streams.get(channelName);
     if (!streamData) {
+      log(`[StreamManager] Stream ${channelName} not found`);
       throw new Error(`Stream ${channelName} not found`);
     }
 

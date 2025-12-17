@@ -6,7 +6,7 @@ import type {
 } from "../../../types/media/publisher.types";
 import { VideoEncoderManager } from "../managers/VideoEncoderManager";
 import { StreamManager } from "../transports/StreamManager";
-import {log} from "../../../utils";
+import { log } from "../../../utils";
 
 /**
  * VideoProcessor - Manages video frame processing and encoding pipeline
@@ -254,6 +254,8 @@ export class VideoProcessor extends EventEmitter<{
           log("[VideoProcessor] Frame reading completed");
           break;
         }
+
+        // log("[VideoProcessor] Frame read:", result.value);
 
         const frame = result.value;
         frameCount++;

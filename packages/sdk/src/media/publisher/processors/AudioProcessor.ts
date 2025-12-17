@@ -104,7 +104,7 @@ export class AudioProcessor extends EventEmitter<{
 
     this.audioEncoderManager.on("audioChunk", async (data) => {
       // DEBUG: Log audio chunk reception
-      log(`[AudioProcessor] 🎤 Audio chunk received - micEnabled: ${this.micEnabled}, timestamp: ${data.timestamp}, size: ${data.data.length}`);
+      // log(`[AudioProcessor] 🎤 Audio chunk received - micEnabled: ${this.micEnabled}, timestamp: ${data.timestamp}, size: ${data.data.length}`);
 
       if (!this.micEnabled) {
         log(`[AudioProcessor] ⏭️ Skipping audio chunk - mic is disabled`);
@@ -119,7 +119,7 @@ export class AudioProcessor extends EventEmitter<{
       }
 
       try {
-        log(`[AudioProcessor] 📤 Sending audio chunk to StreamManager for ${this.channelName}`);
+        // log(`[AudioProcessor] 📤 Sending audio chunk to StreamManager for ${this.channelName}`);
         // Send audio chunk
         await this.streamManager.sendAudioChunk(
           this.channelName,
@@ -127,7 +127,7 @@ export class AudioProcessor extends EventEmitter<{
           data.timestamp,
         );
 
-        log(`[AudioProcessor] ✅ Audio chunk sent successfully, bytes: ${data.data.length}`);
+        // log(`[AudioProcessor] ✅ Audio chunk sent successfully, bytes: ${data.data.length}`);
         this.emit("chunkSent", {
           channelName: this.channelName,
           timestamp: data.timestamp,

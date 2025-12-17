@@ -383,6 +383,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       this.options.streamId || ""
     );
 
+    // Set WebRTC manager reference for screen share support
+    this.streamManager.setWebRTCManager(this.webRtcManager);
+
     // Get all channel names from subStreams (already includes MEETING_CONTROL, MIC_AUDIO, and video channels)
     const channelNames: ChannelName[] = this.subStreams.map(s => s.channelName as ChannelName);
 
@@ -703,6 +706,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     try {
       this.updateStatus("Stopping publisher...");
+
+      // Stop heartbeat first to prevent errors during cleanup
+      if (this.streamManager) {
+        this.streamManager.stopHeartbeat();
+      }
 
       if (this.videoProcessor) {
         await this.videoProcessor.stop();
