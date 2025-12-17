@@ -85,12 +85,14 @@ const audioInit = {
 // ------------------------------
 // Main entry
 // ------------------------------
-
+let subscriberStreamId = null;
 self.onmessage = async function (e) {
-  const { type, port, quality, readable, writable, channelName, dataChannel, wsUrl } = e.data;
+  const { type, port, quality, readable, writable, channelName, dataChannel, wsUrl, localParticipantStreamId } = e.data;
 
   switch (type) {
     case "init":
+      console.log("[Subscriber worker]: Initializing subscriber worker...", "localParticipantStreamId:", localParticipantStreamId);
+      subscriberStreamId = localParticipantStreamId || null;
       if (port instanceof MessagePort) workletPort = port;
       subscribeType = e.data.subscribeType || STREAM_TYPE.CAMERA;
       await initializeDecoders();
@@ -102,6 +104,7 @@ self.onmessage = async function (e) {
           sendDataFn: sendOverWebSocket,
           protocol: "websocket",
           commandType: "subscriber_command",
+          subscriberStreamId,
         });
 
         isWebSocket = true;
@@ -115,6 +118,7 @@ self.onmessage = async function (e) {
           sendDataFn: sendOverStream,
           protocol: "webtransport",
           commandType: "subscriber_command",
+          subscriberStreamId,
         });
         console.warn(`[Publisher worker]: Attaching WebTransport stream!`);
         attachWebTransportStream(readable, writable);

@@ -20,19 +20,22 @@ class ApiClient {
   /**
    * Generic API call method
    */
-  async apiCall(endpoint, method = "GET", body = null) {
+  async apiCall(endpoint, method = "GET", body = null, token = null) {
     if (!this.userId) {
       throw new Error("Please authenticate first");
     }
 
-    if (!this.jwtToken) {
-      throw new Error("JWT token not found");
-    }
+    // if (!this.jwtToken) {
+    //   throw new Error("JWT token not found");
+    // }
+
+    const bearer = token ? `Bearer ${token}` : `Bearer ${this.jwtToken}`;
+    console.warn('Using token:', bearer, "token params:", token);
 
     const options = {
       method,
       headers: {
-        Authorization: `Bearer ${this.jwtToken}`,
+        Authorization: bearer,
         "Content-Type": "application/json",
       },
     };
@@ -56,14 +59,50 @@ class ApiClient {
   /**
    * Get dummy token for authentication
    */
-  async getDummyToken(userId) {
-    const endpoint = "/get-token";
+
+
+  async getDummyUserToken(userId) {
+    const endpoint = "/get-user-token";
     const options = {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ sub: userId }),
+      body: JSON.stringify({ sub: userId, permissions:{can_publish: true,
+    can_publish_data: true,
+    can_publish_sources: [
+      
+        [
+        "mic_48k",
+        true
+      ],
+      [
+        "video_360p",
+        true
+      ],
+      [
+        "video_720p",
+        true
+      ],
+      [
+        "screen_share_720p",
+        true
+      ],
+      [
+        "screen_share_1080p",
+        true
+      ],
+      [
+        "screen_share_audio",
+        true
+      ]
+      
+    ],
+    can_subscribe: true,
+    can_update_metadata: true,
+    hidden: true
+  },
+ },)
     };
 
     try {
@@ -74,6 +113,32 @@ class ApiClient {
       return await response.json();
     } catch (error) {
       console.error("Token request failed:", error);
+      throw error;
+    }
+  }
+
+    /**
+   * Get dummy token for authentication
+   */
+  async getDummyServiceToken(){
+    const endpoint = '/get-service-token';
+    const options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        issuer: "hoangbim@gmail.com" }),
+    };
+
+    try {
+      const response = await fetch(`${this.apiBaseUrl}${endpoint}`, options);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Token request failed:', error);
       throw error;
     }
   }
@@ -115,15 +180,19 @@ class ApiClient {
   /**
    * Join a room by room code
    */
-  async joinRoom(roomCode, appName = "Ermis-Meeting") {
+  async joinRoom(roomCode, appName = "Ermis-Meeting"
+
+  ) {
+
+    const tokenResponse = await this.getDummyUserToken(this.userId);
     return await this.apiCall("/rooms/join", "POST", {
       room_code: roomCode,
       app_name: appName,
-    });
+    }, tokenResponse.access_token);
   }
 
   /**
-   * Create a sub room
+   * Create a sub room.
    */
   async createSubRoom({ main_room_id, rooms }) {
     return await this.apiCall("/rooms/breakout", "POST", { 

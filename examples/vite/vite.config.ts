@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     open: true,
     // host: true,
-    port: 3000,
+    port: 4000,
     allowedHosts: ["meet.xoithit.lol", "admin.bandia.vn", "4000.bandia.vn", "xoithit.lol"],
   },
   // Configure base URL for production deployment

@@ -5,6 +5,7 @@ class CommandSender {
     this.sendData = config.sendDataFn;
     this.protocol = config.protocol || "websocket";
     this.commandType = config.commandType || "publisher_command"; // publisher or subscriber
+    this.subscriberStreamId = config.subscriberStreamId || null;
   }
 
   async _sendPublisherCommand(channelName, type, data = null) {
@@ -71,13 +72,16 @@ class CommandSender {
       "[Client Command]Initializing subscribe channel stream with type:",
       subscriberType,
       "and quality:",
-      initQuality
+      initQuality,
+      "subscriberStreamId:",
+      this.subscriberStreamId
     );
     await this._sendSubscriberCommand("init_channel_stream", {
       stream_type: subscriberType,
       audio: true,
       video: true,
       quality: initQuality,
+      subscriber_stream_id: this.subscriberStreamId,
     });
   }
 

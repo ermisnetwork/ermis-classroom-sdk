@@ -48,6 +48,8 @@ class Subscriber extends EventEmitter {
 
     // Audio mixer reference (will be set externally)
     this.audioMixer = null;
+
+    this.localParticipantStreamId = config.localParticipantStreamId || null;
   }
 
   /**
@@ -246,6 +248,7 @@ class Subscriber extends EventEmitter {
           subscriberId: this.subscriberId,
           subscribeType: this.subscribeType,
           port: channelPort,
+          localParticipantStreamId: this.localParticipantStreamId,
         },
         [channelPort]
       );

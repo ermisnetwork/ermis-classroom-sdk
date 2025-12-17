@@ -67,6 +67,7 @@ class ErmisClient extends EventEmitter {
    * Authenticate user
    */
   async authenticate(userId) {
+    console.log("[Ermis Client]Authenticating user:", userId);
     if (this.state.isAuthenticated && this.state.user?.id === userId) {
       return this.state.user;
     }
@@ -84,7 +85,7 @@ class ErmisClient extends EventEmitter {
       }
 
       // Get authentication token
-      const tokenResponse = await this.apiClient.getDummyToken(userId);
+      const tokenResponse = await this.apiClient.getDummyServiceToken(userId);
 
       // Set authentication in API client
       this.apiClient.setAuth(tokenResponse.access_token, userId);

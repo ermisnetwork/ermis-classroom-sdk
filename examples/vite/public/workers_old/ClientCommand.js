@@ -1,11 +1,10 @@
-import { FRAME_TYPE, CHANNEL_NAME, CLIENT_COMMANDS } from "../constant/publisherConstants.js";
+import { FRAME_TYPE, CHANNEL_NAME, CLIENT_COMMANDS } from "./publisherConstants.js";
 
 class CommandSender {
   constructor(config) {
     this.sendData = config.sendDataFn;
     this.protocol = config.protocol || "websocket";
     this.commandType = config.commandType || "publisher_command"; // publisher or subscriber
-    this.subscriberStreamId = config.subscriberStreamId || null;
   }
 
   async _sendPublisherCommand(channelName, type, data = null) {
@@ -24,7 +23,7 @@ class CommandSender {
     }
   }
 
-  async _sendSubscriberCommand(type, data = null) {
+  async _sendSubscriberCommand(channelName, type, data = null) {
     const command = { type };
     if (data !== null) {
       command.data = data;
@@ -32,12 +31,10 @@ class CommandSender {
 
     const json = JSON.stringify(command);
     if (this.protocol === "webtransport") {
-      console.warn("[Client Command]Sending subscriber command via WebTransport:", "command:", command);
       const bytes = new TextEncoder().encode(json);
-      await this.sendData(bytes);
+      await this.sendData(channelName, bytes);
     } else {
-      console.warn("[Client Command]Sending subscriber command via WebSocket:", "command:", command);
-      await this.sendData(json);
+      await this.sendData(channelName, json);
     }
   }
 
@@ -48,7 +45,6 @@ class CommandSender {
   async initChannelStream(channelName) {
     await this._sendPublisherCommand(channelName, "init_channel_stream", {
       channel: channelName,
-      
     });
   }
 
@@ -66,29 +62,39 @@ class CommandSender {
     await this._sendPublisherCommand(channelName, "media_config", config);
   }
 
-  async initSubscribeChannelStream(subscriberType) {
-    await this._sendSubscriberCommand("init_channel_stream", {
-      stream_type: subscriberType,
+  // SubscriberCommand::InitChannelStream {
+  //                           channel,
+  //                           stream_type,
+  //                           audio,
+  //                           video,
+  //                           quality,
+  //                       },
+  /*  Subscriber command methods  */
+
+  async initSubscribeChannelStream(channelName) {
+    await this._sendSubscriberCommand(channelName, "init_channel_stream", {
+      channel: channelName,
+      stream_type: "camera",
       audio: true,
       video: true,
       quality: CHANNEL_NAME.VIDEO_720P,
     });
   }
 
-  async startStream() {
-    await this._sendSubscriberCommand(CLIENT_COMMANDS.START_STREAM);
+  async startStream(channelName) {
+    await this._sendSubscriberCommand(channelName, CLIENT_COMMANDS.START_STREAM);
   }
 
-  async stopStream() {
-    await this._sendSubscriberCommand(CLIENT_COMMANDS.STOP_STREAM);
+  async stopStream(channelName) {
+    await this._sendSubscriberCommand(channelName, CLIENT_COMMANDS.STOP_STREAM);
   }
 
-  async pauseStream() {
-    await this._sendSubscriberCommand(CLIENT_COMMANDS.PAUSE_STREAM);
+  async pauseStream(channelName) {
+    await this._sendSubscriberCommand(channelName, CLIENT_COMMANDS.PAUSE_STREAM);
   }
 
-  async resumeStream() {
-    await this._sendSubscriberCommand(CLIENT_COMMANDS.RESUME_STREAM);
+  async resumeStream(channelName) {
+    await this._sendSubscriberCommand(channelName, CLIENT_COMMANDS.RESUME_STREAM);
   }
 }
 

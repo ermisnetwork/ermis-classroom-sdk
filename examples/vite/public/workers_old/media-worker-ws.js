@@ -1,21 +1,27 @@
 import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
-import { CHANNEL_NAME, STREAM_TYPE } from "./publisherConstants.js";
+import { CHANNEL_NAME, SUBSCRIBE_TYPE } from "./publisherConstants.js";
 // import { CHANNEL_NAME, SUBSCRIBE_TYPE } from new URL("./publisherConstants.js", import.meta.url);
 
-import CommandSender from "./ClientCommandDev.js";
+import CommandSender from "./ClientCommand.js";
 
-let subscribeType = STREAM_TYPE.CAMERA;
+let subscribeType = SUBSCRIBE_TYPE.CAMERA;
 
+let videoDecoder360p;
+let videoDecoder720p;
 let currentVideoChannel = CHANNEL_NAME.VIDEO_360P;
+let audioDecoder = null;
 
 let workletPort = null;
 let audioEnabled = true;
 
-let mediaConfigs = new Map();
+let video360pConfig;
+let video720pConfig;
+let audioConfig;
 
-let mediaDecoders = new Map();
+let videoConfigs = new Map();
+let videoDecoders = new Map();
 
 let videoIntervalID;
 let audioIntervalID;
@@ -32,12 +38,16 @@ let webRtcDataChannels = new Map();
 // command sender
 let commandSender = null;
 
-let webSocketConnection = null;
-let webTPStreamReader = null;
-let webTPStreamWriter = null;
+// let fecManager = null;
+
+// raptorqInit().then(() => {
+//   console.log("Raptorq WASM module initialized");
+//   fecManager = new WasmFecManager();
+// });
 
 // WebSocket specific
 let isWebSocket = false;
+const webSocketConnections = new Map();
 
 const createVideoInit = (channelName) => ({
   output: (frame) => {
@@ -85,43 +95,57 @@ const audioInit = {
 // ------------------------------
 // Main entry
 // ------------------------------
-let subscriberStreamId = null;
+
 self.onmessage = async function (e) {
-  const { type, port, quality, readable, writable, channelName, dataChannel, wsUrl, localParticipantStreamId } = e.data;
+  console.warn("Worker received message:", e);
+  // if (!e.data || !e.data.type) return;
+  const {
+    type,
+    subscriberType: incomingSubscribeType,
+    port,
+    quality,
+    readable,
+    writable,
+    channelName,
+    dataChannel,
+    wsUrl,
+  } = e.data;
 
   switch (type) {
     case "init":
-      console.log("[Subscriber worker]: Initializing subscriber worker...", "localParticipantStreamId:", localParticipantStreamId);
-      subscriberStreamId = localParticipantStreamId || null;
-      if (port instanceof MessagePort) workletPort = port;
-      subscribeType = e.data.subscribeType || STREAM_TYPE.CAMERA;
+      console.warn("[Subscriber worker]: Received init, initializing decoders");
       await initializeDecoders();
+      console.log("received worker port", port);
+      if (port instanceof MessagePort) workletPort = port;
+      subscribeType = incomingSubscribeType || SUBSCRIBE_TYPE.CAMERA;
       break;
 
     case "attachWebSocket":
       if (wsUrl) {
+        // console.warn(`[Media worker]: Attaching WebSocket for ${channelName}`);
         commandSender = new CommandSender({
           sendDataFn: sendOverWebSocket,
           protocol: "websocket",
           commandType: "subscriber_command",
-          subscriberStreamId,
         });
 
         isWebSocket = true;
-        attachWebSocket(e.data.wsUrl);
+        // const channels = [CHANNEL_NAME.VIDEO_720P, CHANNEL_NAME.AUDIO];
+        const channels = [CHANNEL_NAME.VIDEO_360P, CHANNEL_NAME.AUDIO];
+        channels.forEach((ch) => attachWebSocket(ch, wsUrl));
+        // attachWebSocket(channelName, e.data.wsUrl);
       }
       break;
 
     case "attachStream":
-      if (readable && writable) {
+      if (readable && writable && channelName) {
         commandSender = new CommandSender({
           sendDataFn: sendOverStream,
           protocol: "webtransport",
           commandType: "subscriber_command",
-          subscriberStreamId,
         });
-        console.warn(`[Publisher worker]: Attaching WebTransport stream!`);
-        attachWebTransportStream(readable, writable);
+        console.warn(`[Publisher worker]: Attaching stream for ${channelName}`);
+        attachWebTransportStream(channelName, readable, writable);
       }
       break;
 
@@ -153,41 +177,46 @@ self.onmessage = async function (e) {
 // ------------------------------
 // WebSocket Setup
 // ------------------------------
-function attachWebSocket(wsUrl) {
-  const ws = new WebSocket(wsUrl);
+function attachWebSocket(channelName, wsUrl) {
+  const fullUrl = `${wsUrl}/${channelName}`;
+  const ws = new WebSocket(fullUrl);
 
   ws.binaryType = "arraybuffer";
 
-  webSocketConnection = ws;
+  webSocketConnections.set(channelName, ws);
 
   ws.onopen = () => {
-    commandSender.initSubscribeChannelStream(subscribeType);
+    console.log(`[WebSocket] Connected: ${channelName}`);
 
-    commandSender.startStream();
+    // const initText = { type: "start_stream" };
+
+    // ws.send(JSON.stringify(initText));
+    commandSender.startStream(channelName);
+    console.log(`[WebSocket] Sent subscribe message for ${channelName}`);
   };
 
   ws.onclose = () => {
-    console.log(`[WebSocket] Closed!`);
+    console.log(`[WebSocket] Closed: ${channelName}`);
+    webSocketConnections.delete(channelName);
   };
 
   ws.onerror = (error) => {
-    console.error(`[WebSocket] Error:`, error);
+    console.error(`[WebSocket] Error for ${channelName}:`, error);
   };
 
   ws.onmessage = (event) => {
-    processIncomingMessage(event.data);
+    processIncomingMessage(channelName, event.data);
   };
 }
 
 /// Send data over websocket, dont need to add length prefix
-async function sendOverWebSocket(data) {
-  if (!webSocketConnection || webSocketConnection.readyState !== WebSocket.OPEN) {
-    console.error(`WebSocket not found`);
+async function sendOverWebSocket(channelName, data) {
+  const ws = webSocketConnections.get(channelName);
+  if (!ws) {
+    console.error(`WebSocket ${channelName} not found`);
     return;
   }
-
-  console.warn(`[WebSocket] Sending data ${data}`);
-  await webSocketConnection.send(data);
+  await ws.send(data);
 }
 
 // ------------------------------
@@ -240,8 +269,8 @@ function handleWebRtcMessage(channelName, message) {
     if (text) {
       try {
         const json = JSON.parse(text);
-        if (json.type === "DecoderConfigs") {
-          handleStreamConfigs(channelName, json.config);
+        if (json.type === "StreamConfig") {
+          handleStreamConfig(channelName, json.config);
           return;
         }
       } catch (e) {
@@ -291,80 +320,49 @@ function parseWebRTCPacket(packet) {
   };
 }
 
-function handleStreamConfigs(json) {
-  if (json.type !== "DecoderConfigs") return;
+function handleStreamConfig(channelName, cfg) {
+  const desc = base64ToUint8Array(cfg.description);
 
-  for (const [key, value] of Object.entries(json)) {
-    if (key === "type") continue;
+  if (channelName.startsWith("video_")) {
+    const videoConfig = {
+      codec: cfg.codec,
+      codedWidth: cfg.codedWidth,
+      codedHeight: cfg.codedHeight,
+      frameRate: cfg.frameRate,
+      description: desc,
+    };
+
+    videoConfigs.set(channelName, videoConfig);
+
+    configureVideoDecoders(channelName);
+  } else if (channelName.startsWith("mic_")) {
+    audioConfig = {
+      codec: cfg.codec,
+      sampleRate: cfg.sampleRate,
+      numberOfChannels: cfg.numberOfChannels,
+      description: desc,
+    };
+
+    if (audioDecoder) audioDecoder.configure(audioConfig);
 
     try {
-      const stream = JSON.parse(value);
-      if (stream.type !== "StreamConfig") continue;
+      // const dataView = new DataView(desc.buffer);
+      // const timestamp = dataView.getUint32(0, false);
+      // const data = desc.slice(5);
 
-      const channelName = stream.channelName;
-      const cfg = stream.config;
-      const desc = base64ToUint8Array(cfg.description);
+      // for debugging
+      const dataView = new DataView(desc.buffer);
+      const timestamp = dataView.getUint32(4, false);
+      const data = desc.slice(9);
 
-      console.log(`Configuring decoder for ${key} (${channelName})`, { cfg });
-      if (stream.mediaType === "video") {
-        const videoConfig = {
-          codec: cfg.codec,
-          codedWidth: cfg.codedWidth,
-          codedHeight: cfg.codedHeight,
-          frameRate: cfg.frameRate,
-          description: desc,
-        };
-
-        mediaConfigs.set(channelName, videoConfig);
-
-        const decoder = mediaDecoders.get(channelName);
-        if (decoder) {
-          try {
-            decoder.configure(videoConfig);
-          } catch (err) {
-            console.warn(`Configure decoder fail ${channelName}:`, err);
-          }
-        } else {
-          console.warn(`No decoder for video channel ${channelName}`);
-        }
-      } else if (stream.mediaType === "audio") {
-        const audioConfig = {
-          codec: cfg.codec,
-          sampleRate: cfg.sampleRate,
-          numberOfChannels: cfg.numberOfChannels,
-          description: desc,
-        };
-
-        mediaConfigs.set(channelName, audioConfig);
-
-        const decoder = mediaDecoders.get(channelName);
-        if (decoder) {
-          try {
-            decoder.configure(audioConfig);
-
-            try {
-              const dataView = new DataView(desc.buffer);
-              const timestamp = dataView.getUint32(4, false);
-              const data = desc.slice(9);
-
-              const chunk = new EncodedAudioChunk({
-                timestamp: timestamp * 1000,
-                type: "key",
-                data,
-              });
-              decoder.decode(chunk);
-            } catch (err) {
-              console.warn(`Error decoding first audio frame (${channelName}):`, err);
-            }
-          } catch (err) {
-            console.warn(`Configure decoder fail ${channelName}:`, err);
-          }
-        } else {
-          console.warn(`No decoder for audio channel ${channelName}`);
-        }
-      }
-    } catch (err) {
-      console.error(`Error processing config for ${key}:`, err);
+      const chunk = new EncodedAudioChunk({
+        timestamp: timestamp * 1000,
+        type: "key",
+        data,
+      });
+      audioDecoder.decode(chunk);
+    } catch (error) {
+      console.log("Error decoding first audio frame:", error);
     }
   }
 }
@@ -373,21 +371,38 @@ function handleStreamConfigs(json) {
 // Stream handling (WebTransport)
 // ------------------------------
 
-async function attachWebTransportStream(readable, writable) {
-  webTPStreamReader = readable.getReader();
-  webTPStreamWriter = writable.getWriter();
+async function attachWebTransportStream(channelName, readable, writable) {
+  const reader = readable.getReader();
+  const writer = writable.getWriter();
+  channelStreams.set(channelName, { reader, writer });
 
-  commandSender.initSubscribeChannelStream(subscribeType);
+  commandSender.initSubscribeChannelStream(channelName);
 
-  console.log(`Attached WebTransport stream`);
+  console.log(`Attached WebTransport stream for ${channelName}`);
 
-  commandSender.startStream();
-  readStream(webTPStreamReader);
+  // const initText = `subscribe:${channelName}`;
+  // console.log(`Sending init message for ${channelName}:`, initText);
+
+  // const initData = new TextEncoder().encode(initText);
+  // const len = initData.length;
+  // const out = new Uint8Array(4 + len);
+  // const view = new DataView(out.buffer);
+  // view.setUint32(0, len, false);
+  // out.set(initData, 4);
+
+  // writer.write(out);
+
+  commandSender.startStream(channelName);
+  // if (channelName.startsWith("cam_")) readVideoStream(channelName, reader);
+  // else if (channelName.startsWith("mic_")) readAudioStream(reader);
+  readStream(channelName, reader);
 }
 
-async function sendOverStream(frameBytes) {
-  if (!webTPStreamWriter) {
-    console.error(`WebTransport stream not found`);
+async function sendOverStream(channelName, frameBytes) {
+  const stream = channelStreams.get(channelName);
+  console.log("sendOverStream", channelName, frameBytes, "stream", stream);
+  if (!stream || !stream.writer) {
+    console.error(`Stream ${channelName} not found`);
     return;
   }
 
@@ -397,27 +412,27 @@ async function sendOverStream(frameBytes) {
     const view = new DataView(out.buffer);
     view.setUint32(0, len, false);
     out.set(frameBytes, 4);
-    await webTPStreamWriter.write(out);
+    await stream.writer.write(out);
   } catch (error) {
-    console.error(`Failed to send over stream:`, error);
+    console.error(`Failed to send over stream ${channelName}:`, error);
     throw error;
   }
 }
 
-async function readStream(reader) {
+async function readStream(channelName, reader) {
   const delimitedReader = new LengthDelimitedReader(reader);
   try {
     while (true) {
       const message = await delimitedReader.readMessage();
       if (message === null) break;
-      await processIncomingMessage(message);
+      await processIncomingMessage(channelName, message);
     }
   } catch (err) {
-    console.error(`[readStream] error:`, err);
+    console.error(`[readStream] ${channelName}:`, err);
   }
 }
 
-async function processIncomingMessage(message) {
+async function processIncomingMessage(channelName, message) {
   try {
     let text = null;
     if (typeof message === "string") {
@@ -429,19 +444,20 @@ async function processIncomingMessage(message) {
     }
 
     if (text) {
+      console.warn(`[${channelName}] Incoming message:`, text);
       try {
         const json = JSON.parse(text);
-        if (json.type === "DecoderConfigs") {
-          handleStreamConfigs(json);
+        if (json.type === "StreamConfig") {
+          handleStreamConfig(channelName, json.config);
           return;
         }
       } catch (e) {
-        console.warn(`[processIncomingMessage] Non-JSON text:`, text);
+        console.warn(`[${channelName}] Non-JSON text:`, text);
         return;
       }
     }
   } catch (err) {
-    console.error(`[processIncomingMessage] error:`, err);
+    console.error(`[processIncomingMessage] error for ${channelName}:`, err);
   }
   if (message instanceof ArrayBuffer) {
     handleBinaryPacket(message);
@@ -449,12 +465,11 @@ async function processIncomingMessage(message) {
     handleBinaryPacket(message.buffer);
   }
 }
-
-// let videoCounterTest = 0;
-// setInterval(() => {
-//   console.log("Receive frame rate:", videoCounterTest / 5);
-//   videoCounterTest = 0;
-// }, 5000);
+let videoCounterTest = 0;
+setInterval(() => {
+  console.log("Receive frame rate:", videoCounterTest / 5);
+  videoCounterTest = 0;
+}, 5000);
 
 function handleBinaryPacket(dataBuffer) {
   // const dataView = new DataView(dataBuffer);
@@ -468,7 +483,6 @@ function handleBinaryPacket(dataBuffer) {
   const data = dataBuffer.slice(9);
 
   if (frameType === 0 || frameType === 1) {
-    let videoDecoder360p;
     const type = frameType === 0 ? "key" : "delta";
 
     if (type === "key") {
@@ -476,11 +490,11 @@ function handleBinaryPacket(dataBuffer) {
     }
 
     if (keyFrameReceived) {
-      if (mediaDecoders.get(CHANNEL_NAME.VIDEO_360P).state === "closed") {
+      if (videoDecoders.get(CHANNEL_NAME.VIDEO_360P).state === "closed") {
         videoDecoder360p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P));
-        mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, videoDecoder360p);
-        const video360pConfig = mediaConfigs.get(CHANNEL_NAME.VIDEO_360P);
-        mediaDecoders.get(CHANNEL_NAME.VIDEO_360P).configure(video360pConfig);
+        const video360pConfig = videoConfigs.get(CHANNEL_NAME.VIDEO_360P);
+        console.log("Decoder error, Configuring 360p decoder with config:", video360pConfig);
+        videoDecoders.get(CHANNEL_NAME.VIDEO_360P).configure(video360pConfig);
       }
       const encodedChunk = new EncodedVideoChunk({
         timestamp: timestamp * 1000,
@@ -488,21 +502,31 @@ function handleBinaryPacket(dataBuffer) {
         data,
       });
 
-      videoDecoder360p.decode(encodedChunk);
+      videoDecoders.get(CHANNEL_NAME.VIDEO_360P).decode(encodedChunk);
     }
     return;
   } else if (frameType === 2 || frameType === 3) {
+    // stats.record(sequenceNumber);
+    // if (last_720p_frame_sequence === sequenceNumber) {
+    //   return;
+    // }
+    videoCounterTest++;
+    last_720p_frame_sequence = sequenceNumber;
+    // console.log(
+    //   `Received video frame - Seq: ${sequenceNumber}, size: ${data.byteLength} bytes`
+    // );
     const type = frameType === 2 ? "key" : "delta";
+
     if (type === "key") {
       keyFrameReceived = true;
     }
 
     if (keyFrameReceived) {
-      if (mediaDecoders.get(CHANNEL_NAME.VIDEO_720P).state === "closed") {
-        mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
-        const config720p = mediaConfigs.get(CHANNEL_NAME.VIDEO_720P);
+      if (videoDecoders.get(CHANNEL_NAME.VIDEO_720P).state === "closed") {
+        videoDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
+        const config720p = videoConfigs.get(CHANNEL_NAME.VIDEO_720P);
         console.log("Decoder error, Configuring 720p decoder with config:", config720p);
-        mediaDecoders.get(CHANNEL_NAME.VIDEO_720P).configure(config720p);
+        videoDecoders.get(CHANNEL_NAME.VIDEO_720P).configure(config720p);
       }
       const encodedChunk = new EncodedVideoChunk({
         timestamp: timestamp * 1000,
@@ -510,42 +534,31 @@ function handleBinaryPacket(dataBuffer) {
         data,
       });
 
-      mediaDecoders.get(CHANNEL_NAME.VIDEO_720P).decode(encodedChunk);
+      videoDecoders.get(CHANNEL_NAME.VIDEO_720P).decode(encodedChunk);
     }
     return;
   } else if (frameType === 4 || frameType === 5) {
-    // todo: bind screen share 720p and camera 720p packet same packet type, dont need separate, create and get decoder base on subscribe type!!!!
-    let videoDecoderScreenShare720p = mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P);
-    const type = frameType === 4 ? "key" : "delta";
+    const type = frameType === 0 ? "key" : "delta";
 
     if (type === "key") {
       keyFrameReceived = true;
     }
 
     if (keyFrameReceived) {
-      try {
-        if (mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).state === "closed") {
-          videoDecoderScreenShare720p = new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P));
-          const screenShare720pConfig = mediaConfigs.get(CHANNEL_NAME.SCREEN_SHARE_720P);
-          console.log("Decoder error, Configuring screen share 720p decoder with config:", screenShare720pConfig);
-          mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).configure(screenShare720pConfig);
-        }
-        const encodedChunk = new EncodedVideoChunk({
-          timestamp: timestamp * 1000,
-          type,
-          data,
-        });
-
-        videoDecoderScreenShare720p.decode(encodedChunk);
-      } catch (error) {
-        console.error("Screen share video decode error:", error);
+      if (videoDecoders.get(CHANNEL_NAME.VIDEO_1080P).state === "closed") {
+        videoDecoder360p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P));
+        videoDecoders.get(CHANNEL_NAME.VIDEO_1080P).configure(videoConfigs.get(CHANNEL_NAME.VIDEO_1080P));
       }
+      const encodedChunk = new EncodedVideoChunk({
+        timestamp: timestamp * 1000,
+        type,
+        data,
+      });
+
+      videoDecoders.get(CHANNEL_NAME.VIDEO_1080P).decode(encodedChunk);
     }
     return;
   } else if (frameType === 6) {
-    let audioDecoder = mediaDecoders.get(
-      subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_AUDIO : CHANNEL_NAME.SCREEN_SHARE_AUDIO
-    );
     const chunk = new EncodedAudioChunk({
       timestamp: timestamp * 1000,
       type: "key",
@@ -567,63 +580,50 @@ function handleBinaryPacket(dataBuffer) {
 async function initializeDecoders() {
   console.log("Initializing camera decoders for subscribe type:", subscribeType);
   switch (subscribeType) {
-    case STREAM_TYPE.CAMERA:
-      mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P)));
-      mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
-      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, new OpusAudioDecoder(audioInit));
+    case SUBSCRIBE_TYPE.CAMERA:
+      videoDecoders.set(CHANNEL_NAME.VIDEO_360P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P)));
+      videoDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
       break;
 
-    case STREAM_TYPE.SCREEN_SHARE:
-      mediaDecoders.set(
-        CHANNEL_NAME.SCREEN_SHARE_720P,
-        new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P))
-      );
-      mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_AUDIO, new OpusAudioDecoder(audioInit));
-      console.warn(
-        "Initialized screen share decoders:",
-        mediaDecoders,
-        "video channel",
-        CHANNEL_NAME.SCREEN_SHARE_720P,
-        "audio channel",
-        CHANNEL_NAME.SCREEN_SHARE_AUDIO
-      );
+    case SUBSCRIBE_TYPE.SCREEN:
+      videoDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
+      videoDecoders.set(CHANNEL_NAME.VIDEO_1080P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P)));
       break;
 
     default:
-      mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P)));
-      mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
-      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, new OpusAudioDecoder(audioInit));
+      videoDecoders.set(CHANNEL_NAME.VIDEO_360P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P)));
+      videoDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
       break;
   }
 
-  // try {
-  //   audioDecoder = new OpusAudioDecoder(audioInit);
-  // } catch (error) {
-  //   console.error("Failed to initialize OpusAudioDecoder:", error);
-  // }
+  try {
+    audioDecoder = new OpusAudioDecoder(audioInit);
+  } catch (error) {
+    console.error("Failed to initialize OpusAudioDecoder:", error);
+  }
 }
 
-// function configureVideoDecoders(channelName) {
-//   const config = mediaConfigs.get(channelName);
-//   if (!config) return;
+function configureVideoDecoders(channelName) {
+  const config = videoConfigs.get(channelName);
+  if (!config) return;
 
-//   try {
-//     const decoder = mediaDecoders.get(channelName);
-//     if (decoder.state === "unconfigured") {
-//       decoder.configure(config);
-//       // videoFrameRate = config.frameRate;
-//     }
+  try {
+    const decoder = videoDecoders.get(channelName);
+    if (decoder.state === "unconfigured") {
+      decoder.configure(config);
+      // videoFrameRate = config.frameRate;
+    }
 
-//     self.postMessage({
-//       type: "codecReceived",
-//       stream: "video",
-//       channelName,
-//       config,
-//     });
-//   } catch (error) {
-//     console.error("Failed to configure video decoder:", error);
-//   }
-// }
+    self.postMessage({
+      type: "codecReceived",
+      stream: "video",
+      channelName,
+      config,
+    });
+  } catch (error) {
+    console.error("Failed to configure video decoder:", error);
+  }
+}
 
 // ------------------------------
 // Bitrate Switching
@@ -777,28 +777,24 @@ function stopAll() {
   }
   channelStreams.clear();
 
-  mediaDecoders.forEach((decoder) => {
-    try {
-      decoder.close();
-    } catch {}
-  });
-  mediaDecoders.clear();
-  mediaConfigs.clear();
+  if (videoDecoder360p) videoDecoder360p.close?.();
+  if (videoDecoder720p) videoDecoder720p.close?.();
+  if (audioDecoder) audioDecoder.close?.();
 
   clearInterval(videoIntervalID);
   clearInterval(audioIntervalID);
 
   if (isWebSocket) {
-    try {
-      if (
-        webSocketConnection.readyState === WebSocket.OPEN ||
-        webSocketConnection.readyState === WebSocket.CONNECTING
-      ) {
-        webSocketConnection.close();
+    for (const [name, ws] of webSocketConnections.entries()) {
+      try {
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
+      } catch (e) {
+        console.error(`Error closing WebSocket ${name}:`, e);
       }
-    } catch (e) {
-      console.error(`Error closing WebSocket:`, e);
     }
+    webSocketConnections.clear();
   }
 
   self.postMessage({

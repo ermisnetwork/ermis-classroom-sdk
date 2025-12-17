@@ -836,6 +836,7 @@ class Room extends EventEmitter {
       host: this.mediaConfig.hostNode,
       protocol: this.mediaConfig.subscribeProtocol,
       subscribeType: STREAM_TYPE.CAMERA,
+      localParticipantStreamId: this.localParticipant.streamId,
 
       onStatus: (msg, isError) => {
         participant.setConnectionStatus(isError ? "failed" : "connected");
@@ -940,6 +941,7 @@ class Room extends EventEmitter {
         host: this.mediaConfig.hostNode,
         protocol: this.mediaConfig.subscribeProtocol,
         subscribeType: STREAM_TYPE.SCREEN_SHARE,
+        subscriberStreamId: this.localParticipant.streamId,
 
         onStatus: (msg, isError) => {
           participant.setConnectionStatus(isError ? "failed" : "connected");
