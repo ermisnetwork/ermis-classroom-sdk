@@ -237,7 +237,7 @@ export interface WasmEncoder {
 
 // Audio recorder interface
 export interface AudioRecorder {
-  start: () => void;
+  start: (options?: { timeSlice?: number }) => void;
   stop: () => void;
   ondataavailable: ((event: { data: Uint8Array }) => void) | null;
 }

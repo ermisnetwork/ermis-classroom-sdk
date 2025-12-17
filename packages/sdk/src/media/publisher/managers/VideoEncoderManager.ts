@@ -5,7 +5,7 @@ import type {
   VideoEncoderConfig,
   VideoEncoderObject,
 } from "../../../types/media/publisher.types";
-import {log} from "../../../utils";
+import { log } from "../../../utils";
 
 /**
  * VideoEncoderManager - Manages video encoding for multiple qualities
@@ -42,7 +42,7 @@ export class VideoEncoderManager extends EventEmitter<{
   private encoders = new Map<string, VideoEncoderObject>();
   private frameCounter = 0;
   private keyframeInterval: number = VIDEO_CONFIG.KEYFRAME_INTERVAL;
-  
+
   /**
    * Create video encoder for specific quality
    *
@@ -166,10 +166,9 @@ export class VideoEncoderManager extends EventEmitter<{
       }
     }
 
-    // Close original frame if it wasn't used (all encoders made clones)
-    if (targetEncoders.length > 1) {
-      frame.close();
-    }
+    // NOTE: Do NOT close the original frame here!
+    // The caller (VideoProcessor.processFrames) is responsible for closing the frame
+    // after encodeFrame returns. Double-closing causes crashes and video corruption.
   }
 
   /**

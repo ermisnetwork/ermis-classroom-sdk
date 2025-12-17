@@ -133,7 +133,9 @@ export class AudioEncoderManager extends EventEmitter<{
     }
 
     try {
-      this.audioRecorder.start();
+      // CRITICAL: Must pass timeSlice to emit ondataavailable every 100ms
+      // Without this, the recorder may only emit data at the end or stop after 2 chunks
+      this.audioRecorder.start({ timeSlice: 100 });
 
       // Reset timing
       this.baseTime = 0;
@@ -187,7 +189,7 @@ export class AudioEncoderManager extends EventEmitter<{
    */
   private handleAudioData(typedArray: Uint8Array): void {
     // Debug: log every call to handleAudioData
-    // log(`[AudioEncoder] handleAudioData called for ${this.channelName}, size: ${typedArray?.byteLength || 0}, chunk#: ${this.chunkCount + 1}`);
+    log(`[AudioEncoder] handleAudioData called for ${this.channelName}, size: ${typedArray?.byteLength || 0}, chunk#: ${this.chunkCount + 1}`);
 
     if (!typedArray || typedArray.byteLength === 0) {
       console.warn(`[AudioEncoder] Empty data received for ${this.channelName}`);

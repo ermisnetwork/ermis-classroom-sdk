@@ -3,18 +3,7 @@ let recorderScriptLoading = false;
 let recorderScriptLoadPromise = null;
 let configNumberOfChannels = 1; // Default to stereo
 
-const proxyConsole = {
-  log: () => { },
-  error: () => { },
-  warn: () => { },
-  debug: () => { },
-  info: () => { },
-  trace: () => { },
-  group: () => { },
-  groupEnd: () => { },
-};
-
-proxyConsole.log(
+console.log(
   "[Opus Decoder] Initializing OpusAudioDecoder module, version 1.0.0"
 );
 
@@ -46,13 +35,13 @@ export async function ensureRecorderScriptLoaded() {
     script.onload = () => {
       recorderScriptLoaded = true;
       recorderScriptLoading = false;
-      proxyConsole.log("Recorder.js loaded successfully");
+      console.log("Recorder.js loaded successfully");
       resolve();
     };
 
     script.onerror = (err) => {
       recorderScriptLoading = false;
-      proxyConsole.error("Failed to load Recorder.js:", err);
+      console.error("Failed to load Recorder.js:", err);
       reject(
         new Error(
           "Failed to load Recorder.js. Please ensure the file exists at /opus_decoder/recorder.min.js"
@@ -70,7 +59,7 @@ export async function initAudioRecorder(audioStream, options = {}) {
   try {
     await ensureRecorderScriptLoaded();
   } catch (err) {
-    proxyConsole.error("Error loading Recorder.js:", err);
+    console.error("Error loading Recorder.js:", err);
     throw err;
   }
 
@@ -99,64 +88,14 @@ export async function initAudioRecorder(audioStream, options = {}) {
     throw new Error("Browser does not support recording");
   }
 
-  // Detect Safari
-  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-
   try {
     // const audioStream = new MediaStream([source]);
-    proxyConsole.log("Using provided MediaStreamTrack");
+    console.log("Using provided MediaStreamTrack");
 
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     const context = new AudioContext({
       sampleRate: finalOptions.encoderSampleRate,
     });
-
-    // SAFARI FIX: Force ScriptProcessor fallback instead of AudioWorklet
-    // Safari's AudioWorklet conflicts with MediaStreamTrackProcessor (used for video)
-    // causing audio encoding to stop after just 2 chunks
-    if (isSafari && context.audioWorklet) {
-      proxyConsole.log('[OpusDecoder] Safari detected - disabling AudioWorklet to use ScriptProcessor fallback');
-      // Delete audioWorklet to force Recorder.js to use createScriptProcessor fallback
-      Object.defineProperty(context, 'audioWorklet', {
-        value: undefined,
-        writable: false,
-        configurable: true
-      });
-    }
-
-    // Safari requires explicit resume of AudioContext (autoplay policy)
-    if (context.state === 'suspended') {
-      proxyConsole.log('[OpusDecoder] AudioContext is suspended, attempting to resume...');
-      try {
-        await context.resume();
-        proxyConsole.log('[OpusDecoder] AudioContext resumed successfully, state:', context.state);
-      } catch (resumeError) {
-        proxyConsole.error('[OpusDecoder] Failed to resume AudioContext:', resumeError);
-      }
-    }
-
-    // Verify audio track is active
-    const audioTrack = audioStream.getAudioTracks()[0];
-    if (audioTrack) {
-      proxyConsole.log('[OpusDecoder] Audio track status:', {
-        enabled: audioTrack.enabled,
-        muted: audioTrack.muted,
-        readyState: audioTrack.readyState,
-        label: audioTrack.label,
-      });
-
-      // Monitor track ending
-      audioTrack.onended = () => {
-        proxyConsole.error('[OpusDecoder] Audio track ended unexpectedly!');
-      };
-
-      // Monitor track mute
-      audioTrack.onmute = () => {
-        proxyConsole.warn('[OpusDecoder] Audio track muted!');
-      };
-    } else {
-      proxyConsole.error('[OpusDecoder] No audio track found in stream!');
-    }
 
     const sourceNode = context.createMediaStreamSource(audioStream);
 
@@ -174,29 +113,27 @@ export async function initAudioRecorder(audioStream, options = {}) {
       encoderComplexity: finalOptions.encoderComplexity,
       maxFramesPerPage: finalOptions.maxFramesPerPage,
     };
-    proxyConsole.log("Recorder options:", recorderOptions);
+    console.log("Recorder options:", recorderOptions);
 
     const recorder = new Recorder(recorderOptions);
 
-    recorder.onstart = () => {
-      proxyConsole.log('[OpusDecoder] Recorder started, AudioContext state:', context.state);
-    };
-    recorder.onstop = () => proxyConsole.log("Recorder stopped");
-    recorder.onpause = () => proxyConsole.log("Recorder paused");
-    recorder.onresume = () => proxyConsole.log("Recorder resumed");
+    recorder.onstart = () => console.log("Recorder started");
+    recorder.onstop = () => console.log("Recorder stopped");
+    recorder.onpause = () => console.log("Recorder paused");
+    recorder.onresume = () => console.log("Recorder resumed");
 
     return recorder;
   } catch (err) {
-    proxyConsole.error("Error initializing recorder:", err);
+    console.error("Error initializing recorder:", err);
     throw err;
   }
 }
 
 function log(message, ...args) {
   if (args.length === 0) {
-    proxyConsole.log(`[Opus Decoder] ${message}`);
+    console.log(`[Opus Decoder] ${message}`);
   } else {
-    proxyConsole.log(`[Opus Decoder] ${message}`, ...args);
+    console.log(`[Opus Decoder] ${message}`, ...args);
   }
 }
 
@@ -208,7 +145,7 @@ class OpusAudioDecoder {
    */
   constructor(init) {
     this.output = init.output;
-    this.error = init.error || proxyConsole.error;
+    this.error = init.error || console.error;
     this.state = "unconfigured";
     this.frameCounter = 0;
     this.decoderWorker = null;
