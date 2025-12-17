@@ -1,0 +1,26 @@
+# Summary
+
+- [Introduction](README.md)
+- [Getting Started](getting-started/README.md)
+  - [Installation](getting-started/installation.md)
+  - [Quick Start](getting-started/quick-start.md)
+  - [FAQ](getting-started/faq.md)
+
+- [User Guide](user-guide/README.md)
+  - [Concepts](user-guide/concepts.md)
+  - [Publisher](user-guide/publisher.md)
+  - [Subscriber](user-guide/subscriber.md)
+  - [Room](user-guide/room.md)
+  - [Events](user-guide/events.md)
+  - [Features](user-guide/features/README.md)
+    - [Screen Share](user-guide/features/screen-share.md)
+    - [Device Switching](user-guide/features/device-switching.md)
+
+- [Contributor Guide](contributor-guide/README.md)
+  - [Architecture](contributor-guide/architecture.md)
+  - [Streaming Flow](contributor-guide/streaming-flow.md)
+  - [Transports](contributor-guide/transports/README.md)
+    - [WebTransport](contributor-guide/transports/webtransport.md)
+    - [WebRTC](contributor-guide/transports/webrtc.md)
+  - [Troubleshooting](contributor-guide/troubleshooting/README.md)
+    - [Safari Issues](contributor-guide/troubleshooting/safari-issues.md)
