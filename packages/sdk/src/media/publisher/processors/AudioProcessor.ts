@@ -107,7 +107,7 @@ export class AudioProcessor extends EventEmitter<{
       // log(`[AudioProcessor] 🎤 Audio chunk received - micEnabled: ${this.micEnabled}, timestamp: ${data.timestamp}, size: ${data.data.length}`);
 
       if (!this.micEnabled) {
-        log(`[AudioProcessor] ⏭️ Skipping audio chunk - mic is disabled`);
+        // log(`[AudioProcessor] ⏭️ Skipping audio chunk - mic is disabled`);
         return;
       }
 

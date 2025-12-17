@@ -27,7 +27,7 @@ export class RoomServiceClient {
     this.serviceToken = serviceToken;
     this.apiHost = apiHost.replace(/\/$/, '');
   }
-  
+
   static async create(apiHost: string, privateKeyPem: string): Promise<RoomServiceClient> {
     const serviceToken = await signRoomServiceToken(privateKeyPem);
     return new RoomServiceClient(apiHost, serviceToken);
@@ -125,7 +125,7 @@ export class RoomServiceClient {
       stream_id: streamId,
       permission_changed: permissionChanged,
     };
-    return this.call<UpdateParticipantRequest>('POST', '/meeting/participants/update', req);
+    return this.call<UpdateParticipantRequest>('PUT', '/meeting/participants', req);
   }
 
   async removeParticipant(streamId: string): Promise<void> {
