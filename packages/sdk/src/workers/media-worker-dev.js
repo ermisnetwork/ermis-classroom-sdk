@@ -172,7 +172,14 @@ function attachWebSocket(wsUrl) {
   webSocketConnection = ws;
 
   ws.onopen = () => {
-    commandSender.initSubscribeChannelStream(subscribeType);
+    const options = subscribeType === STREAM_TYPE.CAMERA
+      ? { audio: true, video: true }
+      : {
+      audio: false,
+      video: true,
+    };
+    proxyConsole.log(`[WebSocket] Connected to ${wsUrl}`);
+    commandSender.initSubscribeChannelStream(subscribeType, options);
 
     commandSender.startStream();
   };
@@ -387,8 +394,15 @@ function handleStreamConfigs(json) {
 async function attachWebTransportStream(readable, writable) {
   webTPStreamReader = readable.getReader();
   webTPStreamWriter = writable.getWriter();
+  const options = subscribeType === STREAM_TYPE.CAMERA
+    ? { audio: true, video: true }
+    : {
+    audio: false,
+    video: true,
+  };
+  proxyConsole.warn(`[WebTransport] Attached stream`);
 
-  commandSender.initSubscribeChannelStream(subscribeType);
+  commandSender.initSubscribeChannelStream(subscribeType, options);
 
   proxyConsole.log(`Attached WebTransport stream`);
 

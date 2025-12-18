@@ -327,9 +327,9 @@ export class VideoProcessor extends EventEmitter<{
   ): Promise<void> {
     // Debug: log every call to handleEncodedChunk for screen share
     const isScreenShare = channelName.includes('screen_share');
-    if (isScreenShare) {
-      console.warn(`[VideoProcessor] handleEncodedChunk called for ${channelName}, type: ${chunk.type}, size: ${chunk.byteLength}, cameraEnabled: ${this.cameraEnabled}, isCapturingConfig: ${this.isCapturingConfig}`);
-    }
+    // if (isScreenShare) {
+    //   console.warn(`[VideoProcessor] handleEncodedChunk called for ${channelName}, type: ${chunk.type}, size: ${chunk.byteLength}, cameraEnabled: ${this.cameraEnabled}, isCapturingConfig: ${this.isCapturingConfig}`);
+    // }
 
     try {
       // Handle decoder config
@@ -387,9 +387,9 @@ export class VideoProcessor extends EventEmitter<{
       }
 
       // Debug: log sending video chunk for screen share
-      if (isScreenShare) {
-        console.warn(`[VideoProcessor] ✅ Sending video chunk for ${channelName}, type: ${chunk.type}, size: ${chunk.byteLength}`);
-      }
+      // if (isScreenShare) {
+      //   console.warn(`[VideoProcessor] ✅ Sending video chunk for ${channelName}, type: ${chunk.type}, size: ${chunk.byteLength}`);
+      // }
 
       // Send video chunk
       await this.streamManager.sendVideoChunk(channelName, chunk, metadata);
