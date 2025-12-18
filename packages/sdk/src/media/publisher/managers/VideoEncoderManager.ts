@@ -147,10 +147,11 @@ export class VideoEncoderManager extends EventEmitter<{
       const [name, encoderObj] = targetEncoders[i];
       const isLastEncoder = i === targetEncoders.length - 1;
 
-      // Check if encoder has capacity
-      if (encoderObj.encoder.encodeQueueSize > VIDEO_CONFIG.MAX_QUEUE_SIZE) {
+      // Check if encoder has capacity - but ALWAYS encode keyframes
+      const isQueueFull = encoderObj.encoder.encodeQueueSize > VIDEO_CONFIG.MAX_QUEUE_SIZE;
+      if (isQueueFull && !isKeyFrame) {
         console.warn(
-          `[VideoEncoder] ${name} queue full (${encoderObj.encoder.encodeQueueSize}), skipping frame`,
+          `[VideoEncoder] ${name} queue full (${encoderObj.encoder.encodeQueueSize}), skipping delta frame`,
         );
         continue;
       }

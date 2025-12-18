@@ -468,15 +468,17 @@ async function processIncomingMessage(message) {
 // }, 5000);
 
 function handleBinaryPacket(dataBuffer) {
-  // const dataView = new DataView(dataBuffer);
-  // const timestamp = dataView.getUint32(0, false);
-  // const frameType = dataView.getUint8(4);
-  // const data = dataBuffer.slice(5);
   const dataView = new DataView(dataBuffer);
   const sequenceNumber = dataView.getUint32(0, false);
   const timestamp = dataView.getUint32(4, false);
   const frameType = dataView.getUint8(8);
   const data = dataBuffer.slice(9);
+
+  // DEBUG: Only log screen share packets (frameType 4 or 5)
+  if (frameType === 4 || frameType === 5) {
+    console.warn(`[Worker] 📺 SCREEN_SHARE packet: frameType=${frameType}, seq=${sequenceNumber}, size=${data.byteLength}`);
+  }
+
 
   if (frameType === 0 || frameType === 1) {
     const type = frameType === 0 ? "key" : "delta";
@@ -547,9 +549,15 @@ function handleBinaryPacket(dataBuffer) {
     }
     return;
   } else if (frameType === 4 || frameType === 5) {
+    // DEBUG: Screen share packet received
+    console.warn(`[Worker] 📺 Screen share packet received! frameType=${frameType}, size=${data.byteLength}`);
+
     // todo: bind screen share 720p and camera 720p packet same packet type, dont need separate, create and get decoder base on subscribe type!!!!
     let videoDecoderScreenShare720p = mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P);
     const type = frameType === 4 ? "key" : "delta";
+
+    console.warn(`[Worker] Screen share decoder exists: ${!!videoDecoderScreenShare720p}, type: ${type}, keyFrameReceived: ${keyFrameReceived}`);
+
 
     if (type === "key") {
       keyFrameReceived = true;

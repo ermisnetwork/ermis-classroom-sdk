@@ -1045,6 +1045,61 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
+   * Wait for a stream to be ready (data channel open for WebRTC)
+   * @param channelName - Channel to wait for
+   * @param timeout - Timeout in milliseconds (default 10000ms)
+   */
+  async waitForStreamReady(channelName: ChannelName, timeout = 10000): Promise<void> {
+    const streamData = this.streams.get(channelName);
+
+    // For WebTransport, stream is ready when writer is available (already sync)
+    if (!this.isWebRTC) {
+      if (streamData?.writer) {
+        return;
+      }
+      // Wait for stream to be created
+      await this.waitForStream(channelName, timeout);
+      return;
+    }
+
+    // For WebRTC, need to wait for data channel to be open
+    if (streamData?.dataChannel?.readyState === "open") {
+      log(`[StreamManager] Stream ${channelName} already ready`);
+      return;
+    }
+
+    log(`[StreamManager] Waiting for stream ${channelName} to be ready...`);
+
+    // Wait for streamReady event which fires on dataChannel.onopen
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.off("streamReady", handleStreamReady);
+        reject(new Error(`Timeout waiting for stream ${channelName} to be ready`));
+      }, timeout);
+
+      const handleStreamReady = (event: { channelName: ChannelName }) => {
+        if (event.channelName === channelName) {
+          clearTimeout(timeoutId);
+          this.off("streamReady", handleStreamReady);
+          log(`[StreamManager] Stream ${channelName} is now ready`);
+          resolve();
+        }
+      };
+
+      // Check if already ready (race condition check)
+      const existingStream = this.streams.get(channelName);
+      if (existingStream?.dataChannel?.readyState === "open") {
+        clearTimeout(timeoutId);
+        log(`[StreamManager] Stream ${channelName} was already ready`);
+        resolve();
+        return;
+      }
+
+      this.on("streamReady", handleStreamReady);
+    });
+  }
+
+  /**
    * Check if config has been sent
    */
   isConfigSent(channelName: ChannelName): boolean {

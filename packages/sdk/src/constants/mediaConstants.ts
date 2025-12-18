@@ -75,7 +75,7 @@ export const VIDEO_ENCODER = {
  */
 export const VIDEO_CONFIG = {
   KEYFRAME_INTERVAL: 30, // Keyframe every 30 frames (1 second at 30fps)
-  MAX_QUEUE_SIZE: 10, // Max encoder queue size before dropping frames (increased for Safari's slower encoder)
+  MAX_QUEUE_SIZE: 2, // Max encoder queue size before dropping frames (matches old JS version for Safari compatibility)
 } as const;
 
 /**

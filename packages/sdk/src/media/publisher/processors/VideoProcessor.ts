@@ -325,6 +325,12 @@ export class VideoProcessor extends EventEmitter<{
     metadata: EncodedVideoChunkMetadata,
     channelName: ChannelName,
   ): Promise<void> {
+    // Debug: log every call to handleEncodedChunk for screen share
+    const isScreenShare = channelName.includes('screen_share');
+    if (isScreenShare) {
+      console.warn(`[VideoProcessor] handleEncodedChunk called for ${channelName}, type: ${chunk.type}, size: ${chunk.byteLength}, cameraEnabled: ${this.cameraEnabled}, isCapturingConfig: ${this.isCapturingConfig}`);
+    }
+
     try {
       // Handle decoder config
       if (
@@ -362,14 +368,27 @@ export class VideoProcessor extends EventEmitter<{
       }
 
       // Don't send video chunks if we're only capturing config (camera is off)
+      // NOTE: For screen share, cameraEnabled doesn't apply - we always send
       // We only want to send the config, not the actual video data
-      if (this.isCapturingConfig || !this.cameraEnabled) {
+      const shouldBlockChunk = this.isCapturingConfig || (!this.cameraEnabled && !isScreenShare);
+      if (shouldBlockChunk) {
+        if (isScreenShare) {
+          console.warn(`[VideoProcessor] BLOCKING screen share chunk! isCapturingConfig: ${this.isCapturingConfig}, cameraEnabled: ${this.cameraEnabled}`);
+        }
         return;
       }
 
       // Wait for config to be sent before sending video chunks
       if (!this.streamManager.isConfigSent(channelName)) {
+        if (isScreenShare) {
+          console.warn(`[VideoProcessor] Waiting for config to be sent for ${channelName}`);
+        }
         return;
+      }
+
+      // Debug: log sending video chunk for screen share
+      if (isScreenShare) {
+        console.warn(`[VideoProcessor] ✅ Sending video chunk for ${channelName}, type: ${chunk.type}, size: ${chunk.byteLength}`);
       }
 
       // Send video chunk

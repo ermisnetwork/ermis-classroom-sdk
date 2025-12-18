@@ -828,6 +828,14 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       }
       log(`[Publisher] Screen share streams created successfully`);
 
+      // Wait for data channels to be ready before starting video capture
+      log(`[Publisher] Waiting for screen share data channels to be ready...`);
+      await this.streamManager.waitForStreamReady(ChannelName.SCREEN_SHARE_720P);
+      if (hasAudio) {
+        await this.streamManager.waitForStreamReady(ChannelName.SCREEN_SHARE_AUDIO);
+      }
+      log(`[Publisher] Screen share data channels ready`);
+
       await this.startScreenVideoCapture();
 
       // Start audio if available
