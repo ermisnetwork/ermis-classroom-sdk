@@ -47,6 +47,8 @@ export class AudioEncoderManager extends EventEmitter<{
   private initAudioRecorder: InitAudioRecorder;
   private channelName: ChannelName;
   private config: AudioEncoderConfig;
+  // Keep stream reference to prevent garbage collection
+  private audioStream: MediaStream | null = null;
 
   // Timing management
   private baseTime = 0;
@@ -99,6 +101,9 @@ export class AudioEncoderManager extends EventEmitter<{
       if (!this.initAudioRecorder || typeof this.initAudioRecorder !== 'function') {
         throw new Error(`initAudioRecorder is not a function: ${typeof this.initAudioRecorder}`);
       }
+
+      // CRITICAL: Store stream reference to prevent garbage collection
+      this.audioStream = audioStream;
 
       this.audioRecorder = await this.initAudioRecorder(
         audioStream,
@@ -166,6 +171,7 @@ export class AudioEncoderManager extends EventEmitter<{
       this.audioRecorder.stop();
 
       this.audioRecorder = null;
+      this.audioStream = null; // Clear stream reference
       this.baseTime = 0;
       this.samplesSent = 0;
       this.chunkCount = 0;
@@ -189,7 +195,7 @@ export class AudioEncoderManager extends EventEmitter<{
    */
   private handleAudioData(typedArray: Uint8Array): void {
     // Debug: log every call to handleAudioData
-    log(`[AudioEncoder] handleAudioData called for ${this.channelName}, size: ${typedArray?.byteLength || 0}, chunk#: ${this.chunkCount + 1}`);
+    // log(`[AudioEncoder] handleAudioData called for ${this.channelName}, size: ${typedArray?.byteLength || 0}, chunk#: ${this.chunkCount + 1}`);
 
     if (!typedArray || typedArray.byteLength === 0) {
       console.warn(`[AudioEncoder] Empty data received for ${this.channelName}`);

@@ -9,8 +9,8 @@
  */
 
 import EventEmitter from "../../../events/EventEmitter";
-import type {QualityLevel, SubscribeType, WorkerMessageData,} from "../../../types/media/subscriber.types";
-import {log} from "../../../utils";
+import type { QualityLevel, SubscribeType, WorkerMessageData, } from "../../../types/media/subscriber.types";
+import { log } from "../../../utils";
 
 /**
  * Worker manager events
@@ -33,6 +33,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   private workerUrl: string;
   private isInitialized = false;
   private subscriberId: string;
+  // private videoFrameCount = 0; // DEBUG: Count video frames
 
   constructor(workerUrl: string, subscriberId: string) {
     super();
@@ -84,7 +85,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       log("Media worker initialized successfully");
     } catch (error) {
       const err = error instanceof Error ? error : new Error("Worker initialization failed");
-      this.emit("error", {error: err, context: "init"});
+      this.emit("error", { error: err, context: "init" });
       throw err;
     }
   }
@@ -164,7 +165,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       throw new Error("Worker not initialized");
     }
 
-    this.worker.postMessage({type: "toggleAudio"});
+    this.worker.postMessage({ type: "toggleAudio" });
   }
 
   /**
@@ -176,7 +177,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
     }
 
     log(`Switching bitrate to ${quality}`);
-    this.worker.postMessage({type: "switchBitrate", quality});
+    this.worker.postMessage({ type: "switchBitrate", quality });
   }
 
   /**
@@ -195,24 +196,31 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
    * Handle messages from worker
    */
   private handleWorkerMessage(data: WorkerMessageData): void {
-    const {type, frame, message, audioEnabled} = data;
+    const { type, frame, message, audioEnabled } = data;
 
     switch (type) {
       case "videoData":
         if (frame) {
-          this.emit("videoData", {frame});
+          // this.videoFrameCount++;
+          // if (this.videoFrameCount <= 5 || this.videoFrameCount % 100 === 0) {
+          //   log(`[WorkerManager] 📹 Video frame ${this.videoFrameCount} received from worker`);
+          // }
+          this.emit("videoData", { frame });
+        } else {
+          console.warn("[WorkerManager] ⚠️ videoData event received but frame is null/undefined");
         }
         break;
 
       case "status":
         if (message) {
-          this.emit("status", {message, isError: false});
+          this.emit("status", { message, isError: false });
         }
         break;
 
       case "error":
         if (message) {
-          this.emit("status", {message, isError: true});
+          console.error(`[WorkerManager] ❌ Worker error: ${message}`);
+          this.emit("status", { message, isError: true });
           this.emit("error", {
             error: new Error(message),
             context: "workerMessage",
@@ -222,7 +230,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
 
       case "audio-toggled":
         if (audioEnabled !== undefined) {
-          this.emit("audioToggled", {enabled: audioEnabled});
+          this.emit("audioToggled", { enabled: audioEnabled });
         }
         break;
 

@@ -58,6 +58,8 @@ export class AudioProcessor extends EventEmitter<{
   private micEnabled = true;
   private isProcessing = false;
   private audioTrack: MediaStreamTrack | null = null;
+  // Keep stream reference to prevent garbage collection
+  private audioStream: MediaStream | null = null;
 
   constructor(
     audioEncoderManager: AudioEncoderManager,
@@ -158,6 +160,10 @@ export class AudioProcessor extends EventEmitter<{
     try {
       log("[AudioProcessor] Initializing...");
 
+      // CRITICAL: Store stream reference to prevent garbage collection
+      // This fixes "MediaStreamTrack was destroyed" error
+      this.audioStream = audioStream;
+
       // Store audio track reference for enabling/disabling
       const audioTracks = audioStream.getAudioTracks();
       if (audioTracks.length > 0) {
@@ -214,6 +220,10 @@ export class AudioProcessor extends EventEmitter<{
       this.isProcessing = false;
 
       await this.audioEncoderManager.stop();
+
+      // Clear stream reference
+      this.audioStream = null;
+      this.audioTrack = null;
 
       log("[AudioProcessor] Stopped successfully");
       this.emit("stopped", { channelName: this.channelName });

@@ -39,14 +39,14 @@ let webTPStreamWriter = null;
 let isWebSocket = false;
 
 const proxyConsole = {
-  log: () => {},
-  error: () => {},
-  warn: () => {},
-  debug: () => {},
-  info: () => {},
-  trace: () => {},
-  group: () => {},
-  groupEnd: () => {},
+  log: () => { },
+  error: () => { },
+  warn: () => { },
+  debug: () => { },
+  info: () => { },
+  trace: () => { },
+  group: () => { },
+  groupEnd: () => { },
 };
 
 const createVideoInit = (channelName) => ({
@@ -59,6 +59,9 @@ const createVideoInit = (channelName) => ({
       type: "error",
       message: `${channelName} decoder: ${e.message}`,
     });
+    // Attempt to recover by resetting keyframe flag - next keyframe will reinitialize decoder
+    keyFrameReceived = false;
+    proxyConsole.warn(`[Recovery] Reset keyframe flag for ${channelName} decoder, waiting for next keyframe`);
   },
 });
 
@@ -476,7 +479,6 @@ function handleBinaryPacket(dataBuffer) {
   const data = dataBuffer.slice(9);
 
   if (frameType === 0 || frameType === 1) {
-    let videoDecoder360p;
     const type = frameType === 0 ? "key" : "delta";
 
     if (type === "key") {
@@ -484,19 +486,30 @@ function handleBinaryPacket(dataBuffer) {
     }
 
     if (keyFrameReceived) {
-      if (mediaDecoders.get(CHANNEL_NAME.VIDEO_360P).state === "closed") {
-        videoDecoder360p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P));
-        mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, videoDecoder360p);
-        const video360pConfig = mediaConfigs.get(CHANNEL_NAME.VIDEO_360P);
-        mediaDecoders.get(CHANNEL_NAME.VIDEO_360P).configure(video360pConfig);
-      }
-      const encodedChunk = new EncodedVideoChunk({
-        timestamp: timestamp * 1000,
-        type,
-        data,
-      });
+      let decoder360p = mediaDecoders.get(CHANNEL_NAME.VIDEO_360P);
+      const decoderState = decoder360p ? decoder360p.state : null;
 
-      videoDecoder360p.decode(encodedChunk);
+      // Recreate decoder if closed or in error state
+      if (!decoder360p || decoderState === "closed" || decoderState === "unconfigured") {
+        decoder360p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P));
+        mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, decoder360p);
+        const video360pConfig = mediaConfigs.get(CHANNEL_NAME.VIDEO_360P);
+        if (video360pConfig) {
+          decoder360p.configure(video360pConfig);
+        }
+      }
+
+      try {
+        const encodedChunk = new EncodedVideoChunk({
+          timestamp: timestamp * 1000,
+          type,
+          data,
+        });
+        decoder360p.decode(encodedChunk);
+      } catch (err) {
+        proxyConsole.error("360p decode error:", err);
+        keyFrameReceived = false; // Wait for next keyframe
+      }
     }
     return;
   } else if (frameType === 2 || frameType === 3) {
@@ -506,19 +519,31 @@ function handleBinaryPacket(dataBuffer) {
     }
 
     if (keyFrameReceived) {
-      if (mediaDecoders.get(CHANNEL_NAME.VIDEO_720P).state === "closed") {
-        mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
-        const config720p = mediaConfigs.get(CHANNEL_NAME.VIDEO_720P);
-        proxyConsole.log("Decoder error, Configuring 720p decoder with config:", config720p);
-        mediaDecoders.get(CHANNEL_NAME.VIDEO_720P).configure(config720p);
-      }
-      const encodedChunk = new EncodedVideoChunk({
-        timestamp: timestamp * 1000,
-        type,
-        data,
-      });
+      let decoder720p = mediaDecoders.get(CHANNEL_NAME.VIDEO_720P);
+      const decoderState = decoder720p ? decoder720p.state : null;
 
-      mediaDecoders.get(CHANNEL_NAME.VIDEO_720P).decode(encodedChunk);
+      // Recreate decoder if closed or in error state
+      if (!decoder720p || decoderState === "closed" || decoderState === "unconfigured") {
+        decoder720p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P));
+        mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, decoder720p);
+        const config720p = mediaConfigs.get(CHANNEL_NAME.VIDEO_720P);
+        if (config720p) {
+          proxyConsole.log("Decoder error, Configuring 720p decoder with config:", config720p);
+          decoder720p.configure(config720p);
+        }
+      }
+
+      try {
+        const encodedChunk = new EncodedVideoChunk({
+          timestamp: timestamp * 1000,
+          type,
+          data,
+        });
+        decoder720p.decode(encodedChunk);
+      } catch (err) {
+        proxyConsole.error("720p decode error:", err);
+        keyFrameReceived = false; // Wait for next keyframe
+      }
     }
     return;
   } else if (frameType === 4 || frameType === 5) {

@@ -8,7 +8,7 @@
  */
 
 import EventEmitter from "../../../events/EventEmitter";
-import {log} from "../../../utils";
+import { log } from "../../../utils";
 
 /**
  * Video processor events
@@ -53,6 +53,9 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       // Create MediaStream with video track only
       this.mediaStream = new MediaStream([this.videoGenerator]);
 
+      // DEBUG: Track state
+      // log("[VideoProcessor] 🎥 Track created, readyState:", this.videoGenerator.readyState);
+
       log("[VideoProcessor] ✅ Video system initialized, emitting 'initialized' event");
       this.emit("initialized", { stream: this.mediaStream });
 
@@ -60,18 +63,29 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
     } catch (error) {
       const err =
         error instanceof Error ? error : new Error("Video initialization failed");
-      console.error("Failed to initialize video system:", err);
+      console.error("[VideoProcessor] ❌ Failed to initialize video system:", err);
       this.emit("error", { error: err, context: "init" });
       throw err;
     }
   }
+
+  private frameCount = 0;
 
   /**
    * Write video frame
    */
   async writeFrame(frame: VideoFrame): Promise<void> {
     if (!this.videoWriter || !frame) {
+      console.error("[VideoProcessor] ❌ writeFrame error: writer not initialized or invalid frame");
       throw new Error("Video writer not initialized or invalid frame");
+    }
+
+    // DEBUG: Check track state before writing
+    if (this.videoGenerator) {
+      const trackState = this.videoGenerator.readyState;
+      if (trackState !== "live") {
+        console.warn(`[VideoProcessor] ⚠️ Track is not live, state: ${trackState}`);
+      }
     }
 
     try {
@@ -79,11 +93,22 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       await writer.write(frame);
       writer.releaseLock();
 
+      this.frameCount++;
+      // if (this.frameCount <= 5 || this.frameCount % 100 === 0) {
+      //   log(`[VideoProcessor] ✅ Frame ${this.frameCount} written successfully`);
+      // }
+
       this.emit("frameProcessed", undefined);
     } catch (error) {
       const err =
         error instanceof Error ? error : new Error("Video write failed");
-      console.error("Failed to write video frame:", err);
+      console.error(`[VideoProcessor] ❌ Failed to write video frame #${this.frameCount}:`, err);
+
+      // Check track state after error
+      if (this.videoGenerator) {
+        console.error("[VideoProcessor] Track state after error:", this.videoGenerator.readyState);
+      }
+
       this.emit("error", { error: err, context: "writeFrame" });
       throw err;
     }

@@ -42,6 +42,7 @@ export class VideoEncoderManager extends EventEmitter<{
   private encoders = new Map<string, VideoEncoderObject>();
   private frameCounter = 0;
   private keyframeInterval: number = VIDEO_CONFIG.KEYFRAME_INTERVAL;
+  // private chunkCounters = new Map<string, number>(); // DEBUG: Track chunks per encoder
 
   /**
    * Create video encoder for specific quality
@@ -69,6 +70,13 @@ export class VideoEncoderManager extends EventEmitter<{
 
     const encoder = new VideoEncoder({
       output: (chunk, metadata) => {
+        // DEBUG: Count and log chunks
+        // const count = (this.chunkCounters.get(name) || 0) + 1;
+        // this.chunkCounters.set(name, count);
+        // if (count <= 5 || count % 100 === 0) {
+        //   log(`[VideoEncoder] ✅ ${name} output chunk #${count}, size: ${chunk.byteLength}, type: ${chunk.type}`);
+        // }
+
         // Add encoder info to metadata
         const enrichedMetadata = {
           ...metadata,
@@ -79,7 +87,7 @@ export class VideoEncoderManager extends EventEmitter<{
         onOutput(chunk, enrichedMetadata);
       },
       error: (error) => {
-        console.error(`[VideoEncoder] ${name} error:`, error);
+        console.error(`[VideoEncoder] ❌ ${name} error:`, error);
         this.emit("encoderError", { name, error });
         onError(error);
       },
