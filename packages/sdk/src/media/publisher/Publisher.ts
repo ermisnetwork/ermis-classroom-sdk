@@ -681,12 +681,14 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       console.warn("[Publisher] StreamManager not initialized");
       return;
     }
+    // Spread data fields at top level (server expects has_audio, has_video at top level, not nested in data)
     const event = {
       type: eventType,
       sender_stream_id: this.options.streamId || "",
       timestamp: Date.now(),
-      data: data || {},
+      ...(data || {}),
     };
+    console.warn(`[Publisher] 📤 Sending meeting event:`, JSON.stringify(event, null, 2));
     await this.streamManager.sendEvent(event);
   }
 
@@ -843,7 +845,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         await this.startScreenAudioStreaming();
       }
 
-      await this.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE);
+      // Send event with has_audio so subscribers know whether to subscribe to audio
+      console.warn(`[Publisher] Sending START_SCREEN_SHARE event with has_audio: ${hasAudio}`);
+      await this.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE, {
+        has_audio: hasAudio,
+      });
 
       this.updateStatus(`Screen sharing started (Video: ${hasVideo}, Audio: ${hasAudio})`);
 

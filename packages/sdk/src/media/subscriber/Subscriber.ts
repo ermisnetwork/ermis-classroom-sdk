@@ -97,6 +97,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     isScreenSharing: boolean;
     streamOutputEnabled: boolean;
     streamMode: StreamMode;
+    audioEnabled: boolean;
     onStatus?: (msg: string, isError: boolean) => void;
   };
   private subscriberId: string;
@@ -143,6 +144,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
           ? config.streamOutputEnabled
           : true,
       streamMode: config.streamMode || "single",
+      audioEnabled: config.audioEnabled ?? true,
       onStatus: config.onStatus,
     };
 
@@ -340,18 +342,21 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         await this.transportManager.connect();
       }
 
-      // Initialize worker
+      // Initialize worker with audioEnabled config
       if (!this.workerManager) {
         throw new Error("Worker manager not initialized");
       }
-      await this.workerManager.init(channel.port2, this.subscribeType);
+      await this.workerManager.init(channel.port2, this.subscribeType, this.config.audioEnabled);
 
-      // Initialize audio system
-      if (this.audioProcessor) {
+      // Initialize audio system only if audio is enabled for this subscription
+      // For screen share without audio, skip audio initialization to avoid "Audio mixer not set" error
+      if (this.audioProcessor && this.config.audioEnabled) {
         await this.audioProcessor.init(
           this.config.audioWorkletUrl,
           channel.port1
         );
+      } else if (!this.config.audioEnabled) {
+        log("[Subscriber] Skipping audio initialization - audioEnabled is false");
       }
 
       // Initialize video system if needed (not for screen sharing streams)

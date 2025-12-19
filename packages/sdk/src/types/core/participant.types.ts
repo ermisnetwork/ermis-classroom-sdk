@@ -48,6 +48,10 @@ export interface ParticipantConfig {
   isAudioEnabled?: boolean;
   /** Initial video enabled state (from server) */
   isVideoEnabled?: boolean;
+  /** Whether screen share has audio */
+  hasScreenShareAudio?: boolean;
+  /** Whether screen share has video */
+  hasScreenShareVideo?: boolean;
 }
 
 /**
@@ -78,7 +82,7 @@ export interface ParticipantInfo {
   connectionStatus: ParticipantConnectionStatus;
   /** Display name */
   name?: string;
-  
+
   participantPermissions: ParticipantPermissions;
 }
 

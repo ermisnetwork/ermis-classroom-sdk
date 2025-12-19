@@ -1,4 +1,4 @@
-import {CHANNEL_NAME, CLIENT_COMMANDS, FRAME_TYPE, STREAM_TYPE} from "./publisherConstants.js";
+import { CHANNEL_NAME, CLIENT_COMMANDS, FRAME_TYPE, STREAM_TYPE } from "./publisherConstants.js";
 
 class CommandSender {
   constructor(config) {
@@ -9,7 +9,7 @@ class CommandSender {
   }
 
   async _sendPublisherCommand(channelName, type, data = null) {
-    const command = {type};
+    const command = { type };
     if (data !== null) {
       command.data = data;
     }
@@ -25,7 +25,7 @@ class CommandSender {
   }
 
   async _sendSubscriberCommand(type, data = null) {
-    const command = {type};
+    const command = { type };
     if (data !== null) {
       command.data = data;
     }
@@ -62,28 +62,29 @@ class CommandSender {
     await this._sendPublisherCommand(channelName, "media_config", config);
   }
 
-
-  //! temporary disable sharescreen audio
+  /**
+   * Initialize subscription channel stream
+   * @param subscriberType - Type of stream (camera or screen_share)
+   * @param options - Options containing audio and video flags
+   *                  For screen share, options.audio is determined by whether publisher has screen share audio
+   */
   async initSubscribeChannelStream(subscriberType, options = {}) {
     const initQuality =
       subscriberType === STREAM_TYPE.SCREEN_SHARE ? CHANNEL_NAME.SCREEN_SHARE_720P : CHANNEL_NAME.VIDEO_720P;
-      let audioEnabled = subscriberType === STREAM_TYPE.SCREEN_SHARE ? false : true;
-      const commandData = {
+
+    // Use options.audio directly - this is now dynamically determined based on publisher's screen share audio
+    const audioEnabled = options.audio !== undefined ? options.audio : true;
+    const videoEnabled = options.video !== undefined ? options.video : true;
+
+    const commandData = {
       subscriber_stream_id: this.localStreamId,
       stream_type: subscriberType,
       audio: audioEnabled,
-      video: options.video !== undefined ? options.video : true,
+      video: videoEnabled,
       quality: initQuality,
-    }
-    console.warn('initSubscribeChannelStream commandData', commandData);
+    };
+    console.log('[ClientCommand] initSubscribeChannelStream:', { subscriberType, audioEnabled, videoEnabled, initQuality });
     await this._sendSubscriberCommand("init_channel_stream", commandData);
-    // await this._sendSubscriberCommand("init_channel_stream", {
-    //   subscriber_stream_id: this.localStreamId,
-    //   stream_type: subscriberType,
-    //   audio: audioEnabled,
-    //   video: options.video !== undefined ? options.video : true,
-    //   quality: initQuality,
-    // });
   }
 
   async startStream() {

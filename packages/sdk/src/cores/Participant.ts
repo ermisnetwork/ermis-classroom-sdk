@@ -14,7 +14,7 @@ import type {
 import type { Publisher } from "../media/publisher/Publisher";
 import type { Subscriber } from "../media/subscriber/Subscriber";
 import { ParticipantPermissions } from "../types/media/publisher.types";
-import {log} from "../utils";
+import { log } from "../utils";
 
 export class Participant extends EventEmitter {
   // Identity
@@ -38,6 +38,8 @@ export class Participant extends EventEmitter {
 
   // Screen share state
   isScreenSharing: boolean;
+  hasScreenShareAudio: boolean;
+  hasScreenShareVideo: boolean;
   screenSubscriber: Subscriber | null = null;
 
   // Sub-room state
@@ -58,6 +60,8 @@ export class Participant extends EventEmitter {
     this.name = config.name;
 
     this.isScreenSharing = config.isScreenSharing || false;
+    this.hasScreenShareAudio = config.hasScreenShareAudio ?? false;
+    this.hasScreenShareVideo = config.hasScreenShareVideo ?? true;
     this.subRoomId = config.subRoomId || null;
     this.permissions = config.permissions || {
       can_subscribe: true,

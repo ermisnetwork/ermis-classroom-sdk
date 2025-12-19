@@ -27,7 +27,7 @@ import type {
   MediaConfig,
   CustomEventData,
 } from "../types/core/room.types";
-import {log} from "../utils";
+import { log } from "../utils";
 
 export class Room extends EventEmitter {
   // Basic room properties
@@ -762,6 +762,9 @@ export class Room extends EventEmitter {
       // Pass initial audio/video enabled state from server
       isAudioEnabled: memberData.is_mic_on,
       isVideoEnabled: memberData.is_camera_on,
+      // Pass screen share audio/video state from server (for participants already sharing screen)
+      hasScreenShareAudio: memberData.has_screen_sharing_audio ?? false,
+      hasScreenShareVideo: memberData.has_screen_sharing_video ?? true,
     });
 
     // Setup participant events
@@ -949,16 +952,28 @@ export class Room extends EventEmitter {
 
   /**
    * Handle remote screen share
+   * @param participantId - The participant's user ID
+   * @param _screenStreamId - The screen stream ID
+   * @param isStarting - Whether the screen share is starting or stopping
+   * @param hasAudio - Whether the screen share has audio (from start_share_screen event)
    */
   async handleRemoteScreenShare(
     participantId: string,
     _screenStreamId: string,
     isStarting: boolean,
+    hasAudio?: boolean,
   ): Promise<void> {
     const participant = this.participants.get(participantId);
     if (!participant) return;
 
     if (isStarting && this.localParticipant?.streamId) {
+      // Update participant's screen share audio state if provided
+      if (hasAudio !== undefined) {
+        participant.hasScreenShareAudio = hasAudio;
+      }
+
+      log(`[Room] Subscribing to screen share from ${participantId}, hasAudio: ${participant.hasScreenShareAudio}`);
+
       const screenSubscriber = new Subscriber({
         subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
         localStreamId: this.localParticipant?.streamId,
@@ -968,16 +983,17 @@ export class Room extends EventEmitter {
         protocol: this.mediaConfig.subscribeProtocol as any,
         subscribeType: StreamTypes.SCREEN_SHARE,
         streamOutputEnabled: true,
+        // Pass audioEnabled based on whether publisher has screen share audio
+        audioEnabled: participant.hasScreenShareAudio,
         onStatus: (_msg, isError) => {
           participant.setConnectionStatus(isError ? "failed" : "connected");
         },
         audioWorkletUrl: "/workers/audio-worklet.js",
         mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
-        // protocol: "webtransport",
       });
 
       // Add to audio mixer if has audio
-      if (this.audioMixer) {
+      if (this.audioMixer && participant.hasScreenShareAudio) {
         screenSubscriber.setAudioMixer(this.audioMixer);
       }
 
@@ -994,6 +1010,8 @@ export class Room extends EventEmitter {
       }
 
       participant.isScreenSharing = false;
+      // Reset screen share audio state when stopping
+      participant.hasScreenShareAudio = false;
 
       this.emit("remoteScreenShareStopped", { room: this, participant });
     }
@@ -1103,6 +1121,12 @@ export class Room extends EventEmitter {
   private async _setupRemoteSubscriber(
     participant: Participant,
   ): Promise<void> {
+    // Skip if subscriber already exists (prevent duplicate subscriptions from multiple join events)
+    if (participant.subscriber) {
+      log("[Room] Subscriber already exists for:", participant.userId, "- skipping setup");
+      return;
+    }
+
     log("[Room] Setting up remote subscriber for:", {
       userId: participant.userId,
       streamId: participant.streamId,
@@ -1143,10 +1167,12 @@ export class Room extends EventEmitter {
     log("[Room] Subscriber started successfully for:", participant.userId);
 
     if (participant.isScreenSharing) {
+      // Participant is already screen sharing when joining, use their stored hasScreenShareAudio value
       await this.handleRemoteScreenShare(
         participant.userId,
         participant.streamId,
         true,
+        participant.hasScreenShareAudio,
       );
     }
   }
@@ -1213,17 +1239,24 @@ export class Room extends EventEmitter {
       const participant = this.participants.get(
         screenEvent.participant.user_id,
       );
+      // Extract hasAudio from event (server forwards has_audio at top level)
+      console.warn(`[Room] 📥 Received start_share_screen event FULL:`, JSON.stringify(screenEvent, null, 2));
+      const hasAudio = screenEvent.has_audio ?? false;
+      console.warn(`[Room] Received start_share_screen event, hasAudio: ${hasAudio}`);
+
       if (participant && participant.userId !== this.localParticipant?.userId) {
         await this.handleRemoteScreenShare(
           participant.userId,
           screenEvent.participant.stream_id,
           true,
+          hasAudio, // Pass hasAudio to subscriber
         );
       } else if (
         participant &&
         participant.userId === this.localParticipant?.userId
       ) {
         participant.isScreenSharing = true;
+        participant.hasScreenShareAudio = hasAudio;
       }
     }
 

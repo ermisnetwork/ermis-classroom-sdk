@@ -43,10 +43,14 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
 
   /**
    * Initialize the worker
+   * @param channelPort - MessagePort for audio communication
+   * @param subscribeType - Type of subscription (camera or screen_share)
+   * @param audioEnabled - Whether audio should be subscribed (default: true)
    */
   async init(
     channelPort: MessagePort,
-    subscribeType: SubscribeType = "camera"
+    subscribeType: SubscribeType = "camera",
+    audioEnabled: boolean = true
   ): Promise<void> {
     try {
       // Create worker with cache busting
@@ -67,13 +71,14 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
         });
       };
 
-      // Send init message with subscriberId and subscribeType
+      // Send init message with subscriberId, subscribeType, and audioEnabled
       // ⚠️ CRITICAL: Worker expects FLAT structure, not nested in 'data'
       this.worker.postMessage(
         {
           type: "init",
           subscriberId: this.subscriberId,
           subscribeType: subscribeType,
+          audioEnabled: audioEnabled, // Pass audio enabled state to worker
           port: channelPort,
         },
         [channelPort]
@@ -82,7 +87,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       this.isInitialized = true;
       this.emit("workerReady", undefined);
 
-      log("Media worker initialized successfully");
+      log(`Media worker initialized successfully (audioEnabled: ${audioEnabled})`);
     } catch (error) {
       const err = error instanceof Error ? error : new Error("Worker initialization failed");
       this.emit("error", { error: err, context: "init" });

@@ -235,6 +235,10 @@ export interface ParticipantApiData {
   is_mic_on?: boolean;
   /** Camera on status */
   is_camera_on?: boolean;
+  /** Screen share has audio */
+  has_screen_sharing_audio?: boolean;
+  /** Screen share has video */
+  has_screen_sharing_video?: boolean;
 }
 
 /**
