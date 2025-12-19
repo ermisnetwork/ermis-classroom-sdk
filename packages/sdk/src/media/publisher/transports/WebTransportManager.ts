@@ -67,6 +67,7 @@ export class WebTransportManager extends EventEmitter<
             await this.transport.ready;
             clearTimeout(timeout);
 
+
             this.isConnected = true;
             this.reconnectAttempts = 0;
 

@@ -489,9 +489,9 @@ function handleBinaryPacket(dataBuffer) {
   const data = dataBuffer.slice(9);
 
   // DEBUG: Only log screen share packets (frameType 4 or 5)
-  if (frameType === 4 || frameType === 5) {
-    console.warn(`[Worker] 📺 SCREEN_SHARE packet: frameType=${frameType}, seq=${sequenceNumber}, size=${data.byteLength}`);
-  }
+  // if (frameType === 4 || frameType === 5) {
+  //   console.warn(`[Worker] 📺 SCREEN_SHARE packet: frameType=${frameType}, seq=${sequenceNumber}, size=${data.byteLength}`);
+  // }
 
 
   if (frameType === 0 || frameType === 1) {

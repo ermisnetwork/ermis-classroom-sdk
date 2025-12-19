@@ -387,9 +387,12 @@ export class VideoProcessor extends EventEmitter<{
       }
 
       // Debug: log sending video chunk for screen share
-      // if (isScreenShare) {
-      //   console.warn(`[VideoProcessor] ✅ Sending video chunk for ${channelName}, type: ${chunk.type}, size: ${chunk.byteLength}`);
-      // }
+   // todo: implement logic send stream per GOP
+  //  if (chunk.type === "key") {
+  //   await this.streamManager.beginGopWith(channelName, chunk);
+  //  } else {
+  //   await this.streamManager.sendFrame(channelName, chunk);
+  //  }
 
       // Send video chunk
       await this.streamManager.sendVideoChunk(channelName, chunk, metadata);

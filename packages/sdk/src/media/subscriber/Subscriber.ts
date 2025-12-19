@@ -184,12 +184,13 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   private initializeManagers(): void {
     // Transport manager - only initialize for webtransport protocol
     // For websocket protocol, connection is handled differently
-    if (this.protocol === 'webtransport') {
-      this.transportManager = new WebTransportManager(this.config.subcribeUrl);
-    } else {
-      this.transportManager = null;
-      log(`[Subscriber] Skipping WebTransportManager initialization for protocol: ${this.protocol}`);
-    }
+    // !! turn off unused WebTransportManager!!!
+    // if (this.protocol === 'webtransport') {
+    //   this.transportManager = new WebTransportManager(this.config.subcribeUrl);
+    // } else {
+    //   this.transportManager = null;
+    //   log(`[Subscriber] Skipping WebTransportManager initialization for protocol: ${this.protocol}`);
+    // }
 
     // Worker manager
     this.workerManager = new WorkerManager(
@@ -333,12 +334,12 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       }
 
       // Connect to WebTransport only if protocol is webtransport
-      if (this.protocol === "webtransport") {
-        if (!this.transportManager) {
-          throw new Error("Transport manager not initialized");
-        }
-        await this.transportManager.connect();
-      }
+      // if (this.protocol === "webtransport") {
+      //   if (!this.transportManager) {
+      //     throw new Error("Transport manager not initialized");
+      //   }
+      //   await this.transportManager.connect();
+      // }
 
       // Initialize worker
       if (!this.workerManager) {
@@ -539,7 +540,10 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
    * Worker does NOT use channelName - it only needs readable/writable streams
    */
   private async attachWebTransportStreams(): Promise<void> {
-    if (!this.transportManager || !this.workerManager) {
+    // if (!this.transportManager || !this.workerManager) {
+    //   throw new Error("Managers not initialized");
+    // }
+    if (!this.workerManager) {
       throw new Error("Managers not initialized");
     }
 

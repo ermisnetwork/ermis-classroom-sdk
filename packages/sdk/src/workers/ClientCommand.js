@@ -66,7 +66,7 @@ class CommandSender {
   //! temporary disable sharescreen audio
   async initSubscribeChannelStream(subscriberType, options = {}) {
     const initQuality =
-      subscriberType === STREAM_TYPE.SCREEN_SHARE ? CHANNEL_NAME.SCREEN_SHARE_720P : CHANNEL_NAME.VIDEO_720P;
+      subscriberType === STREAM_TYPE.SCREEN_SHARE ? CHANNEL_NAME.SCREEN_SHARE_720P : CHANNEL_NAME.VIDEO_360P;
       let audioEnabled = subscriberType === STREAM_TYPE.SCREEN_SHARE ? false : true;
       const commandData = {
       subscriber_stream_id: this.localStreamId,
@@ -75,15 +75,7 @@ class CommandSender {
       video: options.video !== undefined ? options.video : true,
       quality: initQuality,
     }
-    console.warn('initSubscribeChannelStream commandData', commandData);
     await this._sendSubscriberCommand("init_channel_stream", commandData);
-    // await this._sendSubscriberCommand("init_channel_stream", {
-    //   subscriber_stream_id: this.localStreamId,
-    //   stream_type: subscriberType,
-    //   audio: audioEnabled,
-    //   video: options.video !== undefined ? options.video : true,
-    //   quality: initQuality,
-    // });
   }
 
   async startStream() {
