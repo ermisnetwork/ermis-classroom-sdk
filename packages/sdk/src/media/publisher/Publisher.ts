@@ -652,30 +652,18 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     await this.sendMeetingEvent(MEETING_EVENTS.LOWER_HAND);
     log("[Publisher] Hand lowered");
   }
-
-  // private async sendMeetingEvent(eventType: string, data?: any): Promise<void> {
-  //   if (!this.streamManager) {
-  //     console.warn("[Publisher] StreamManager not initialized");
-  //     return;
-  //   }
-
-  //   try {
-  //     const event = {
-  //       type: eventType,
-  //       sender_stream_id: this.options.streamId || "",
-  //       timestamp: Date.now(),
-  //       data: data || {},
-  //     };
-
-  //     await this.streamManager.sendData(
-  //       ChannelName.MEETING_CONTROL,
-  //       event
-  //     );
-  //   } catch (error: any) {
-  //     console.error("[Publisher] Failed to send meeting event:", error);
-  //   }
-  // }
-
+  async pinForEveryone(targetStreamId: string): Promise<void> {
+    await this.sendMeetingEvent(MEETING_EVENTS.PIN_FOR_EVERYONE, {
+      target_stream_id: targetStreamId,
+    });
+    log("[Publisher] Pin for everyone:", targetStreamId);
+  }
+  async unPinForEveryone(targetStreamId: string): Promise<void> {
+    await this.sendMeetingEvent(MEETING_EVENTS.UNPIN_FOR_EVERYONE, {
+      target_stream_id: targetStreamId,
+    });
+    log("[Publisher] Unpin for everyone:", targetStreamId);
+  }
   private async sendMeetingEvent(eventType: string, data?: any): Promise<void> {
     if (!this.streamManager) {
       console.warn("[Publisher] StreamManager not initialized");

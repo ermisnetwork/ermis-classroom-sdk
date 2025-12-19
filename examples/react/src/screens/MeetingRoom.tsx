@@ -10,7 +10,7 @@ import {
 } from "@ermisnetwork/ermis-classroom-react"
 import { Button } from "@/components/ui/button"
 import {
-  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp
+  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers
 } from "@tabler/icons-react"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { cn } from "@/lib/utils"
@@ -23,11 +23,13 @@ function CustomParticipantTile({
   participant,
   size,
   onPin,
+  onPinForEveryone,
   canPin,
 }: {
   participant: ParticipantData
   size: { width: number; height: number }
   onPin?: (id: string) => void
+  onPinForEveryone?: (id: string) => void
   canPin: boolean
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -37,11 +39,6 @@ function CustomParticipantTile({
       videoRef.current.srcObject = participant.stream
     }
   }, [participant.stream])
-
-  const handlePinClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onPin?.(participant.id)
-  }
 
   return (
     <div
@@ -67,22 +64,69 @@ function CustomParticipantTile({
           </div>
         </div>
       )}
-      {canPin && onPin && (
-        <button
-          onClick={handlePinClick}
-          className={cn(
-            "absolute top-2 right-2 p-1.5 rounded-full transition-opacity",
-            "bg-black/50 hover:bg-black/70",
-            participant.isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-          )}
-          title={participant.isPinned ? "Unpin" : "Pin"}
-        >
-          {participant.isPinned ? (
-            <IconPinnedOff className="h-4 w-4 text-white" />
-          ) : (
-            <IconPin className="h-4 w-4 text-white" />
-          )}
-        </button>
+      {canPin && (onPin || onPinForEveryone) && (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              className={cn(
+                "absolute top-2 right-2 p-1.5 rounded-full transition-opacity",
+                "bg-black/50 hover:bg-black/70",
+                participant.isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              )}
+              title="Pin options"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {participant.isPinned ? (
+                <IconPinnedOff className="h-4 w-4 text-white" />
+              ) : (
+                <IconPin className="h-4 w-4 text-white" />
+              )}
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              className="min-w-[160px] bg-slate-800 rounded-lg p-1 shadow-lg border border-slate-600 z-50"
+              sideOffset={5}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {participant.isPinned ? (
+                <DropdownMenu.Item
+                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                  onSelect={(e) => {
+                    e.preventDefault()
+                    onPin?.(participant.id)
+                  }}
+                >
+                  <IconPinnedOff className="h-4 w-4" />
+                  Unpin
+                </DropdownMenu.Item>
+              ) : (
+                <>
+                  <DropdownMenu.Item
+                    className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                    onSelect={(e) => {
+                      e.preventDefault()
+                      onPin?.(participant.id)
+                    }}
+                  >
+                    <IconPin className="h-4 w-4" />
+                    Pin for me
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                    onSelect={(e) => {
+                      e.preventDefault()
+                      onPinForEveryone?.(participant.id)
+                    }}
+                  >
+                    <IconUsers className="h-4 w-4" />
+                    Pin for everyone
+                  </DropdownMenu.Item>
+                </>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       )}
       <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/70 to-transparent">
         <div className="flex items-center justify-between">
@@ -112,15 +156,18 @@ function CustomParticipantTile({
   )
 }
 
+
 function CustomTile({
   tile,
   size,
   onPin,
+  onPinForEveryone,
   canPin,
 }: {
   tile: TileData
   size: { width: number; height: number }
   onPin?: (id: string) => void
+  onPinForEveryone?: (id: string) => void
   canPin: boolean
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -130,11 +177,6 @@ function CustomTile({
       videoRef.current.srcObject = tile.stream
     }
   }, [tile.stream])
-
-  const handlePinClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onPin?.(tile.id)
-  }
 
   const isScreenShare = tile.type === 'screenShare'
 
@@ -167,22 +209,69 @@ function CustomTile({
           </div>
         </div>
       )}
-      {canPin && onPin && (
-        <button
-          onClick={handlePinClick}
-          className={cn(
-            "absolute top-2 right-2 p-1.5 rounded-full transition-opacity",
-            "bg-black/50 hover:bg-black/70",
-            tile.isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-          )}
-          title={tile.isPinned ? "Unpin" : "Pin"}
-        >
-          {tile.isPinned ? (
-            <IconPinnedOff className="h-4 w-4 text-white" />
-          ) : (
-            <IconPin className="h-4 w-4 text-white" />
-          )}
-        </button>
+      {canPin && (onPin || onPinForEveryone) && (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              className={cn(
+                "absolute top-2 right-2 p-1.5 rounded-full transition-opacity",
+                "bg-black/50 hover:bg-black/70",
+                tile.isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              )}
+              title="Pin options"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {tile.isPinned ? (
+                <IconPinnedOff className="h-4 w-4 text-white" />
+              ) : (
+                <IconPin className="h-4 w-4 text-white" />
+              )}
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              className="min-w-[160px] bg-slate-800 rounded-lg p-1 shadow-lg border border-slate-600 z-50"
+              sideOffset={5}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {tile.isPinned ? (
+                <DropdownMenu.Item
+                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                  onSelect={(e) => {
+                    e.preventDefault()
+                    onPin?.(tile.id)
+                  }}
+                >
+                  <IconPinnedOff className="h-4 w-4" />
+                  Unpin
+                </DropdownMenu.Item>
+              ) : (
+                <>
+                  <DropdownMenu.Item
+                    className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                    onSelect={(e) => {
+                      e.preventDefault()
+                      onPin?.(tile.id)
+                    }}
+                  >
+                    <IconPin className="h-4 w-4" />
+                    Pin for me
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                    onSelect={(e) => {
+                      e.preventDefault()
+                      onPinForEveryone?.(tile.id)
+                    }}
+                  >
+                    <IconUsers className="h-4 w-4" />
+                    Pin for everyone
+                  </DropdownMenu.Item>
+                </>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       )}
       <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/70 to-transparent">
         <div className="flex items-center justify-between">
@@ -213,6 +302,7 @@ function CustomTile({
     </div>
   )
 }
+
 
 export function MeetingRoom({ onLeft }: MeetingRoomProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -285,6 +375,16 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     togglePin(participantId, 'local')
   }, [localPinnedUserId, togglePin, canPin])
 
+  const handlePinForEveryone = useCallback((participantId: string) => {
+    if (!canPin) return
+    if (localPinnedUserId === participantId) {
+      setLocalPinnedUserId(null)
+    } else {
+      setLocalPinnedUserId(participantId)
+    }
+    togglePin(participantId, 'everyone')
+  }, [localPinnedUserId, togglePin, canPin])
+
   const allTiles: TileData[] = useMemo(() => {
     const tiles: TileData[] = []
 
@@ -351,10 +451,11 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         tile={tile}
         size={size}
         onPin={handlePin}
+        onPinForEveryone={handlePinForEveryone}
         canPin={canPin}
       />
     ),
-    [handlePin, canPin]
+    [handlePin, handlePinForEveryone, canPin]
   )
 
   const renderParticipant = useCallback(
@@ -363,10 +464,11 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         participant={participant}
         size={size}
         onPin={handlePin}
+        onPinForEveryone={handlePinForEveryone}
         canPin={canPin}
       />
     ),
-    [handlePin, canPin]
+    [handlePin, handlePinForEveryone, canPin]
   )
 
   const renderScreenShare = useCallback(
@@ -381,10 +483,11 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         }}
         size={size}
         onPin={handlePin}
+        onPinForEveryone={handlePinForEveryone}
         canPin={canPin}
       />
     ),
-    [handlePin, canPin, pinnedUserId]
+    [handlePin, handlePinForEveryone, canPin, pinnedUserId]
   )
 
   return (
