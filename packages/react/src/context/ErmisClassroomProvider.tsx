@@ -28,7 +28,7 @@ export function ErmisClassroomProvider({
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
 
   // Memoize config to prevent unnecessary re-renders
-  const cfg = {
+  const cfg = useMemo(() => ({
     host: config.host,
     hostNode: config.hostNode,
     debug: config.debug,
@@ -36,7 +36,7 @@ export function ErmisClassroomProvider({
     apiUrl: config.apiUrl,
     reconnectAttempts: config.reconnectAttempts,
     reconnectDelay: config.reconnectDelay,
-  };
+  }), [config.host, config.hostNode, config.debug, config.webtpUrl, config.apiUrl, config.reconnectAttempts, config.reconnectDelay]);
   const cfgKey = useMemo(() => JSON.stringify(cfg), [cfg]);
 
   // Room state

@@ -219,11 +219,13 @@ export class ErmisClient extends EventEmitter {
         }
       }
 
-      // Get authentication token
+      // Get user authentication token
       const tokenResponse: TokenResponse = await this.apiClient.getDummyUserToken(userId);
-      // Set authentication in API client
       this.apiClient.setAuth(tokenResponse.access_token, userId);
 
+      // Get service token for admin operations (listRooms, createRoom)
+      const serviceTokenResponse: TokenResponse = await this.apiClient.getDummyServiceToken(userId);
+      this.apiClient.setServiceToken(serviceTokenResponse.access_token);
 
       // Update state
       this.state.user = {
@@ -529,9 +531,12 @@ export class ErmisClient extends EventEmitter {
     try {
       const response = await this.apiClient.listRooms(options.page || 1, options.perPage || 20);
 
-      this.emit('roomsLoaded', { rooms: response.data || [] });
+      // Handle both response formats: direct array or wrapped in data property
+      const rooms = Array.isArray(response) ? response : (response.data || []);
 
-      return response.data || [];
+      this.emit('roomsLoaded', { rooms });
+
+      return rooms;
     } catch (error) {
       this.emit('error', {
         error: error instanceof Error ? error : new Error(String(error)),
