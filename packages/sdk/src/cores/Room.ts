@@ -842,7 +842,6 @@ export class Room extends EventEmitter {
 
     return true;
   }
-
   /**
    * Unpin currently pinned participant
    */
@@ -854,10 +853,9 @@ export class Room extends EventEmitter {
 
     this.pinnedParticipant = null;
 
-    // Auto-pin local participant if exists
-    if (this.localParticipant) {
-      this.pinParticipant(this.localParticipant.userId);
-    }
+    // Note: Removed auto-pin local participant behavior
+    // It caused issues with "unpin for everyone" where receiver would
+    // immediately pin themselves instead of staying unpinned
 
     this.emit("participantUnpinned", {
       room: this,

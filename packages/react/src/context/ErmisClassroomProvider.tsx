@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ErmisClassroom, {
+  log,
   MediaDeviceManager,
   type MediaDevices,
   type Participant,
@@ -494,7 +495,7 @@ export function ErmisClassroomProvider({
   }, [participants, userId]);
 
   const togglePin = useCallback(
-    async (participantId: string, pinFor: 'local' | 'everyone') => {
+    async (participantId: string, pinFor: 'local' | 'everyone', action?: 'pin' | 'unpin') => {
       if (!currentRoom) return;
       const target = currentRoom.getParticipant(participantId);
       if (!target) return;
@@ -502,7 +503,18 @@ export function ErmisClassroomProvider({
       const local = currentRoom.localParticipant as any;
       if (!local?.publisher) return;
 
-      const isPinned = currentRoom.pinnedParticipant?.userId === participantId;
+      // Use explicit action if provided, otherwise infer from currentRoom state
+      const roomIsPinned = currentRoom.pinnedParticipant?.userId === participantId;
+      const shouldUnpin = action === 'unpin' || (action === undefined && roomIsPinned);
+
+      log('[Provider] togglePin:', {
+        participantId,
+        pinFor,
+        action,
+        roomIsPinned,
+        shouldUnpin,
+        pinnedParticipant: currentRoom.pinnedParticipant?.userId
+      });
 
       setParticipants((prev) => {
         const updated = new Map(prev);
@@ -511,9 +523,11 @@ export function ErmisClassroomProvider({
       });
 
       if (pinFor === 'everyone') {
-        if (isPinned) {
-          await local.publisher.unpinForEveryone(target.streamId);
+        if (shouldUnpin) {
+          log('[Provider] Calling unPinForEveryone');
+          await local.publisher.unPinForEveryone(target.streamId);
         } else {
+          log('[Provider] Calling pinForEveryone');
           await local.publisher.pinForEveryone(target.streamId);
         }
       }
