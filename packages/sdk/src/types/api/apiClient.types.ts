@@ -46,7 +46,7 @@ export interface ListQuery {
   /** Sort field */
   sort_by: string;
   /** Sort order */
-  sort_order: 'Asc' | 'Desc';
+  sort_order: 'asc' | 'desc';
 }
 
 /**
