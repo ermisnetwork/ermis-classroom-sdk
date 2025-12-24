@@ -175,8 +175,9 @@ export class ErmisClient extends EventEmitter {
     // Detect browser to determine optimal subscribe protocol
     // Safari uses websocket (no WebTransport support), other browsers use webtransport
     const transportInfo = BrowserDetection.determineTransport();
-    const subscribeProtocol = transportInfo.useWebRTC ? 'websocket' : 'webtransport';
-    log(`[MeetingClient] Browser detection - useWebRTC: ${transportInfo.useWebRTC}, subscribeProtocol: ${subscribeProtocol}`);
+    // const subscribeProtocol = transportInfo.useWebRTC ? 'websocket' : 'webtransport';
+    const subscribeProtocol = transportInfo.useWebRTC ? 'webrtc' : 'webtransport';
+    console.log(`[MeetingClient] Browser detection - useWebRTC: ${transportInfo.useWebRTC}, subscribeProtocol: ${subscribeProtocol}`);
 
     this.mediaConfig = {
       host: this.config.hostNode || this.config.host,

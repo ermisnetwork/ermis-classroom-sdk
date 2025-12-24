@@ -21,6 +21,7 @@ import { VideoProcessor } from "./processors/VideoProcessor";
 import { AudioProcessor } from "./processors/AudioProcessor";
 import { ConnectionStatus } from "../../types/core/ermisClient.types";
 import { log, BrowserDetection } from "../../utils";
+import { ChannelName, getDataChannelId } from "../../constants";
 
 // Event type definitions
 interface SubscriberEvents extends Record<string, unknown> {
@@ -197,6 +198,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     this.workerManager = new WorkerManager(
       this.config.mediaWorkerUrl,
       this.subscriberId,
+      this.protocol
     );
 
     // Polyfill manager
@@ -346,7 +348,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       if (!this.workerManager) {
         throw new Error("Worker manager not initialized");
       }
-      await this.workerManager.init(channel.port2, this.subscribeType, this.config.audioEnabled);
+      await this.workerManager.init(channel.port2, this.subscribeType, this.config.audioEnabled, true);
 
       // Initialize audio system only if audio is enabled for this subscription
       // For screen share without audio, skip audio initialization to avoid "Audio mixer not set" error
@@ -365,6 +367,13 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         log("[Subscriber] Initializing video processor for:", this.subscriberId);
         this.videoProcessor.init(); // ❗ NO await
         log("[Subscriber] Video processor init() called");
+      }
+
+      if (this.protocol === "webrtc" && this.workerManager) {
+        log("[Subscriber] Waiting for WASM ready from WorkerManager...");
+        
+        await this.workerManager.waitForWasmReady(3000);
+        console.log("[Subscriber] WASM ready");
       }
 
       // Attach streams to worker (WebTransport, WebRTC, or WebSocket)
@@ -530,6 +539,14 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         await this.attachWebTransportStreams();
       } else if (this.protocol === "websocket") {
         await this.attachWebSocketConnection();
+      } else if (this.protocol === "webrtc") {
+        if (this.subscribeType === "camera") {
+       this.attachDataChannel(ChannelName.VIDEO_360P);
+       this.attachDataChannel(ChannelName.MICROPHONE);} 
+       else if (this.subscribeType === "screen_share") {
+        this.attachDataChannel(ChannelName.SCREEN_SHARE_720P);
+       }
+       
       }
     } catch (error) {
       throw new Error(
@@ -537,6 +554,18 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       );
     }
   }
+
+  // async createWrtcDataChannel(channelName: any, webRtcConnection: RTCPeerConnection): Promise<RTCDataChannel> {
+  //   const id = getDataChannelId(channelName);
+
+  //   const dataChannel = webRtcConnection.createDataChannel(channelName, {
+  //     ordered: false,
+  //     id,
+  //     negotiated: true,
+  //   });
+
+  //   return dataChannel;
+  // }
 
   /**
    * Attach WebTransport streams to worker
@@ -587,6 +616,67 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     this.workerManager.attachWebSocket(wsUrl, this.config.localStreamId);
 
     log("WebSocket attached successfully");
+  }
+
+  /**
+   * Attach data channel via WebRTC to worker
+   */
+  async attachDataChannel(mediaChannel: ChannelName): Promise<{
+    rtc: RTCPeerConnection;
+    dataChannel: RTCDataChannel;
+  }> {
+    try {
+      if (!this.workerManager || !mediaChannel) throw new Error("Worker manager not initialized or mediaChannel not provided");
+
+      const rtc = new RTCPeerConnection();
+
+      // const dataChannel = await this.createWrtcDataChannel(mediaChannel, rtc);
+      const dataChannel = rtc.createDataChannel(mediaChannel, {
+        ordered: false,
+        id: 0,
+        negotiated: true,
+      });
+      console.log(`Data channel created for ${mediaChannel}, id:`, dataChannel.id);
+      this.workerManager.attachDataChannel(mediaChannel, dataChannel);
+
+      const offer = await rtc.createOffer();
+      await rtc.setLocalDescription(offer);
+
+    
+      const channel = `${this.config.streamId}:${mediaChannel}`;
+      
+      console.log(`[WebRTC subscriber] Created offer for ${mediaChannel}, sending to server...`);
+
+      const response = await fetch(`https://${this.config.host}/meeting/sdp/answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          offer,
+          room_id: this.config.roomId,
+          stream_id: this.config.localStreamId,
+          action: "subscriber_offer",
+          channel: channel,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+
+      const answer = await response.json();
+      await rtc.setRemoteDescription(answer);
+
+      console.log(`[WebRTC] Channel ${mediaChannel} setup completed`);
+
+      return { rtc, dataChannel };
+    } catch (error: any) {
+      console.error(`[WebRTC] Setup error for ${mediaChannel}:`, error);
+      self.postMessage({
+        type: "error",
+        message: `WebRTC setup failed for ${mediaChannel}: ${error.message}`,
+      });
+      throw error;
+    }
   }
 
   /**

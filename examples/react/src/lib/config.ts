@@ -1,4 +1,4 @@
 export const AppConfig = {
   apiHosts: ['daibo.ermis.network:9935', 'daibo.ermis.network:9936'],
-  nodes: ['daibo.ermis.network:9995', 'admin.bandia.vn:9995', 'admin.bandia.vn:9996'],
+  nodes: ['admin.bandia.vn:9997','daibo.ermis.network:9995', 'admin.bandia.vn:9995', 'admin.bandia.vn:9996' ],
 }

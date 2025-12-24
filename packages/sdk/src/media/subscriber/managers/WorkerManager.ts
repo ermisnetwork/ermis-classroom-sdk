@@ -11,6 +11,7 @@
 import EventEmitter from "../../../events/EventEmitter";
 import type { QualityLevel, SubscribeType, WorkerMessageData, } from "../../../types/media/subscriber.types";
 import { log } from "../../../utils";
+import { ChannelName } from "../../publisher";
 
 /**
  * Worker manager events
@@ -33,12 +34,19 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   private workerUrl: string;
   private isInitialized = false;
   private subscriberId: string;
+  private protocol: "webrtc" | "webtransport" | "websocket";
+  private wasmReady = false;
   // private videoFrameCount = 0; // DEBUG: Count video frames
 
-  constructor(workerUrl: string, subscriberId: string) {
+  constructor(workerUrl: string, subscriberId: string, protocol: "webrtc" | "webtransport" | "websocket") {
     super();
     this.workerUrl = workerUrl;
     this.subscriberId = subscriberId;
+    this.protocol = protocol;
+
+    this.on("wasmReady", () => {
+      this.wasmReady = true;
+    });
   }
 
   /**
@@ -50,7 +58,8 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   async init(
     channelPort: MessagePort,
     subscribeType: SubscribeType = "camera",
-    audioEnabled: boolean = true
+    audioEnabled: boolean = true,
+    enableLogging: boolean = false
   ): Promise<void> {
     try {
       // Create worker with cache busting
@@ -80,6 +89,8 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
           subscribeType: subscribeType,
           audioEnabled: audioEnabled, // Pass audio enabled state to worker
           port: channelPort,
+          enableLogging,
+          protocol: this.protocol,
         },
         [channelPort]
       );
@@ -93,6 +104,32 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       this.emit("error", { error: err, context: "init" });
       throw err;
     }
+  }
+
+
+  waitForWasmReady(timeoutMs = 5000): Promise<void> {
+    if (this.wasmReady) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("WASM initialization timeout"));
+      }, timeoutMs);
+
+      const onReady = () => {
+        cleanup();
+        resolve();
+      };
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.off("wasmReady", onReady);
+      };
+
+      this.on("wasmReady", onReady);
+    });
   }
 
   /**
@@ -126,7 +163,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
    * Attach a WebRTC data channel to the worker
    */
   attachDataChannel(
-    channelName: "cam_360p" | "cam_720p" | "mic_48k",
+    channelName: ChannelName,
     dataChannel: RTCDataChannel
   ): void {
     if (!this.worker || !this.isInitialized) {
@@ -246,6 +283,11 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       case "resuming":
         this.emit("frameResumed", undefined);
         break;
+
+      case "raptorq-initialized":
+        log("[WorkerManager] RaptorQ WASM module initialized in worker");
+        this.emit("wasmReady", undefined);
+        break;  
 
       default:
         log(`Unknown worker message type: ${type}`, data);
