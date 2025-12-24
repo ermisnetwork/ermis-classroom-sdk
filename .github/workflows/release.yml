@@ -68,6 +68,11 @@ jobs:
           cd packages/vcr-client
           npm version ${{ steps.version.outputs.version }} --no-git-tag-version --allow-same-version
 
+      - name: Update React package version
+        run: |
+          cd packages/react
+          npm version ${{ steps.version.outputs.version }} --no-git-tag-version --allow-same-version
+
       - name: Build all packages
         run: pnpm build --filter='./packages/*'
 
@@ -111,6 +116,18 @@ jobs:
             yarn add @ermisnetwork/vcr-client@${{ steps.version.outputs.version }}
             ```
 
+            ### @ermisnetwork/ermis-classroom-react v${{ steps.version.outputs.version }}
+            React hooks and components for Ermis Classroom SDK
+
+            **Installation:**
+            ```bash
+            npm install @ermisnetwork/ermis-classroom-react@${{ steps.version.outputs.version }}
+            # or
+            pnpm add @ermisnetwork/ermis-classroom-react@${{ steps.version.outputs.version }}
+            # or
+            yarn add @ermisnetwork/ermis-classroom-react@${{ steps.version.outputs.version }}
+            ```
+
       - name: Setup .npmrc for GitHub Packages
         run: |
           echo "@ermisnetwork:registry=https://npm.pkg.github.com" > .npmrc
@@ -130,6 +147,13 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Publish @ermisnetwork/ermis-classroom-react
+        run: |
+          cd packages/react
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Summary
         run: |
           echo "## 🎉 Release Summary" >> $GITHUB_STEP_SUMMARY
@@ -140,10 +164,12 @@ jobs:
           echo "|---------|---------|----------|" >> $GITHUB_STEP_SUMMARY
           echo "| @ermisnetwork/ermis-classroom-sdk | ${{ steps.version.outputs.version }} | GitHub Packages |" >> $GITHUB_STEP_SUMMARY
           echo "| @ermisnetwork/vcr-client | ${{ steps.version.outputs.version }} | GitHub Packages |" >> $GITHUB_STEP_SUMMARY
+          echo "| @ermisnetwork/ermis-classroom-react | ${{ steps.version.outputs.version }} | GitHub Packages |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Installation" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
           echo "pnpm add @ermisnetwork/ermis-classroom-sdk@${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "pnpm add @ermisnetwork/vcr-client@${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "pnpm add @ermisnetwork/ermis-classroom-react@${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
