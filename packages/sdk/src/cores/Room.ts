@@ -886,25 +886,17 @@ export class Room extends EventEmitter {
    * Start screen sharing for local participant
    */
   async startScreenShare(): Promise<MediaStream> {
-    if (!this.localParticipant || !this.localParticipant.publisher) {
-      throw new Error("Local participant or publisher not available");
+    if (!this.localParticipant) {
+      throw new Error("Local participant not available");
     }
 
     try {
       this.emit("screenShareStarting", { room: this });
 
-      // Get display media
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { width: 1920, height: 1080 } as any,
-        audio: true,
-      });
+      // Start screen share through participant
+      const screenStream = await this.localParticipant.startScreenShare();
 
-      // Start screen share through publisher first
-      await this.localParticipant.publisher.startShareScreen(screenStream);
-
-      this.localParticipant.isScreenSharing = true;
-
-      // Emit with original stream for UI
+      // Emit with original stream for UI (Room-level event)
       this.emit("screenShareStarted", {
         room: this,
         stream: screenStream,
@@ -927,16 +919,17 @@ export class Room extends EventEmitter {
    * Stop screen sharing for local participant
    */
   async stopScreenShare(): Promise<void> {
-    if (!this.localParticipant || !this.localParticipant.publisher) {
-      throw new Error("Local participant or publisher not available");
+    if (!this.localParticipant) {
+      throw new Error("Local participant not available");
     }
 
     try {
       this.emit("screenShareStopping", { room: this });
 
-      await this.localParticipant.publisher.stopShareScreen();
+      // Stop screen share through participant
+      await this.localParticipant.stopScreenShare();
 
-      this.localParticipant.isScreenSharing = false;
+      // Room-level event
       this.emit("screenShareStopped", { room: this });
     } catch (error) {
       this.emit("error", {
@@ -965,6 +958,12 @@ export class Room extends EventEmitter {
     if (!participant) return;
 
     if (isStarting && this.localParticipant?.streamId) {
+      // Skip if screen subscriber already exists (prevent duplicate subscriptions)
+      if ((participant as any).screenSubscriber) {
+        log(`[Room] Screen subscriber already exists for ${participantId}, skipping duplicate subscription`);
+        return;
+      }
+
       // Update participant's screen share audio state if provided
       if (hasAudio !== undefined) {
         participant.hasScreenShareAudio = hasAudio;
@@ -1002,7 +1001,12 @@ export class Room extends EventEmitter {
 
       this.emit("remoteScreenShareStarted", { room: this, participant });
     } else {
+      log(`[Room] Stopping screen share for ${participantId}`);
+      log(`[Room] screenSubscriber exists: ${!!(participant as any).screenSubscriber}`);
+      log(`[Room] camera subscriber exists: ${!!participant.subscriber}`);
+
       if ((participant as any).screenSubscriber) {
+        log(`[Room] Stopping ONLY screenSubscriber for ${participantId}`);
         (participant as any).screenSubscriber.stop();
         (participant as any).screenSubscriber = null;
       }
@@ -1011,6 +1015,7 @@ export class Room extends EventEmitter {
       // Reset screen share audio state when stopping
       participant.hasScreenShareAudio = false;
 
+      log(`[Room] After stop - camera subscriber still exists: ${!!participant.subscriber}`);
       this.emit("remoteScreenShareStopped", { room: this, participant });
     }
   }
@@ -1188,6 +1193,18 @@ export class Room extends EventEmitter {
 
       if (joinedParticipant.user_id === this.localParticipant?.userId) {
         log("[Room] Skipping join event for local participant");
+        return;
+      }
+
+      // Check if participant already exists - if so, skip creating new one
+      // This prevents duplicate join events (e.g. during screen share) from 
+      // destroying existing subscriber connections
+      const existingParticipant = this.participants.get(joinedParticipant.user_id);
+      if (existingParticipant) {
+        log("[Room] Participant already exists, skipping duplicate join:", joinedParticipant.user_id);
+        // Update participant info if needed (mic/camera state may have changed)
+        existingParticipant.updateMicStatus(joinedParticipant.is_mic_on);
+        existingParticipant.updateCameraStatus(joinedParticipant.is_camera_on);
         return;
       }
 

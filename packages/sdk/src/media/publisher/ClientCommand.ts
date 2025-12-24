@@ -1,6 +1,6 @@
-import {ChannelName, CLIENT_COMMANDS, FrameType} from "../../constants/publisherConstants";
-import {StreamData} from "../../types/media/publisher.types";
-import {log} from "../../utils";
+import { ChannelName, CLIENT_COMMANDS, FrameType } from "../../constants/publisherConstants";
+import { StreamData } from "../../types/media/publisher.types";
+import { log } from "../../utils";
 
 // Define separate config types for each protocol
 type WebRTCConfig = {
@@ -60,7 +60,7 @@ export class CommandSender {
     type: string,
     data: any = null
   ): Promise<void> {
-    const command: any = {type};
+    const command: any = { type };
     if (data !== null) {
       command.data = data;
     }
@@ -88,7 +88,7 @@ export class CommandSender {
     type: string,
     data: any = null
   ): Promise<void> {
-    const command: any = {type};
+    const command: any = { type };
     if (data !== null) {
       command.data = data;
     }
@@ -137,13 +137,39 @@ export class CommandSender {
     await this._sendPublisherCommand(channelName, streamData, 'media_config', config);
   }
 
-  async initSubscribeChannelStream(streamData: StreamData, subscriberType: string): Promise<void> {
-    await this._sendSubscriberCommand(streamData, 'init_channel_stream', {
+  /**
+   * Initialize subscription channel stream
+   * @param streamData - Stream data for sending
+   * @param subscriberType - Type of stream (camera or screen_share)
+   * @param localStreamId - Local stream ID for subscriber identification
+   * @param options - Options containing audio and video flags
+   *                  For screen share, options.audio is determined by whether publisher has screen share audio
+   */
+  async initSubscribeChannelStream(
+    streamData: StreamData,
+    subscriberType: string,
+    localStreamId: string,
+    options: { audio?: boolean; video?: boolean } = {}
+  ): Promise<void> {
+    // Determine quality based on subscriber type
+    const initQuality = subscriberType === 'screen_share'
+      ? ChannelName.SCREEN_SHARE_720P
+      : ChannelName.VIDEO_720P;
+
+    // Use options directly - dynamically determined based on publisher's screen share audio
+    const audioEnabled = options.audio !== undefined ? options.audio : true;
+    const videoEnabled = options.video !== undefined ? options.video : true;
+
+    const commandData = {
+      subscriber_stream_id: localStreamId,
       stream_type: subscriberType,
-      audio: true,
-      video: true,
-      quality: ChannelName.VIDEO_720P,
-    });
+      audio: audioEnabled,
+      video: videoEnabled,
+      quality: initQuality,
+    };
+
+    log('[CommandSender] initSubscribeChannelStream:', { subscriberType, audioEnabled, videoEnabled, initQuality });
+    await this._sendSubscriberCommand(streamData, 'init_channel_stream', commandData);
   }
 
   async startStream(streamData: StreamData): Promise<void> {

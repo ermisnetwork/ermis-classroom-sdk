@@ -500,8 +500,8 @@ export function ErmisClassroomProvider({
       const target = currentRoom.getParticipant(participantId);
       if (!target) return;
 
-      const local = currentRoom.localParticipant as any;
-      if (!local?.publisher) return;
+      const local = currentRoom.localParticipant;
+      if (!local) return;
 
       // Use explicit action if provided, otherwise infer from currentRoom state
       const roomIsPinned = currentRoom.pinnedParticipant?.userId === participantId;
@@ -525,10 +525,10 @@ export function ErmisClassroomProvider({
       if (pinFor === 'everyone') {
         if (shouldUnpin) {
           log('[Provider] Calling unPinForEveryone');
-          await local.publisher.unPinForEveryone(target.streamId);
+          await local.unPinForEveryone(target.streamId);
         } else {
           log('[Provider] Calling pinForEveryone');
-          await local.publisher.pinForEveryone(target.streamId);
+          await local.pinForEveryone(target.streamId);
         }
       }
     },
@@ -663,18 +663,16 @@ export function ErmisClassroomProvider({
   );
 
   const toggleScreenShare = useCallback(async () => {
-    if (!currentRoom) return;
+    if (!userId) return;
+    const p = participants.get(userId);
+    if (!p) return;
     try {
-      if (isScreenSharing) {
-        await currentRoom.stopScreenShare();
-      } else {
-        await currentRoom.startScreenShare();
-      }
+      await p.toggleScreenShare();
     } catch (error) {
       console.error('Failed to toggle screen share:', error);
       setIsScreenSharing(false);
     }
-  }, [currentRoom, isScreenSharing]);
+  }, [participants, userId]);
 
   const sendCustomEvent = useCallback(
     async (eventType: string, data: any) => {
