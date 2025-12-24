@@ -3,7 +3,7 @@
  * Type definitions for ApiClient class
  */
 
-import {SubRoomDefinition} from "../core/room.types";
+import { SubRoomDefinition } from "../core/room.types";
 
 /**
  * ApiClient configuration
@@ -46,7 +46,7 @@ export interface ListQuery {
   /** Sort field */
   sort_by: string;
   /** Sort order */
-  sort_order: 'asc' | 'desc';
+  sort_order: 'Asc' | 'Desc';
 }
 
 /**

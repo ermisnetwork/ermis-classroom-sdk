@@ -107,7 +107,8 @@ export class ApiClient {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        issuer: "hoangbim@gmail.com" }),
+        issuer: "hoangbim@gmail.com"
+      }),
     };
 
     try {
@@ -121,7 +122,7 @@ export class ApiClient {
       throw error;
     }
   }
-  
+
   /**
    * Get dummy token for authentication
    */
@@ -133,7 +134,8 @@ export class ApiClient {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        issuer: "hoangbim@gmail.com" }),
+        issuer: "hoangbim@gmail.com"
+      }),
     };
 
     try {
@@ -208,7 +210,7 @@ export class ApiClient {
         page,
         per_page: perPage,
         sort_by: 'created_at',
-        sort_order: 'desc',
+        sort_order: 'Desc',
       },
       conditions: {
         is_active: true,
