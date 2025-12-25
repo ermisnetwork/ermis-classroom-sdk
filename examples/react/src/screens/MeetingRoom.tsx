@@ -10,10 +10,11 @@ import {
 } from "@ermisnetwork/ermis-classroom-react"
 import { Button } from "@/components/ui/button"
 import {
-  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp
+  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers
 } from "@tabler/icons-react"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { cn } from "@/lib/utils"
+import { log } from "@ermisnetwork/ermis-classroom-sdk"
 
 interface MeetingRoomProps {
   onLeft: () => void
@@ -22,12 +23,22 @@ interface MeetingRoomProps {
 function CustomParticipantTile({
   participant,
   size,
-  onPin,
+  isPinnedLocal,
+  isPinnedForEveryone,
+  onPinLocal,
+  onUnpinLocal,
+  onPinForEveryone,
+  onUnpinForEveryone,
   canPin,
 }: {
   participant: ParticipantData
   size: { width: number; height: number }
-  onPin?: (id: string) => void
+  isPinnedLocal?: boolean
+  isPinnedForEveryone?: boolean
+  onPinLocal?: (id: string) => void
+  onUnpinLocal?: (id: string) => void
+  onPinForEveryone?: (id: string) => void
+  onUnpinForEveryone?: (id: string) => void
   canPin: boolean
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -38,16 +49,14 @@ function CustomParticipantTile({
     }
   }, [participant.stream])
 
-  const handlePinClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onPin?.(participant.id)
-  }
+  const isPinned = isPinnedLocal || isPinnedForEveryone
 
   return (
     <div
       className={cn(
         "relative bg-slate-800 rounded-lg overflow-hidden group",
-        participant.isPinned && "ring-2 ring-blue-500"
+        isPinnedForEveryone && "ring-2 ring-blue-500",
+        isPinnedLocal && !isPinnedForEveryone && "ring-2 ring-green-500"
       )}
       style={{ width: size.width, height: size.height }}
     >
@@ -67,22 +76,85 @@ function CustomParticipantTile({
           </div>
         </div>
       )}
-      {canPin && onPin && (
-        <button
-          onClick={handlePinClick}
-          className={cn(
-            "absolute top-2 right-2 p-1.5 rounded-full transition-opacity",
-            "bg-black/50 hover:bg-black/70",
-            participant.isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-          )}
-          title={participant.isPinned ? "Unpin" : "Pin"}
-        >
-          {participant.isPinned ? (
-            <IconPinnedOff className="h-4 w-4 text-white" />
-          ) : (
-            <IconPin className="h-4 w-4 text-white" />
-          )}
-        </button>
+      {canPin && (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              className={cn(
+                "absolute top-2 right-2 p-1.5 rounded-full transition-opacity",
+                "bg-black/50 hover:bg-black/70",
+                isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              )}
+              title="Pin options"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isPinned ? (
+                <IconPinnedOff className="h-4 w-4 text-white" />
+              ) : (
+                <IconPin className="h-4 w-4 text-white" />
+              )}
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              className="min-w-[180px] bg-slate-800 rounded-lg p-1 shadow-lg border border-slate-600 z-50"
+              sideOffset={5}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Local Pin */}
+              {isPinnedLocal ? (
+                <DropdownMenu.Item
+                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                  onSelect={(e) => {
+                    e.preventDefault()
+                    onUnpinLocal?.(participant.id)
+                  }}
+                >
+                  <IconPinnedOff className="h-4 w-4 text-green-400" />
+                  Unpin for me
+                </DropdownMenu.Item>
+              ) : (
+                <DropdownMenu.Item
+                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                  onSelect={(e) => {
+                    e.preventDefault()
+                    onPinLocal?.(participant.id)
+                  }}
+                >
+                  <IconPin className="h-4 w-4 text-green-400" />
+                  Pin for me
+                </DropdownMenu.Item>
+              )}
+
+              <DropdownMenu.Separator className="h-px bg-slate-600 my-1" />
+
+              {/* Everyone Pin */}
+              {isPinnedForEveryone ? (
+                <DropdownMenu.Item
+                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                  onSelect={(e) => {
+                    e.preventDefault()
+                    onUnpinForEveryone?.(participant.id)
+                  }}
+                >
+                  <IconPinnedOff className="h-4 w-4 text-blue-400" />
+                  Unpin for everyone
+                </DropdownMenu.Item>
+              ) : (
+                <DropdownMenu.Item
+                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                  onSelect={(e) => {
+                    e.preventDefault()
+                    onPinForEveryone?.(participant.id)
+                  }}
+                >
+                  <IconUsers className="h-4 w-4 text-blue-400" />
+                  Pin for everyone
+                </DropdownMenu.Item>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       )}
       <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/70 to-transparent">
         <div className="flex items-center justify-between">
@@ -90,8 +162,13 @@ function CustomParticipantTile({
             {participant.name} {participant.isLocal && "(You)"}
           </span>
           <div className="flex items-center gap-1">
-            {participant.isPinned && (
-              <div className="p-1 rounded bg-blue-500">
+            {isPinnedForEveryone && (
+              <div className="p-1 rounded bg-blue-500" title="Pinned for everyone">
+                <IconUsers className="h-3 w-3 text-white" />
+              </div>
+            )}
+            {isPinnedLocal && (
+              <div className="p-1 rounded bg-green-500" title="Pinned for me">
                 <IconPin className="h-3 w-3 text-white" />
               </div>
             )}
@@ -112,15 +189,26 @@ function CustomParticipantTile({
   )
 }
 
+
 function CustomTile({
   tile,
   size,
-  onPin,
+  isPinnedLocal,
+  isPinnedForEveryone,
+  onPinLocal,
+  onUnpinLocal,
+  onPinForEveryone,
+  onUnpinForEveryone,
   canPin,
 }: {
   tile: TileData
   size: { width: number; height: number }
-  onPin?: (id: string) => void
+  isPinnedLocal?: boolean
+  isPinnedForEveryone?: boolean
+  onPinLocal?: (id: string) => void
+  onUnpinLocal?: (id: string) => void
+  onPinForEveryone?: (id: string) => void
+  onUnpinForEveryone?: (id: string) => void
   canPin: boolean
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -131,19 +219,16 @@ function CustomTile({
     }
   }, [tile.stream])
 
-  const handlePinClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onPin?.(tile.id)
-  }
-
   const isScreenShare = tile.type === 'screenShare'
+  const isPinned = isPinnedLocal || isPinnedForEveryone
 
   return (
     <div
       className={cn(
         "relative rounded-lg overflow-hidden group",
         isScreenShare ? "bg-slate-900" : "bg-slate-800",
-        tile.isPinned && "ring-2 ring-blue-500"
+        isPinnedForEveryone && "ring-2 ring-blue-500",
+        isPinnedLocal && !isPinnedForEveryone && "ring-2 ring-green-500"
       )}
       style={{ width: size.width, height: size.height }}
     >
@@ -167,22 +252,85 @@ function CustomTile({
           </div>
         </div>
       )}
-      {canPin && onPin && (
-        <button
-          onClick={handlePinClick}
-          className={cn(
-            "absolute top-2 right-2 p-1.5 rounded-full transition-opacity",
-            "bg-black/50 hover:bg-black/70",
-            tile.isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-          )}
-          title={tile.isPinned ? "Unpin" : "Pin"}
-        >
-          {tile.isPinned ? (
-            <IconPinnedOff className="h-4 w-4 text-white" />
-          ) : (
-            <IconPin className="h-4 w-4 text-white" />
-          )}
-        </button>
+      {canPin && (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              className={cn(
+                "absolute top-2 right-2 p-1.5 rounded-full transition-opacity",
+                "bg-black/50 hover:bg-black/70",
+                isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              )}
+              title="Pin options"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isPinned ? (
+                <IconPinnedOff className="h-4 w-4 text-white" />
+              ) : (
+                <IconPin className="h-4 w-4 text-white" />
+              )}
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              className="min-w-[180px] bg-slate-800 rounded-lg p-1 shadow-lg border border-slate-600 z-50"
+              sideOffset={5}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Local Pin */}
+              {isPinnedLocal ? (
+                <DropdownMenu.Item
+                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                  onSelect={(e) => {
+                    e.preventDefault()
+                    onUnpinLocal?.(tile.id)
+                  }}
+                >
+                  <IconPinnedOff className="h-4 w-4 text-green-400" />
+                  Unpin for me
+                </DropdownMenu.Item>
+              ) : (
+                <DropdownMenu.Item
+                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                  onSelect={(e) => {
+                    e.preventDefault()
+                    onPinLocal?.(tile.id)
+                  }}
+                >
+                  <IconPin className="h-4 w-4 text-green-400" />
+                  Pin for me
+                </DropdownMenu.Item>
+              )}
+
+              <DropdownMenu.Separator className="h-px bg-slate-600 my-1" />
+
+              {/* Everyone Pin */}
+              {isPinnedForEveryone ? (
+                <DropdownMenu.Item
+                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                  onSelect={(e) => {
+                    e.preventDefault()
+                    onUnpinForEveryone?.(tile.id)
+                  }}
+                >
+                  <IconPinnedOff className="h-4 w-4 text-blue-400" />
+                  Unpin for everyone
+                </DropdownMenu.Item>
+              ) : (
+                <DropdownMenu.Item
+                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                  onSelect={(e) => {
+                    e.preventDefault()
+                    onPinForEveryone?.(tile.id)
+                  }}
+                >
+                  <IconUsers className="h-4 w-4 text-blue-400" />
+                  Pin for everyone
+                </DropdownMenu.Item>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       )}
       <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/70 to-transparent">
         <div className="flex items-center justify-between">
@@ -192,8 +340,13 @@ function CustomTile({
             {isScreenShare && "'s screen"}
           </span>
           <div className="flex items-center gap-1">
-            {tile.isPinned && (
-              <div className="p-1 rounded bg-blue-500">
+            {isPinnedForEveryone && (
+              <div className="p-1 rounded bg-blue-500" title="Pinned for everyone">
+                <IconUsers className="h-3 w-3 text-white" />
+              </div>
+            )}
+            {isPinnedLocal && (
+              <div className="p-1 rounded bg-green-500" title="Pinned for me">
                 <IconPin className="h-3 w-3 text-white" />
               </div>
             )}
@@ -213,6 +366,7 @@ function CustomTile({
     </div>
   )
 }
+
 
 export function MeetingRoom({ onLeft }: MeetingRoomProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -244,17 +398,49 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     selectCamera,
   } = useMediaDevices()
 
+  // Independent pin states
   const [localPinnedUserId, setLocalPinnedUserId] = useState<string | null>(null)
+  const [everyonePinnedUserId, setEveryonePinnedUserId] = useState<string | null>(null)
+  const localPinChangeTimeRef = useRef<number>(0)
+  const prevRemotePinnedUserId = useRef<string | null>(null)
 
-  const remotePinnedUserId = currentRoom?.pinnedParticipant?.userId || null
+  // Get remote pin info - include pinType to determine if it's a screen share
+  const remotePinnedParticipant = currentRoom?.pinnedParticipant || null
+  const remotePinnedPinType = currentRoom?.pinnedPinType || null
 
+  // Generate the correct tile ID based on pinType
+  // pinType 2 = ScreenShare, so tile ID should be "screen-{userId}"
+  const remotePinnedTileId = remotePinnedParticipant
+    ? (remotePinnedPinType === 2 ? `screen-${remotePinnedParticipant.userId}` : remotePinnedParticipant.userId)
+    : null
+
+  // Sync "everyone" pin state from server
   useEffect(() => {
-    if (remotePinnedUserId && remotePinnedUserId !== localPinnedUserId) {
-      setLocalPinnedUserId(remotePinnedUserId)
+    // Only act when remote actually changes
+    if (remotePinnedTileId === prevRemotePinnedUserId.current) {
+      return
     }
-  }, [remotePinnedUserId, localPinnedUserId])
 
-  const pinnedUserId = localPinnedUserId
+    log('[MeetingRoom] Remote pin changed:', {
+      prev: prevRemotePinnedUserId.current,
+      current: remotePinnedTileId,
+      pinType: remotePinnedPinType
+    })
+
+    const timeSinceLocalChange = Date.now() - localPinChangeTimeRef.current
+    const isRecentLocalChange = timeSinceLocalChange < 1000
+
+    if (!isRecentLocalChange) {
+      // We're a receiver, sync from remote
+      setEveryonePinnedUserId(remotePinnedTileId)
+    }
+
+    // Always update previous value
+    prevRemotePinnedUserId.current = remotePinnedTileId
+  }, [remotePinnedTileId, remotePinnedPinType])
+
+  // Determine which user should be focused (everyone pin takes priority)
+  const focusedUserId = everyonePinnedUserId || localPinnedUserId
 
   const handleLeave = async () => {
     try {
@@ -275,15 +461,48 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
 
   const canPin = totalParticipants > 1
 
-  const handlePin = useCallback((participantId: string) => {
-    if (!canPin) return
+  // Local pin handlers
+  const handlePinLocal = useCallback((participantId: string) => {
+    log('[MeetingRoom] handlePinLocal:', { participantId })
+    setLocalPinnedUserId(participantId)
+  }, [])
+
+  const handleUnpinLocal = useCallback((participantId: string) => {
+    log('[MeetingRoom] handleUnpinLocal:', { participantId })
     if (localPinnedUserId === participantId) {
       setLocalPinnedUserId(null)
-    } else {
-      setLocalPinnedUserId(participantId)
     }
-    togglePin(participantId, 'local')
-  }, [localPinnedUserId, togglePin, canPin])
+  }, [localPinnedUserId])
+
+  // Everyone pin handlers
+  const handlePinForEveryone = useCallback((participantId: string) => {
+    if (!canPin) return
+    log('[MeetingRoom] handlePinForEveryone:', { participantId })
+
+    // Mark this as a local change to prevent sync from overwriting
+    localPinChangeTimeRef.current = Date.now()
+
+    // Update local state immediately
+    setEveryonePinnedUserId(participantId)
+
+    // Send event to server
+    togglePin(participantId, 'everyone', 'pin')
+  }, [togglePin, canPin])
+
+  const handleUnpinForEveryone = useCallback((participantId: string) => {
+    if (!canPin) return
+    log('[MeetingRoom] handleUnpinForEveryone:', { participantId })
+
+    // Mark this as a local change to prevent sync from overwriting
+    localPinChangeTimeRef.current = Date.now()
+
+    // Update local state immediately
+    setEveryonePinnedUserId(null)
+
+    // Send event to server
+    togglePin(participantId, 'everyone', 'unpin')
+  }, [togglePin, canPin])
+
 
   const allTiles: TileData[] = useMemo(() => {
     const tiles: TileData[] = []
@@ -296,7 +515,7 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
           stream: data.stream!,
           name: data.userName,
           type: 'screenShare',
-          isPinned: pinnedUserId === `screen-${id}`,
+          isPinned: false, // Will be calculated in render
         })
       })
 
@@ -309,7 +528,7 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
       isMuted: !micEnabled,
       isVideoOff: !videoEnabled,
       isHandRaised: false,
-      isPinned: pinnedUserId === (userId || 'local'),
+      isPinned: false, // Will be calculated in render
     })
 
     participantList
@@ -324,12 +543,12 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
           isMuted: !participant.isAudioEnabled,
           isVideoOff: !participant.isVideoEnabled,
           isHandRaised: participant.isHandRaised,
-          isPinned: pinnedUserId === participant.userId,
+          isPinned: false, // Will be calculated in render
         })
       })
 
     return tiles
-  }, [userId, localStream, micEnabled, videoEnabled, participantList, remoteStreams, pinnedUserId, screenShareStreams])
+  }, [userId, localStream, micEnabled, videoEnabled, participantList, remoteStreams, screenShareStreams])
 
   const allParticipants: ParticipantData[] = useMemo(() => {
     return allTiles.filter(t => t.type === 'participant') as ParticipantData[]
@@ -350,11 +569,16 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
       <CustomTile
         tile={tile}
         size={size}
-        onPin={handlePin}
+        isPinnedLocal={localPinnedUserId === tile.id}
+        isPinnedForEveryone={everyonePinnedUserId === tile.id}
+        onPinLocal={handlePinLocal}
+        onUnpinLocal={handleUnpinLocal}
+        onPinForEveryone={handlePinForEveryone}
+        onUnpinForEveryone={handleUnpinForEveryone}
         canPin={canPin}
       />
     ),
-    [handlePin, canPin]
+    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId]
   )
 
   const renderParticipant = useCallback(
@@ -362,29 +586,42 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
       <CustomParticipantTile
         participant={participant}
         size={size}
-        onPin={handlePin}
+        isPinnedLocal={localPinnedUserId === participant.id}
+        isPinnedForEveryone={everyonePinnedUserId === participant.id}
+        onPinLocal={handlePinLocal}
+        onUnpinLocal={handleUnpinLocal}
+        onPinForEveryone={handlePinForEveryone}
+        onUnpinForEveryone={handleUnpinForEveryone}
         canPin={canPin}
       />
     ),
-    [handlePin, canPin]
+    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId]
   )
 
   const renderScreenShare = useCallback(
-    (screenShare: LayoutScreenShareData, size: { width: number; height: number }) => (
-      <CustomTile
-        tile={{
-          id: `screen-${screenShare.id}`,
-          stream: screenShare.stream,
-          name: screenShare.userName,
-          type: 'screenShare',
-          isPinned: pinnedUserId === `screen-${screenShare.id}`,
-        }}
-        size={size}
-        onPin={handlePin}
-        canPin={canPin}
-      />
-    ),
-    [handlePin, canPin, pinnedUserId]
+    (screenShare: LayoutScreenShareData, size: { width: number; height: number }) => {
+      const screenId = `screen-${screenShare.id}`
+      return (
+        <CustomTile
+          tile={{
+            id: screenId,
+            stream: screenShare.stream,
+            name: screenShare.userName,
+            type: 'screenShare',
+            isPinned: false,
+          }}
+          size={size}
+          isPinnedLocal={localPinnedUserId === screenId}
+          isPinnedForEveryone={everyonePinnedUserId === screenId}
+          onPinLocal={handlePinLocal}
+          onUnpinLocal={handleUnpinLocal}
+          onPinForEveryone={handlePinForEveryone}
+          onUnpinForEveryone={handleUnpinForEveryone}
+          canPin={canPin}
+        />
+      )
+    },
+    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId]
   )
 
   return (
@@ -393,10 +630,10 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         ref={containerRef}
         className="flex-1 min-h-0 p-4 overflow-hidden"
       >
-        {pinnedUserId ? (
+        {focusedUserId ? (
           <FocusLayout
             tiles={allTiles}
-            focusedTileId={pinnedUserId}
+            focusedTileId={focusedUserId}
             renderTile={renderTile}
           />
         ) : (

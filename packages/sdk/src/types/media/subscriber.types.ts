@@ -42,6 +42,12 @@ export interface SubscriberConfig {
    */
   streamMode?: StreamMode;
   /**
+   * Whether audio should be subscribed for this stream
+   * For screen share, this depends on whether the publisher has screen share audio
+   * @default true
+   */
+  audioEnabled?: boolean;
+  /**
    * Status callback (for compatibility with original API)
    */
   onStatus?: (msg: string, isError: boolean) => void;

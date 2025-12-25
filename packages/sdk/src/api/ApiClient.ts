@@ -24,6 +24,7 @@ export class ApiClient {
   private host: string;
   private apiBaseUrl: string;
   private jwtToken: string | null = null;
+  private serviceToken: string | null = null;
   private userId: string | null = null;
 
   constructor(config: ErmisClientConfig = {}) {
@@ -44,7 +45,15 @@ export class ApiClient {
    */
   clearAuth(): void {
     this.jwtToken = null;
+    this.serviceToken = null;
     this.userId = null;
+  }
+
+  /**
+   * Set service token for admin operations (listRooms, createRoom)
+   */
+  setServiceToken(token: string): void {
+    this.serviceToken = token;
   }
 
   /**
@@ -99,7 +108,7 @@ export class ApiClient {
   /**
    * Get dummy token for authentication
    */
-  async getUserToken(): Promise<TokenResponse> {
+  async getUserToken(userId: string): Promise<TokenResponse> {
     const endpoint = '/get-user-token';
     const options: RequestInit = {
       method: 'POST',
@@ -107,7 +116,7 @@ export class ApiClient {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        issuer: "hoangbim@gmail.com"
+        issuer: userId,
       }),
     };
 
@@ -126,7 +135,7 @@ export class ApiClient {
   /**
    * Get dummy token for authentication
    */
-  async getDummyServiceToken(): Promise<TokenResponse> {
+  async getDummyServiceToken(userId: string): Promise<TokenResponse> {
     const endpoint = '/get-service-token';
     const options: RequestInit = {
       method: 'POST',
@@ -134,7 +143,7 @@ export class ApiClient {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        issuer: "hoangbim@gmail.com"
+        issuer: userId
       }),
     };
 
@@ -151,7 +160,7 @@ export class ApiClient {
   }
 
   /**
-   * Generic API call method
+   * Generic API call method (uses user token)
    */
   async apiCall<T = any>(
     endpoint: string,
@@ -192,20 +201,57 @@ export class ApiClient {
   }
 
   /**
-   * Create a new room
+   * API call method using service token (for admin operations)
+   */
+  async serviceApiCall<T = any>(
+    endpoint: string,
+    method: HttpMethod = 'GET',
+    body: any = null,
+  ): Promise<T> {
+    if (!this.serviceToken) {
+      throw new Error('Service token not found. Call getDummyServiceToken first.');
+    }
+    const bearer = `Bearer ${this.serviceToken}`;
+
+    const options: RequestInit = {
+      method,
+      headers: {
+        Authorization: bearer,
+        'Content-Type': 'application/json',
+      },
+    };
+
+    if (body) {
+      options.body = JSON.stringify(body);
+    }
+
+    try {
+      const response = await fetch(`${this.apiBaseUrl}${endpoint}`, options);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('API call failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a new room (requires service token)
    */
   async createRoom(roomName: string, roomType: string = 'main'): Promise<CreateRoomResponse> {
-    return await this.apiCall<CreateRoomResponse>('/rooms', 'POST', {
+    return await this.serviceApiCall<CreateRoomResponse>('/rooms', 'POST', {
       room_name: roomName,
       room_type: roomType,
     });
   }
 
   /**
-   * List available rooms
+   * List available rooms (requires service token)
    */
   async listRooms(page: number = 1, perPage: number = 20): Promise<ListRoomsResponse> {
-    return await this.apiCall<ListRoomsResponse>('/rooms/list', 'POST', {
+    return await this.serviceApiCall<ListRoomsResponse>('/rooms/list', 'POST', {
       list_query: {
         page,
         per_page: perPage,

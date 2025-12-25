@@ -163,7 +163,6 @@ export class ErmisClient extends EventEmitter {
       reconnectDelay: config.reconnectDelay ?? 2000,
       debug: config.debug ?? false,
     };
-    log('[MeetingClient] Initialized with config:', this.config);
     // Initialize API client
     this.apiClient = new ApiClient({
       host: this.config.host,
@@ -176,7 +175,6 @@ export class ErmisClient extends EventEmitter {
     // Safari uses websocket (no WebTransport support), other browsers use webtransport
     const transportInfo = BrowserDetection.determineTransport();
     const subscribeProtocol = transportInfo.useWebRTC ? 'websocket' : 'webtransport';
-    log(`[MeetingClient] Browser detection - useWebRTC: ${transportInfo.useWebRTC}, subscribeProtocol: ${subscribeProtocol}`);
 
     this.mediaConfig = {
       host: this.config.hostNode || this.config.host,
@@ -219,11 +217,13 @@ export class ErmisClient extends EventEmitter {
         }
       }
 
-      // Get authentication token
+      // Get user authentication token
       const tokenResponse: TokenResponse = await this.apiClient.getDummyUserToken(userId);
-      // Set authentication in API client
       this.apiClient.setAuth(tokenResponse.access_token, userId);
 
+      // Get service token for admin operations (listRooms, createRoom)
+      const serviceTokenResponse: TokenResponse = await this.apiClient.getDummyServiceToken(userId);
+      this.apiClient.setServiceToken(serviceTokenResponse.access_token);
 
       // Update state
       this.state.user = {
@@ -476,8 +476,6 @@ export class ErmisClient extends EventEmitter {
       // Join the room with optional custom media stream
       const joinResult = await room.join(this.state.user!.id, mediaStream);
 
-      // Update state after join completes
-      log("Room joined successfully:", room.getInfo());
       this.state.rooms.set(room.id, room);
 
       this.emit('roomJoined', { room, joinResult });
@@ -529,9 +527,12 @@ export class ErmisClient extends EventEmitter {
     try {
       const response = await this.apiClient.listRooms(options.page || 1, options.perPage || 20);
 
-      this.emit('roomsLoaded', { rooms: response.data || [] });
+      // Handle both response formats: direct array or wrapped in data property
+      const rooms = Array.isArray(response) ? response : (response.data || []);
 
-      return response.data || [];
+      this.emit('roomsLoaded', { rooms });
+
+      return rooms;
     } catch (error) {
       this.emit('error', {
         error: error instanceof Error ? error : new Error(String(error)),
@@ -920,19 +921,10 @@ export class ErmisClient extends EventEmitter {
 
     // Handle local stream ready
     const handleLocalStreamReady = (data: any) => {
-      log('[MeetingClient] Received LOCAL_STREAM_READY from globalEventBus', {
-        hasCurrentRoom: !!this.state.currentRoom,
-        dataStreamId: data.streamId,
-      });
-
       if (!this.state.currentRoom) {
-        log('[MeetingClient] No currentRoom when LOCAL_STREAM_READY received');
         return;
       }
 
-      log('[MeetingClient] ✅ Emitting localStreamReady to UI');
-
-      // Enrich with room context and emit
       this.emit('localStreamReady', {
         ...data,
         participant: this.state.currentRoom.localParticipant?.getInfo(),
@@ -942,8 +934,6 @@ export class ErmisClient extends EventEmitter {
 
     // Handle local screen share ready
     const handleLocalScreenShareReady = (data: any) => {
-      log('[MeetingClient] Received LOCAL_SCREEN_SHARE_READY from globalEventBus');
-
       if (!this.state.currentRoom) return;
 
       this.emit('localScreenShareReady', {
@@ -955,14 +945,15 @@ export class ErmisClient extends EventEmitter {
 
     // Handle remote stream ready
     const handleRemoteStreamReady = (data: any) => {
-      log('[MeetingClient] Received REMOTE_STREAM_READY from globalEventBus', {
-        streamId: data.streamId,
-        subscribeType: data.subscribeType,
-        hasCurrentRoom: !!this.state.currentRoom,
-      });
 
       if (!this.state.currentRoom) {
-        log('[MeetingClient] No currentRoom, cannot process REMOTE_STREAM_READY');
+        return;
+      }
+
+      // Skip screen share streams - they are handled by Room's remoteScreenShareStreamReady event
+      // which is forwarded via room event listener, not globalEventBus
+      if (data.subscribeType === 'screen_share') {
+        log('[MeetingClient] Skipping screen_share stream, handled by Room events');
         return;
       }
 
@@ -972,16 +963,10 @@ export class ErmisClient extends EventEmitter {
       );
 
       if (participant) {
-        log('[MeetingClient] ✅ Found participant for stream:', participant.userId);
         this.emit('remoteStreamReady', {
           ...data,
           participant: participant.getInfo(),
           roomId: this.state.currentRoom.id,
-        });
-      } else {
-        log('[MeetingClient] ❌ Participant not found for streamId:', data.streamId, {
-          participantsCount: this.state.currentRoom.participants.size,
-          participantIds: Array.from(this.state.currentRoom.participants.keys()),
         });
       }
     };
@@ -1051,7 +1036,6 @@ export class ErmisClient extends EventEmitter {
 
     eventsToForward.forEach((event) => {
       room.on(event, (data: any) => {
-        log(`[MeetingClient] Forwarding room event: ${event}`, data);
         this.emit(event, data);
       });
     });
@@ -1059,8 +1043,6 @@ export class ErmisClient extends EventEmitter {
 
 
   async sendCustomEvent(targets: string[], eventData: object): Promise<void> {
-    log("[MeetingClient] Sending custom event:", eventData);
-    log("Current room:", this.state.currentRoom?.getInfo());
     if (!this.state.currentRoom) {
       return;
     }

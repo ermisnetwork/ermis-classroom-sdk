@@ -8,8 +8,9 @@ This guide covers how to use the Ermis Classroom SDK in your applications.
 2. [Publisher](publisher.md) - Publishing video and audio
 3. [Subscriber](subscriber.md) - Subscribing to streams
 4. [Room](room.md) - Room management API
-5. [Events](events.md) - Event system reference
-6. [Features](features/README.md) - Advanced features
+5. [Participant](participant.md) - Participant control API
+6. [Events](events.md) - Event system reference
+7. [Features](features/README.md) - Advanced features
 
 ## Quick Reference
 

@@ -172,7 +172,7 @@ export interface ErmisClassroomContextValue {
   toggleMicrophone: () => Promise<void>;
   toggleCamera: () => Promise<void>;
   toggleRaiseHand: () => Promise<void>;
-  togglePin: (participantId: string, pinFor: 'local' | 'everyone') => Promise<void>;
+  togglePin: (participantId: string, pinFor: 'local' | 'everyone', action?: 'pin' | 'unpin') => Promise<void>;
   toggleScreenShare: () => Promise<void>;
   switchCamera: (deviceId: string) => Promise<void>;
   switchMicrophone: (deviceId: string) => Promise<void>;

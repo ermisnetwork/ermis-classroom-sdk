@@ -80,8 +80,6 @@ export class AudioProcessor extends EventEmitter<{
    */
   private setupEncoderHandlers(): void {
     this.audioEncoderManager.on("configReady", async (data) => {
-      log("[AudioProcessor] Config ready:", data);
-
       // Wrap description in packet header.
       const config: AudioConfig = {
         codec: data.config.codec!,

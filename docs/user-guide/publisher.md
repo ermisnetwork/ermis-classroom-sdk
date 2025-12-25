@@ -93,6 +93,32 @@ await publisher.raiseHand();
 await publisher.lowerHand();
 ```
 
+## Pin for Everyone
+
+Pin a participant's video for all viewers (host/co-host only):
+
+```typescript
+import { PinType } from '@ermisnetwork/ermis-classroom-sdk';
+
+// Pin a participant for everyone by their stream ID (default: PinType.User)
+await publisher.pinForEveryone('target-stream-id');
+
+// Pin a screen share for everyone
+await publisher.pinForEveryone('target-stream-id', PinType.ScreenShare);
+
+// Unpin for everyone
+await publisher.unPinForEveryone('target-stream-id');
+
+// Unpin a screen share for everyone
+await publisher.unPinForEveryone('target-stream-id', PinType.ScreenShare);
+```
+
+**PinType Values:**
+| Enum | Value | Description |
+|------|-------|-------------|
+| `PinType.User` | 1 | Pin a user's camera video |
+| `PinType.ScreenShare` | 2 | Pin a screen share |
+
 ## Custom Events
 
 ```typescript
@@ -120,6 +146,7 @@ await publisher.stop();
 | `localStreamReady` | `{ stream, videoOnlyStream, ... }` | Stream ready |
 | `screenShareStarted` | `{ stream, hasVideo, hasAudio }` | Screen share started |
 | `screenShareStopped` | - | Screen share stopped |
+| `mediaStreamReplaced` | `{ stream, videoOnlyStream, hasVideo, hasAudio }` | Media stream replaced |
 
 ```typescript
 publisher.on('statusUpdate', ({ message, isError }) => {

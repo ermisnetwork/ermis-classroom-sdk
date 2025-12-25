@@ -13,8 +13,7 @@ import type {
 } from "../types/core/participant.types";
 import type { Publisher } from "../media/publisher/Publisher";
 import type { Subscriber } from "../media/subscriber/Subscriber";
-import { ParticipantPermissions } from "../types/media/publisher.types";
-import {log} from "../utils";
+import { ParticipantPermissions, PinType } from "../types/media/publisher.types";
 
 export class Participant extends EventEmitter {
   // Identity
@@ -31,13 +30,15 @@ export class Participant extends EventEmitter {
   isVideoEnabled = true;
   isPinned = false;
   isHandRaised = false;
-
+  pinType?: PinType | null = null;
   // Media components
   publisher: Publisher | null = null;
   subscriber: Subscriber | null = null;
 
   // Screen share state
   isScreenSharing: boolean;
+  hasScreenShareAudio: boolean;
+  hasScreenShareVideo: boolean;
   screenSubscriber: Subscriber | null = null;
 
   // Sub-room state
@@ -58,6 +59,8 @@ export class Participant extends EventEmitter {
     this.name = config.name;
 
     this.isScreenSharing = config.isScreenSharing || false;
+    this.hasScreenShareAudio = config.hasScreenShareAudio ?? false;
+    this.hasScreenShareVideo = config.hasScreenShareVideo ?? true;
     this.subRoomId = config.subRoomId || null;
     this.permissions = config.permissions || {
       can_subscribe: true,
@@ -191,14 +194,129 @@ export class Participant extends EventEmitter {
         participant: this,
         enabled: this.isHandRaised,
       });
-      log("toggleRaiseHand", this.isHandRaised);
     } catch (error) {
-      log("toggleRaiseHand error", error);
+      console.error("toggleRaiseHand error", error);
       this.emit("error", {
         participant: this,
         error: error instanceof Error ? error : new Error(String(error)),
         action: "toggleRaiseHand",
       });
+    }
+  }
+
+  /**
+   * Pin a target participant for everyone (local only)
+   * @param targetStreamId - The streamId of the participant to pin
+   * @param pinType - The pin type: PinType.User (1) or PinType.ScreenShare (2)
+   */
+  async pinForEveryone(targetStreamId: string, pinType: PinType = PinType.User): Promise<void> {
+    if (!this.isLocal || !this.publisher) return;
+
+    try {
+      await this.publisher.pinForEveryone(targetStreamId, pinType);
+    } catch (error) {
+      console.error("pinForEveryone error", error);
+      this.emit("error", {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "pinForEveryone",
+      });
+    }
+  }
+
+  /**
+   * Unpin a target participant for everyone (local only)
+   * @param targetStreamId - The streamId of the participant to unpin
+   * @param pinType - The pin type: PinType.User (1) or PinType.ScreenShare (2)
+   */
+  async unPinForEveryone(targetStreamId: string, pinType: PinType = PinType.User): Promise<void> {
+    if (!this.isLocal || !this.publisher) return;
+
+    try {
+      await this.publisher.unPinForEveryone(targetStreamId, pinType);
+    } catch (error) {
+      console.error("unPinForEveryone error", error);
+      this.emit("error", {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "unPinForEveryone",
+      });
+    }
+  }
+
+  /**
+   * Start screen sharing (local only)
+   * @returns The screen share MediaStream
+   */
+  async startScreenShare(): Promise<MediaStream> {
+    if (!this.isLocal || !this.publisher) {
+      throw new Error("Cannot start screen share: not a local participant or no publisher");
+    }
+
+    try {
+      // Get display media
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { width: 1920, height: 1080 } as any,
+        audio: true,
+      });
+
+      // Start screen share through publisher
+      await this.publisher.startShareScreen(screenStream);
+
+      this.isScreenSharing = true;
+      this.emit("screenShareStarted", {
+        participant: this,
+        stream: screenStream,
+      });
+
+      return screenStream;
+    } catch (error) {
+      console.error("startScreenShare error", error);
+      this.emit("error", {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "startScreenShare",
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Stop screen sharing (local only)
+   */
+  async stopScreenShare(): Promise<void> {
+    if (!this.isLocal || !this.publisher) {
+      throw new Error("Cannot stop screen share: not a local participant or no publisher");
+    }
+
+    try {
+      await this.publisher.stopShareScreen();
+
+      this.isScreenSharing = false;
+      this.emit("screenShareStopped", {
+        participant: this,
+      });
+    } catch (error) {
+      console.error("stopScreenShare error", error);
+      this.emit("error", {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "stopScreenShare",
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Toggle screen sharing (local only)
+   */
+  async toggleScreenShare(): Promise<MediaStream | void> {
+    if (!this.isLocal || !this.publisher) return;
+
+    if (this.isScreenSharing) {
+      await this.stopScreenShare();
+    } else {
+      return await this.startScreenShare();
     }
   }
 
@@ -268,8 +386,6 @@ export class Participant extends EventEmitter {
         hasAudio: audioTracks.length > 0,
         hasVideo: videoTracks.length > 0,
       });
-
-      log("Media stream updated successfully");
     } catch (error) {
       console.error("Failed to update media stream:", error);
       this.emit("error", {
@@ -410,6 +526,7 @@ export class Participant extends EventEmitter {
       isVideoEnabled: this.isVideoEnabled,
       isHandRaised: this.isHandRaised,
       isPinned: this.isPinned,
+      pinType: this.pinType,
       isScreenSharing: this.isScreenSharing,
       connectionStatus: this.connectionStatus,
       name: this.name,

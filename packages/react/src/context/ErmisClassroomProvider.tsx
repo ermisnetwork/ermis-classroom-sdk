@@ -4,12 +4,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ErmisClassroom, {
+  log,
   MediaDeviceManager,
   type MediaDevices,
   type Participant,
   type Room,
   ROOM_EVENTS,
   type SelectedDevices,
+  PinType,
 } from '@ermisnetwork/ermis-classroom-sdk';
 import { ErmisClassroomContext } from './ErmisClassroomContext';
 import type { ErmisClassroomContextValue, ErmisClassroomProviderProps, ScreenShareData, } from '../types';
@@ -27,7 +29,7 @@ export function ErmisClassroomProvider({
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
 
   // Memoize config to prevent unnecessary re-renders
-  const cfg = {
+  const cfg = useMemo(() => ({
     host: config.host,
     hostNode: config.hostNode,
     debug: config.debug,
@@ -35,7 +37,7 @@ export function ErmisClassroomProvider({
     apiUrl: config.apiUrl,
     reconnectAttempts: config.reconnectAttempts,
     reconnectDelay: config.reconnectDelay,
-  };
+  }), [config.host, config.hostNode, config.debug, config.webtpUrl, config.apiUrl, config.reconnectAttempts, config.reconnectDelay]);
   const cfgKey = useMemo(() => JSON.stringify(cfg), [cfg]);
 
   // Room state
@@ -274,6 +276,7 @@ export function ErmisClassroomProvider({
     // Pin events
     on(events.PARTICIPANT_PINNED_FOR_EVERYONE, () => {
       setPinType('everyone');
+      log("participants before", participantsRef.current);
       setParticipants((prev) => new Map(prev));
     });
 
@@ -494,27 +497,52 @@ export function ErmisClassroomProvider({
   }, [participants, userId]);
 
   const togglePin = useCallback(
-    async (participantId: string, pinFor: 'local' | 'everyone') => {
+    async (participantId: string, pinFor: 'local' | 'everyone', action?: 'pin' | 'unpin') => {
       if (!currentRoom) return;
-      const target = currentRoom.getParticipant(participantId);
+
+      // Check if this is a screen share tile (has 'screen-' prefix)
+      const isScreenShareTile = participantId.startsWith('screen-');
+      const actualParticipantId = isScreenShareTile
+        ? participantId.replace('screen-', '')
+        : participantId;
+
+      const target = currentRoom.getParticipant(actualParticipantId);
       if (!target) return;
 
-      const local = currentRoom.localParticipant as any;
-      if (!local?.publisher) return;
+      const local = currentRoom.localParticipant;
+      if (!local) return;
 
-      const isPinned = currentRoom.pinnedParticipant?.userId === participantId;
+      // Use explicit action if provided, otherwise infer from currentRoom state
+      const roomIsPinned = currentRoom.pinnedParticipant?.userId === actualParticipantId;
+      const shouldUnpin = action === 'unpin' || (action === undefined && roomIsPinned);
+
+      log('[Provider] togglePin:', {
+        participantId,
+        actualParticipantId,
+        isScreenShareTile,
+        pinFor,
+        action,
+        roomIsPinned,
+        shouldUnpin,
+        pinnedParticipant: currentRoom.pinnedParticipant?.userId
+      });
 
       setParticipants((prev) => {
         const updated = new Map(prev);
-        updated.set(participantId, target);
+        updated.set(actualParticipantId, target);
         return updated;
       });
 
       if (pinFor === 'everyone') {
-        if (isPinned) {
-          await local.publisher.unpinForEveryone(target.streamId);
+        // Determine pinType using PinType enum
+        // Use isScreenShareTile (derived from tile ID) as the primary indicator
+        const pinTypeValue = isScreenShareTile ? PinType.ScreenShare : PinType.User;
+        if (shouldUnpin) {
+          log('[Provider] Calling unPinForEveryone with pinType:', pinTypeValue);
+          await local.unPinForEveryone(target.streamId, pinTypeValue);
         } else {
-          await local.publisher.pinForEveryone(target.streamId);
+          log('[Provider] Calling pinForEveryone with pinType:', pinTypeValue);
+          await local.pinForEveryone(target.streamId, pinTypeValue);
         }
       }
     },
@@ -649,18 +677,16 @@ export function ErmisClassroomProvider({
   );
 
   const toggleScreenShare = useCallback(async () => {
-    if (!currentRoom) return;
+    if (!userId) return;
+    const p = participants.get(userId);
+    if (!p) return;
     try {
-      if (isScreenSharing) {
-        await currentRoom.stopScreenShare();
-      } else {
-        await currentRoom.startScreenShare();
-      }
+      await p.toggleScreenShare();
     } catch (error) {
       console.error('Failed to toggle screen share:', error);
       setIsScreenSharing(false);
     }
-  }, [currentRoom, isScreenSharing]);
+  }, [participants, userId]);
 
   const sendCustomEvent = useCallback(
     async (eventType: string, data: any) => {

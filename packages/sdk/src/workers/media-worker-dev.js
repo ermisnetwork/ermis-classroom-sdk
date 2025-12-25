@@ -12,6 +12,10 @@ let currentVideoChannel = CHANNEL_NAME.VIDEO_360P;
 let workletPort = null;
 let audioEnabled = true;
 
+// Audio subscription control - received from init message
+// For screen share, this is determined by whether the publisher has screen share audio
+let subscriptionAudioEnabled = true;
+
 let mediaConfigs = new Map();
 
 let mediaDecoders = new Map();
@@ -106,6 +110,9 @@ self.onmessage = async function (e) {
     case "init":
       if (port instanceof MessagePort) workletPort = port;
       subscribeType = e.data.subscribeType || STREAM_TYPE.CAMERA;
+      // Get audioEnabled from init message - for screen share, this determines if we should subscribe to audio
+      subscriptionAudioEnabled = e.data.audioEnabled !== undefined ? e.data.audioEnabled : true;
+      console.log(`[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}`);
       await initializeDecoders();
       break;
 
@@ -172,13 +179,12 @@ function attachWebSocket(wsUrl) {
   webSocketConnection = ws;
 
   ws.onopen = () => {
-    const options = subscribeType === STREAM_TYPE.CAMERA
-      ? { audio: true, video: true }
-      : {
-      audio: false,
+    // Use subscriptionAudioEnabled for audio option - dynamically determined based on publisher's screen share audio
+    const options = {
+      audio: subscribeType === STREAM_TYPE.CAMERA ? true : subscriptionAudioEnabled,
       video: true,
     };
-    proxyConsole.log(`[WebSocket] Connected to ${wsUrl}`);
+    proxyConsole.log(`[WebSocket] Connected to ${wsUrl}, options:`, options);
     commandSender.initSubscribeChannelStream(subscribeType, options);
 
     commandSender.startStream();
@@ -394,13 +400,12 @@ function handleStreamConfigs(json) {
 async function attachWebTransportStream(readable, writable) {
   webTPStreamReader = readable.getReader();
   webTPStreamWriter = writable.getWriter();
-  const options = subscribeType === STREAM_TYPE.CAMERA
-    ? { audio: true, video: true }
-    : {
-    audio: false,
+  // Use subscriptionAudioEnabled for audio option - dynamically determined based on publisher's screen share audio
+  const options = {
+    audio: subscribeType === STREAM_TYPE.CAMERA ? true : subscriptionAudioEnabled,
     video: true,
   };
-  proxyConsole.warn(`[WebTransport] Attached stream`);
+  proxyConsole.warn(`[WebTransport] Attached stream, options:`, options);
 
   commandSender.initSubscribeChannelStream(subscribeType, options);
 
@@ -564,13 +569,14 @@ function handleBinaryPacket(dataBuffer) {
     return;
   } else if (frameType === 4 || frameType === 5) {
     // DEBUG: Screen share packet received
-    console.warn(`[Worker] 📺 Screen share packet received! frameType=${frameType}, size=${data.byteLength}`);
+    // console.warn(`[Worker] 📺 Screen share packet received! frameType=${frameType}, size=${data.byteLength}`);
 
     // todo: bind screen share 720p and camera 720p packet same packet type, dont need separate, create and get decoder base on subscribe type!!!!
     let videoDecoderScreenShare720p = mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P);
     const type = frameType === 4 ? "key" : "delta";
 
-    console.warn(`[Worker] Screen share decoder exists: ${!!videoDecoderScreenShare720p}, type: ${type}, keyFrameReceived: ${keyFrameReceived}`);
+    // DEBUG: Screen share packet received (commented to reduce console noise)
+    // console.warn(`[Worker] Screen share decoder exists: ${!!videoDecoderScreenShare720p}, type: ${type}, keyFrameReceived: ${keyFrameReceived}`);
 
 
     if (type === "key") {
