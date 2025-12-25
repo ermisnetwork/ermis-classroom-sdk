@@ -945,9 +945,6 @@ export class ErmisClient extends EventEmitter {
 
     // Handle remote stream ready
     const handleRemoteStreamReady = (data: any) => {
-      if (!this.state.currentRoom) {
-        return;
-      }
 
       if (!this.state.currentRoom) {
         return;

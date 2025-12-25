@@ -241,6 +241,10 @@ export interface ParticipantApiData {
   has_screen_sharing_audio?: boolean;
   /** Screen share has video */
   has_screen_sharing_video?: boolean;
+  /** Is this participant pinned for everyone */
+  is_pinned_for_everyone?: boolean;
+  /** Pin type (1=User, 2=ScreenShare) */
+  pin_type?: number;
 }
 
 /**

@@ -772,6 +772,19 @@ export class Room extends EventEmitter {
       this.localParticipant = participant;
     }
 
+    // Handle initial pin state from API data (for late-joining users)
+    if (memberData.is_pinned_for_everyone) {
+      const pinType: PinType = (memberData.pin_type as PinType) ?? PinType.User;
+      participant.isPinned = true;
+      participant.pinType = pinType;
+      this.pinnedParticipant = participant;
+      this.pinnedPinType = pinType;
+      log("[Room] Participant is pinned for everyone:", {
+        userId: participant.userId,
+        pinType,
+      });
+    }
+
     this.emit("participantAdded", { room: this, participant });
 
     return participant;

@@ -259,6 +259,25 @@ When the server broadcasts a pin event, it includes:
 5. **Update UI focus** based on the calculated tile ID
 6. **Track room state** via `room.pinnedParticipant` and `room.pinnedPinType`
 
+## Initial Pin State (Late-Joining Users)
+
+When a user joins a room where someone is already pinned, the SDK automatically:
+
+1. Reads `is_pinned_for_everyone` and `pin_type` from participant API data
+2. Sets `room.pinnedParticipant` and `room.pinnedPinType` 
+3. Sets `participant.isPinned = true` and `participant.pinType`
+
+This means late-joining users will see the correct pin state immediately without requiring a separate event.
+
+```typescript
+// When joining a room, existing pin state is already loaded
+const room = await meetingClient.joinRoom(roomCode);
+
+// These will already be set if someone is pinned
+console.log(room.pinnedParticipant?.userId);
+console.log(room.pinnedPinType);
+```
+
 ## Troubleshooting
 
 ### Wrong tile is focused when pinning screen share
@@ -280,3 +299,7 @@ Always provide a fallback:
 ```typescript
 const pinType = event.pinType ?? PinType.User;
 ```
+
+### Late-joining users don't see existing pin state
+
+Make sure your backend returns `is_pinned_for_everyone` and `pin_type` fields in participant data. The SDK reads these when creating participants during room join.
