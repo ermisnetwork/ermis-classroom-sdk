@@ -971,13 +971,20 @@ export class ErmisClient extends EventEmitter {
         return;
       }
 
+      // Skip screen share streams - they are handled by Room's remoteScreenShareStreamReady event
+      // which is forwarded via room event listener, not globalEventBus
+      if (data.subscribeType === 'screen_share') {
+        log('[MeetingClient] Skipping screen_share stream, handled by Room events');
+        return;
+      }
+
       // Find participant by streamId
       const participant = Array.from(this.state.currentRoom.participants.values()).find(
         p => p.streamId === data.streamId
       );
 
       if (participant) {
-        log('[MeetingClient] ✅ Found participant for stream:', participant.userId);
+        log('[MeetingClient] ✅ Found participant for camera stream:', participant.userId);
         this.emit('remoteStreamReady', {
           ...data,
           participant: participant.getInfo(),

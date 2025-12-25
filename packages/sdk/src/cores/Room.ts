@@ -124,11 +124,9 @@ export class Room extends EventEmitter {
         }
       }
 
-      // Setup media connections with optional custom stream
-      await this._setupMediaConnections(mediaStream);
-
-      // Setup global event listeners (subscribe directly from globalEventBus)
       this._setupGlobalEventListeners();
+
+      await this._setupMediaConnections(mediaStream);
 
       this.isActive = true;
       this.emit("joined", { room: this, participants: this.participants });
