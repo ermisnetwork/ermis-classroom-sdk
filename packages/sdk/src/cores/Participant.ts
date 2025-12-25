@@ -13,8 +13,7 @@ import type {
 } from "../types/core/participant.types";
 import type { Publisher } from "../media/publisher/Publisher";
 import type { Subscriber } from "../media/subscriber/Subscriber";
-import { ParticipantPermissions } from "../types/media/publisher.types";
-import { log } from "../utils";
+import { ParticipantPermissions, PinType } from "../types/media/publisher.types";
 
 export class Participant extends EventEmitter {
   // Identity
@@ -31,7 +30,7 @@ export class Participant extends EventEmitter {
   isVideoEnabled = true;
   isPinned = false;
   isHandRaised = false;
-
+  pinType?: PinType | null = null;
   // Media components
   publisher: Publisher | null = null;
   subscriber: Subscriber | null = null;
@@ -195,9 +194,8 @@ export class Participant extends EventEmitter {
         participant: this,
         enabled: this.isHandRaised,
       });
-      log("toggleRaiseHand", this.isHandRaised);
     } catch (error) {
-      log("toggleRaiseHand error", error);
+      console.error("toggleRaiseHand error", error);
       this.emit("error", {
         participant: this,
         error: error instanceof Error ? error : new Error(String(error)),
@@ -209,15 +207,15 @@ export class Participant extends EventEmitter {
   /**
    * Pin a target participant for everyone (local only)
    * @param targetStreamId - The streamId of the participant to pin
+   * @param pinType - The pin type: PinType.User (1) or PinType.ScreenShare (2)
    */
-  async pinForEveryone(targetStreamId: string): Promise<void> {
+  async pinForEveryone(targetStreamId: string, pinType: PinType = PinType.User): Promise<void> {
     if (!this.isLocal || !this.publisher) return;
 
     try {
-      await this.publisher.pinForEveryone(targetStreamId);
-      log("pinForEveryone", targetStreamId);
+      await this.publisher.pinForEveryone(targetStreamId, pinType);
     } catch (error) {
-      log("pinForEveryone error", error);
+      console.error("pinForEveryone error", error);
       this.emit("error", {
         participant: this,
         error: error instanceof Error ? error : new Error(String(error)),
@@ -229,15 +227,15 @@ export class Participant extends EventEmitter {
   /**
    * Unpin a target participant for everyone (local only)
    * @param targetStreamId - The streamId of the participant to unpin
+   * @param pinType - The pin type: PinType.User (1) or PinType.ScreenShare (2)
    */
-  async unPinForEveryone(targetStreamId: string): Promise<void> {
+  async unPinForEveryone(targetStreamId: string, pinType: PinType = PinType.User): Promise<void> {
     if (!this.isLocal || !this.publisher) return;
 
     try {
-      await this.publisher.unPinForEveryone(targetStreamId);
-      log("unPinForEveryone", targetStreamId);
+      await this.publisher.unPinForEveryone(targetStreamId, pinType);
     } catch (error) {
-      log("unPinForEveryone error", error);
+      console.error("unPinForEveryone error", error);
       this.emit("error", {
         participant: this,
         error: error instanceof Error ? error : new Error(String(error)),
@@ -270,11 +268,10 @@ export class Participant extends EventEmitter {
         participant: this,
         stream: screenStream,
       });
-      log("startScreenShare", screenStream);
 
       return screenStream;
     } catch (error) {
-      log("startScreenShare error", error);
+      console.error("startScreenShare error", error);
       this.emit("error", {
         participant: this,
         error: error instanceof Error ? error : new Error(String(error)),
@@ -299,9 +296,8 @@ export class Participant extends EventEmitter {
       this.emit("screenShareStopped", {
         participant: this,
       });
-      log("stopScreenShare");
     } catch (error) {
-      log("stopScreenShare error", error);
+      console.error("stopScreenShare error", error);
       this.emit("error", {
         participant: this,
         error: error instanceof Error ? error : new Error(String(error)),
@@ -390,8 +386,6 @@ export class Participant extends EventEmitter {
         hasAudio: audioTracks.length > 0,
         hasVideo: videoTracks.length > 0,
       });
-
-      log("Media stream updated successfully");
     } catch (error) {
       console.error("Failed to update media stream:", error);
       this.emit("error", {
@@ -532,6 +526,7 @@ export class Participant extends EventEmitter {
       isVideoEnabled: this.isVideoEnabled,
       isHandRaised: this.isHandRaised,
       isPinned: this.isPinned,
+      pinType: this.pinType,
       isScreenSharing: this.isScreenSharing,
       connectionStatus: this.connectionStatus,
       name: this.name,

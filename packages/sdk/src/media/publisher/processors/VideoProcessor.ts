@@ -96,17 +96,9 @@ export class VideoProcessor extends EventEmitter<{
     }
 
     try {
-      log("[VideoProcessor] Initializing...");
-      log("[VideoProcessor] Sub-streams:", this.subStreams.length, this.subStreams.map(s => s.name));
-
-      // Store track reference for enabling/disabling
       this.videoTrack = videoTrack;
-
-      // Sync initial cameraEnabled state with track's enabled state
       this.cameraEnabled = videoTrack.enabled;
-      log("[VideoProcessor] Initial camera enabled state:", this.cameraEnabled);
 
-      // Create encoders for each sub-stream
       for (const subStream of this.subStreams) {
         const encoderConfig: VideoEncoderConfig = {
           codec: config.codec,
@@ -115,8 +107,6 @@ export class VideoProcessor extends EventEmitter<{
           framerate: subStream.framerate!,
           bitrate: subStream.bitrate!,
         };
-
-        log(`[VideoProcessor] Creating encoder for ${subStream.name}:`, encoderConfig);
 
         this.videoEncoderManager.createEncoder(
           subStream.name,
@@ -128,9 +118,6 @@ export class VideoProcessor extends EventEmitter<{
         );
       }
 
-      log("[VideoProcessor] Setting up video processor with trigger worker...");
-
-      // Setup video processor with trigger worker
       this.triggerWorker = new Worker("/polyfills/triggerWorker.js");
       this.triggerWorker.postMessage({ frameRate: config.framerate });
 
@@ -142,7 +129,6 @@ export class VideoProcessor extends EventEmitter<{
 
       this.videoReader = this.videoProcessor.readable.getReader();
 
-      log("[VideoProcessor] Initialized successfully, videoReader:", !!this.videoReader);
       this.emit("initialized", { subStreams: this.subStreams });
     } catch (error) {
       console.error("[VideoProcessor] Initialization failed:", error);

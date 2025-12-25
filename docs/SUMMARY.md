@@ -11,10 +11,13 @@
   - [Publisher](user-guide/publisher.md)
   - [Subscriber](user-guide/subscriber.md)
   - [Room](user-guide/room.md)
+  - [Participant](user-guide/participant.md)
   - [Events](user-guide/events.md)
   - [Features](user-guide/features/README.md)
     - [Screen Share](user-guide/features/screen-share.md)
     - [Device Switching](user-guide/features/device-switching.md)
+    - [Breakout Rooms](user-guide/features/breakout-rooms.md)
+    - [Pin for Everyone](user-guide/features/pin-for-everyone.md)
 
 - [Contributor Guide](contributor-guide/README.md)
   - [Architecture](contributor-guide/architecture.md)

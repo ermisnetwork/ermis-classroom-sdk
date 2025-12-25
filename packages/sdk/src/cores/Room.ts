@@ -10,7 +10,7 @@ import { SubRoom } from "./SubRoom";
 import { Publisher } from "../media/publisher/Publisher";
 import { Subscriber } from "../media/subscriber/Subscriber";
 import { AudioMixer } from "../media/audioMixer/AudioMixer";
-import { StreamTypes } from "../types/media/publisher.types";
+import { StreamTypes, PinType } from "../types/media/publisher.types";
 import type {
   RoomConfig,
   RoomType,
@@ -54,6 +54,7 @@ export class Room extends EventEmitter {
   // Media management
   audioMixer: AudioMixer | null = null;
   pinnedParticipant: Participant | null = null;
+  pinnedPinType: PinType | null = null; // Track the type of pin (User or ScreenShare)
 
   // Connection info
   membershipId: string | null = null;
@@ -94,7 +95,6 @@ export class Room extends EventEmitter {
 
     try {
       this.emit("joining", { room: this });
-      log("Joining room with code", this.code);
 
       // Join via API
       const joinResponse = await this.apiClient.joinRoom(this.code);
@@ -109,7 +109,6 @@ export class Room extends EventEmitter {
       const roomDetails = await this.apiClient.getRoomById(
         joinResponse.room_id,
       );
-      log("Joined room, details:", roomDetails);
 
       // Update room info
       this._updateFromApiData(roomDetails.room);
@@ -354,7 +353,6 @@ export class Room extends EventEmitter {
         response,
       });
 
-      log(`✅ User ${localUserId} joined breakout room: ${this.code}`);
       return response;
     } catch (error) {
       this.emit("error", {
@@ -774,7 +772,6 @@ export class Room extends EventEmitter {
       this.localParticipant = participant;
     }
 
-    log("[Room] 📢 Emitting participantAdded event for:", participant.userId);
     this.emit("participantAdded", { room: this, participant });
 
     return participant;
@@ -799,6 +796,7 @@ export class Room extends EventEmitter {
 
     if (this.pinnedParticipant?.userId === userId) {
       this.pinnedParticipant = null;
+      this.pinnedPinType = null;
     }
 
     this.emit("participantRemoved", { room: this, participant });
@@ -877,6 +875,7 @@ export class Room extends EventEmitter {
       participantCount: this.participants.size,
       subRoomCount: this.subRooms.size,
       pinnedParticipant: this.pinnedParticipant?.userId || null,
+      pinnedPinType: this.pinnedPinType,
     };
   }
 
@@ -900,7 +899,6 @@ export class Room extends EventEmitter {
         stream: screenStream,
         participant: this.localParticipant.getInfo(),
       });
-      log("[Room] screenStream: ", screenStream);
 
       return screenStream;
     } catch (error) {
@@ -999,12 +997,7 @@ export class Room extends EventEmitter {
 
       this.emit("remoteScreenShareStarted", { room: this, participant });
     } else {
-      log(`[Room] Stopping screen share for ${participantId}`);
-      log(`[Room] screenSubscriber exists: ${!!(participant as any).screenSubscriber}`);
-      log(`[Room] camera subscriber exists: ${!!participant.subscriber}`);
-
       if ((participant as any).screenSubscriber) {
-        log(`[Room] Stopping ONLY screenSubscriber for ${participantId}`);
         (participant as any).screenSubscriber.stop();
         (participant as any).screenSubscriber = null;
       }
@@ -1071,12 +1064,7 @@ export class Room extends EventEmitter {
     const transportInfo = logTransportInfo();
     const useWebRTC = transportInfo.recommendedTransport.useWebRTC;
 
-    log(
-      `🚀 Setting up publisher with ${useWebRTC ? "WebRTC" : "WebTransport"}`,
-    );
-
     const publishUrl = `${this.mediaConfig.webtpUrl}/publish/${this.id}/${this.streamId}`;
-    log("trying to connect webtransport to", publishUrl);
 
     const publisher = new Publisher({
       publishUrl,
@@ -1109,11 +1097,6 @@ export class Room extends EventEmitter {
     // This handles the case when user joins with mic/camera disabled in preview
     this.localParticipant.isAudioEnabled = publisher.isAudioOn();
     this.localParticipant.isVideoEnabled = publisher.isVideoOn();
-
-    log("[Room] Local participant initial state synced:", {
-      audioEnabled: this.localParticipant.isAudioEnabled,
-      videoEnabled: this.localParticipant.isVideoEnabled,
-    });
   }
 
   /**
@@ -1128,12 +1111,6 @@ export class Room extends EventEmitter {
       return;
     }
 
-    log("[Room] Setting up remote subscriber for:", {
-      userId: participant.userId,
-      streamId: participant.streamId,
-      roomId: this.id,
-    });
-    log("[Room] Media config protocol:", this.mediaConfig.subscribeProtocol);
     if (!this.localParticipant?.streamId) throw new Error('Local stream must be defined');
     const subscriber = new Subscriber({
       localStreamId: this.localParticipant?.streamId,
@@ -1162,10 +1139,8 @@ export class Room extends EventEmitter {
     // No need to listen to subscriber events - Room subscribes directly from globalEventBus
     // This eliminates event re-emission: Subscriber -> Room
 
-    log("[Room] Starting subscriber for:", participant.userId);
     await subscriber.start();
     participant.setSubscriber(subscriber);
-    log("[Room] Subscriber started successfully for:", participant.userId);
 
     if (participant.isScreenSharing) {
       // Participant is already screen sharing when joining, use their stored hasScreenShareAudio value
@@ -1206,7 +1181,6 @@ export class Room extends EventEmitter {
         return;
       }
 
-      log("[Room] Adding new participant:", joinedParticipant.user_id);
       const participant = this.addParticipant(
         {
           user_id: joinedParticipant.user_id,
@@ -1222,9 +1196,7 @@ export class Room extends EventEmitter {
         this.localParticipant?.userId || "",
       );
 
-      log("[Room] Setting up remote subscriber for:", participant.userId);
       await this._setupRemoteSubscriber(participant);
-      log("[Room] Remote subscriber setup complete for:", participant.userId);
     }
 
     if (event.type === "leave") {
@@ -1350,23 +1322,42 @@ export class Room extends EventEmitter {
 
     if (event.type === "pin_for_everyone") {
       const pinEvent = event as any;
-      log(`Pin for everyone event received:`, pinEvent.participant);
-      const participant = this.participants.get(pinEvent.participant.user_id);
+      const eventParticipant = pinEvent.participant;
+      // Read pinType from participant object in event
+      const pinType: PinType = eventParticipant.pin_type ?? pinEvent.pin_type ?? PinType.User;
+      const participant = this.participants.get(eventParticipant.user_id);
       if (participant) {
         this.pinParticipant(participant.userId);
-        this.emit("participantPinnedForEveryone", { room: this, participant });
+        this.pinnedPinType = pinType;
+        // Update participant's pinType from event
+        participant.pinType = pinType;
+        this.emit("participantPinnedForEveryone", {
+          room: this,
+          participant,
+          pinType,
+        });
       }
     }
 
     if (event.type === "unpin_for_everyone") {
-      log(`Unpin for everyone event received`);
+      const unpinEvent = event as any;
+      const eventParticipant = unpinEvent.participant;
+      // Read pinType from participant object in event
+      const pinType: PinType = eventParticipant.pin_type ?? unpinEvent.pin_type ?? PinType.User;
       if (this.pinnedParticipant) {
         const participant = this.pinnedParticipant;
-        this.unpinParticipant();
-        this.emit("participantUnpinnedForEveryone", {
-          room: this,
-          participant,
-        });
+        // Only unpin if the pinType matches
+        if (this.pinnedPinType === pinType || this.pinnedPinType === null) {
+          this.unpinParticipant();
+          this.pinnedPinType = null;
+          // Clear participant's pinType
+          participant.pinType = null;
+          this.emit("participantUnpinnedForEveryone", {
+            room: this,
+            participant,
+            pinType,
+          });
+        }
       }
     }
 
@@ -1574,14 +1565,12 @@ export class Room extends EventEmitter {
         const isScreenShare = data.subscribeType === "screen_share";
 
         if (isScreenShare) {
-          log("[Room] 📢 Emitting remoteScreenShareStreamReady for:", participant.userId);
           this.emit("remoteScreenShareStreamReady", {
             ...data,
             participant: participant.getInfo(),
             roomId: this.id,
           });
         } else {
-          log("[Room] 📢 Emitting remoteStreamReady for:", participant.userId);
           this.emit("remoteStreamReady", {
             ...data,
             participant: participant.getInfo(),
@@ -1653,6 +1642,7 @@ export class Room extends EventEmitter {
     this.participants.clear();
     this.localParticipant = null;
     this.pinnedParticipant = null;
+    this.pinnedPinType = null;
     this.typingUsers.clear();
   }
 

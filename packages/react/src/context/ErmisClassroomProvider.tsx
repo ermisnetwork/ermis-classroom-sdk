@@ -11,6 +11,7 @@ import ErmisClassroom, {
   type Room,
   ROOM_EVENTS,
   type SelectedDevices,
+  PinType,
 } from '@ermisnetwork/ermis-classroom-sdk';
 import { ErmisClassroomContext } from './ErmisClassroomContext';
 import type { ErmisClassroomContextValue, ErmisClassroomProviderProps, ScreenShareData, } from '../types';
@@ -275,6 +276,7 @@ export function ErmisClassroomProvider({
     // Pin events
     on(events.PARTICIPANT_PINNED_FOR_EVERYONE, () => {
       setPinType('everyone');
+      log("participants before", participantsRef.current);
       setParticipants((prev) => new Map(prev));
     });
 
@@ -497,18 +499,27 @@ export function ErmisClassroomProvider({
   const togglePin = useCallback(
     async (participantId: string, pinFor: 'local' | 'everyone', action?: 'pin' | 'unpin') => {
       if (!currentRoom) return;
-      const target = currentRoom.getParticipant(participantId);
+
+      // Check if this is a screen share tile (has 'screen-' prefix)
+      const isScreenShareTile = participantId.startsWith('screen-');
+      const actualParticipantId = isScreenShareTile
+        ? participantId.replace('screen-', '')
+        : participantId;
+
+      const target = currentRoom.getParticipant(actualParticipantId);
       if (!target) return;
 
       const local = currentRoom.localParticipant;
       if (!local) return;
 
       // Use explicit action if provided, otherwise infer from currentRoom state
-      const roomIsPinned = currentRoom.pinnedParticipant?.userId === participantId;
+      const roomIsPinned = currentRoom.pinnedParticipant?.userId === actualParticipantId;
       const shouldUnpin = action === 'unpin' || (action === undefined && roomIsPinned);
 
       log('[Provider] togglePin:', {
         participantId,
+        actualParticipantId,
+        isScreenShareTile,
         pinFor,
         action,
         roomIsPinned,
@@ -518,17 +529,20 @@ export function ErmisClassroomProvider({
 
       setParticipants((prev) => {
         const updated = new Map(prev);
-        updated.set(participantId, target);
+        updated.set(actualParticipantId, target);
         return updated;
       });
 
       if (pinFor === 'everyone') {
+        // Determine pinType using PinType enum
+        // Use isScreenShareTile (derived from tile ID) as the primary indicator
+        const pinTypeValue = isScreenShareTile ? PinType.ScreenShare : PinType.User;
         if (shouldUnpin) {
-          log('[Provider] Calling unPinForEveryone');
-          await local.unPinForEveryone(target.streamId);
+          log('[Provider] Calling unPinForEveryone with pinType:', pinTypeValue);
+          await local.unPinForEveryone(target.streamId, pinTypeValue);
         } else {
-          log('[Provider] Calling pinForEveryone');
-          await local.pinForEveryone(target.streamId);
+          log('[Provider] Calling pinForEveryone with pinType:', pinTypeValue);
+          await local.pinForEveryone(target.streamId, pinTypeValue);
         }
       }
     },

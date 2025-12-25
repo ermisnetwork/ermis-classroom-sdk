@@ -94,10 +94,6 @@ export class AudioEncoderManager extends EventEmitter<{
         numberOfChannels: AUDIO_CONFIG.CHANNEL_COUNT,
       };
 
-      log(
-        `[AudioEncoder] Initializing recorder for ${this.channelName}`,
-      );
-
       if (!this.initAudioRecorder || typeof this.initAudioRecorder !== 'function') {
         throw new Error(`initAudioRecorder is not a function: ${typeof this.initAudioRecorder}`);
       }
@@ -115,9 +111,6 @@ export class AudioEncoderManager extends EventEmitter<{
         this.handleAudioData(data);
       };
 
-      log(
-        `[AudioEncoder] Recorder initialized for ${this.channelName}`,
-      );
       this.emit("initialized", { channelName: this.channelName });
     } catch (error) {
       console.error(
@@ -147,7 +140,6 @@ export class AudioEncoderManager extends EventEmitter<{
       this.samplesSent = 0;
       this.chunkCount = 0;
 
-      log(`[AudioEncoder] Started recording on ${this.channelName}`);
       this.emit("started", { channelName: this.channelName });
     } catch (error) {
       console.error(
@@ -178,7 +170,6 @@ export class AudioEncoderManager extends EventEmitter<{
       this.configReady = false;
       this.audioConfig = null;
 
-      log(`[AudioEncoder] Stopped recording on ${this.channelName}`);
       this.emit("stopped", { channelName: this.channelName });
     } catch (error) {
       console.error(

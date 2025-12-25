@@ -3,7 +3,7 @@
  * Type definitions for Participant class
  */
 
-import { ParticipantPermissions } from "../media/publisher.types";
+import { ParticipantPermissions, PinType } from "../media/publisher.types";
 
 /**
  * Participant role in the room
@@ -76,6 +76,8 @@ export interface ParticipantInfo {
   isHandRaised: boolean;
   /** Whether participant is pinned */
   isPinned: boolean;
+  /** Pin type (User or ScreenShare) if pinned for everyone */
+  pinType?: PinType | null;
   /** Whether screen sharing is active */
   isScreenSharing: boolean;
   /** Connection status */

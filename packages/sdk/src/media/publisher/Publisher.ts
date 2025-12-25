@@ -7,6 +7,7 @@ import {
   SubStream,
   ParticipantPermissions,
   ChannelName,
+  PinType,
 } from '../../types';
 import { getSubStreams, MEETING_EVENTS } from '../../constants';
 import { WebTransportManager } from "./transports/WebTransportManager";
@@ -505,7 +506,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     const eventType = this.options.streamType === "display" ? MEETING_EVENTS.STOP_SCREEN_SHARE : MEETING_EVENTS.CAMERA_OFF;
     await this.sendMeetingEvent(eventType);
 
-    log("[Publisher] Video turned off");
   }
 
   async turnOnVideo(): Promise<void> {
@@ -517,7 +517,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     const eventType = this.options.streamType === "display" ? MEETING_EVENTS.START_SCREEN_SHARE : MEETING_EVENTS.CAMERA_ON;
     await this.sendMeetingEvent(eventType);
 
-    log("[Publisher] Video turned on");
   }
 
   async toggleAudio(): Promise<void> {
@@ -535,7 +534,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.audioEnabled = false;
     await this.sendMeetingEvent(MEETING_EVENTS.MIC_OFF);
 
-    log("[Publisher] Audio turned off");
   }
 
   async turnOnAudio(): Promise<void> {
@@ -545,7 +543,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.audioEnabled = true;
     await this.sendMeetingEvent(MEETING_EVENTS.MIC_ON);
 
-    log("[Publisher] Audio turned on");
   }
 
   async toggleMic(): Promise<void> {
@@ -642,7 +639,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     this.isHandRaised = true;
     await this.sendMeetingEvent(MEETING_EVENTS.RAISE_HAND);
-    log("[Publisher] Hand raised");
   }
 
   async lowerHand(): Promise<void> {
@@ -650,19 +646,18 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     this.isHandRaised = false;
     await this.sendMeetingEvent(MEETING_EVENTS.LOWER_HAND);
-    log("[Publisher] Hand lowered");
   }
-  async pinForEveryone(targetStreamId: string): Promise<void> {
+  async pinForEveryone(targetStreamId: string, pinType: PinType = PinType.User): Promise<void> {
     await this.sendMeetingEvent(MEETING_EVENTS.PIN_FOR_EVERYONE, {
       target_stream_id: targetStreamId,
+      pin_type: pinType,
     });
-    log("[Publisher] Pin for everyone:", targetStreamId);
   }
-  async unPinForEveryone(targetStreamId: string): Promise<void> {
+  async unPinForEveryone(targetStreamId: string, pinType: PinType = PinType.User): Promise<void> {
     await this.sendMeetingEvent(MEETING_EVENTS.UNPIN_FOR_EVERYONE, {
       target_stream_id: targetStreamId,
+      pin_type: pinType,
     });
-    log("[Publisher] Unpin for everyone:", targetStreamId);
   }
   private async sendMeetingEvent(eventType: string, data?: any): Promise<void> {
     if (!this.streamManager) {
@@ -753,9 +748,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   }
 
   async sendEvent(eventData: any): Promise<void> {
-    log("[Publisher] Sending event:", eventData);
     if (!this.streamManager) {
-      log("[Publisher] ERROR: StreamManager not initialized");
       throw new Error("StreamManager not initialized");
     }
     await this.streamManager.sendEvent(eventData);
@@ -770,8 +763,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private isScreenSharing = false;
 
   async startShareScreen(screenMediaStream: MediaStream): Promise<void> {
-    log("[Publisher] Starting screen sharing with provided MediaStream:", screenMediaStream);
-
     if (this.isScreenSharing) {
       this.updateStatus("Already sharing screen", true);
       return;
@@ -810,21 +801,17 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       this.isScreenSharing = true;
 
 
-      log(`[Publisher] Creating screen share streams...`);
       await this.streamManager.addStream(ChannelName.SCREEN_SHARE_720P);
 
       if (hasAudio) {
         await this.streamManager.addStream(ChannelName.SCREEN_SHARE_AUDIO);
       }
-      log(`[Publisher] Screen share streams created successfully`);
 
       // Wait for data channels to be ready before starting video capture
-      log(`[Publisher] Waiting for screen share data channels to be ready...`);
       await this.streamManager.waitForStreamReady(ChannelName.SCREEN_SHARE_720P);
       if (hasAudio) {
         await this.streamManager.waitForStreamReady(ChannelName.SCREEN_SHARE_AUDIO);
       }
-      log(`[Publisher] Screen share data channels ready`);
 
       await this.startScreenVideoCapture();
 
@@ -848,8 +835,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         videoOnlyStream.addTrack(videoTracks[0]);
       }
 
-      log("[Publisher] Emitting localScreenShareReady event");
-
       const screenShareData = {
         stream: this.screenStream,
         videoOnlyStream,
@@ -867,7 +852,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       // Emit to global event bus
       globalEventBus.emit(GlobalEvents.LOCAL_SCREEN_SHARE_READY, screenShareData);
-      log("[Publisher] localScreenShareReady event emitted");
 
       // Also emit screenShareStarted for backward compatibility
       this.emit("screenShareStarted", {

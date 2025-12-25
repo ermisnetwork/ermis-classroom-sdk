@@ -247,3 +247,8 @@ export type InitAudioRecorder = (
   stream: MediaStream,
   options: AudioRecorderOptions,
 ) => Promise<AudioRecorder>;
+
+export enum PinType {
+  User = 1,
+  ScreenShare = 2,
+}

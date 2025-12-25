@@ -163,7 +163,6 @@ export class ErmisClient extends EventEmitter {
       reconnectDelay: config.reconnectDelay ?? 2000,
       debug: config.debug ?? false,
     };
-    log('[MeetingClient] Initialized with config:', this.config);
     // Initialize API client
     this.apiClient = new ApiClient({
       host: this.config.host,
@@ -176,7 +175,6 @@ export class ErmisClient extends EventEmitter {
     // Safari uses websocket (no WebTransport support), other browsers use webtransport
     const transportInfo = BrowserDetection.determineTransport();
     const subscribeProtocol = transportInfo.useWebRTC ? 'websocket' : 'webtransport';
-    log(`[MeetingClient] Browser detection - useWebRTC: ${transportInfo.useWebRTC}, subscribeProtocol: ${subscribeProtocol}`);
 
     this.mediaConfig = {
       host: this.config.hostNode || this.config.host,
@@ -478,8 +476,6 @@ export class ErmisClient extends EventEmitter {
       // Join the room with optional custom media stream
       const joinResult = await room.join(this.state.user!.id, mediaStream);
 
-      // Update state after join completes
-      log("Room joined successfully:", room.getInfo());
       this.state.rooms.set(room.id, room);
 
       this.emit('roomJoined', { room, joinResult });
@@ -925,19 +921,10 @@ export class ErmisClient extends EventEmitter {
 
     // Handle local stream ready
     const handleLocalStreamReady = (data: any) => {
-      log('[MeetingClient] Received LOCAL_STREAM_READY from globalEventBus', {
-        hasCurrentRoom: !!this.state.currentRoom,
-        dataStreamId: data.streamId,
-      });
-
       if (!this.state.currentRoom) {
-        log('[MeetingClient] No currentRoom when LOCAL_STREAM_READY received');
         return;
       }
 
-      log('[MeetingClient] ✅ Emitting localStreamReady to UI');
-
-      // Enrich with room context and emit
       this.emit('localStreamReady', {
         ...data,
         participant: this.state.currentRoom.localParticipant?.getInfo(),
@@ -947,8 +934,6 @@ export class ErmisClient extends EventEmitter {
 
     // Handle local screen share ready
     const handleLocalScreenShareReady = (data: any) => {
-      log('[MeetingClient] Received LOCAL_SCREEN_SHARE_READY from globalEventBus');
-
       if (!this.state.currentRoom) return;
 
       this.emit('localScreenShareReady', {
@@ -960,14 +945,11 @@ export class ErmisClient extends EventEmitter {
 
     // Handle remote stream ready
     const handleRemoteStreamReady = (data: any) => {
-      log('[MeetingClient] Received REMOTE_STREAM_READY from globalEventBus', {
-        streamId: data.streamId,
-        subscribeType: data.subscribeType,
-        hasCurrentRoom: !!this.state.currentRoom,
-      });
+      if (!this.state.currentRoom) {
+        return;
+      }
 
       if (!this.state.currentRoom) {
-        log('[MeetingClient] No currentRoom, cannot process REMOTE_STREAM_READY');
         return;
       }
 
@@ -984,16 +966,10 @@ export class ErmisClient extends EventEmitter {
       );
 
       if (participant) {
-        log('[MeetingClient] ✅ Found participant for camera stream:', participant.userId);
         this.emit('remoteStreamReady', {
           ...data,
           participant: participant.getInfo(),
           roomId: this.state.currentRoom.id,
-        });
-      } else {
-        log('[MeetingClient] ❌ Participant not found for streamId:', data.streamId, {
-          participantsCount: this.state.currentRoom.participants.size,
-          participantIds: Array.from(this.state.currentRoom.participants.keys()),
         });
       }
     };
@@ -1063,7 +1039,6 @@ export class ErmisClient extends EventEmitter {
 
     eventsToForward.forEach((event) => {
       room.on(event, (data: any) => {
-        log(`[MeetingClient] Forwarding room event: ${event}`, data);
         this.emit(event, data);
       });
     });
@@ -1071,8 +1046,6 @@ export class ErmisClient extends EventEmitter {
 
 
   async sendCustomEvent(targets: string[], eventData: object): Promise<void> {
-    log("[MeetingClient] Sending custom event:", eventData);
-    log("Current room:", this.state.currentRoom?.getInfo());
     if (!this.state.currentRoom) {
       return;
     }

@@ -20,13 +20,42 @@ async function getDevices() {
 }
 ```
 
+## Using MediaDeviceManager
+
+The SDK provides a `MediaDeviceManager` for easier device management:
+
+```typescript
+import { MediaDeviceManager } from '@ermisnetwork/ermis-classroom-sdk';
+
+const deviceManager = new MediaDeviceManager();
+
+// Get all devices
+const devices = await deviceManager.getDevices();
+console.log('Cameras:', devices.cameras);
+console.log('Microphones:', devices.microphones);
+console.log('Speakers:', devices.speakers);
+```
+
+Or use the client's helper:
+
+```typescript
+const deviceManager = client.createMediaDeviceManager();
+```
+
 ## Switching Camera
+
+Switch camera via the local participant's publisher:
 
 ```typescript
 const { cameras } = await getDevices();
+const publisher = room.localParticipant?.publisher;
 
 // Switch to a specific camera by device ID
-await room.switchCamera(cameras[1].deviceId);
+const result = await publisher.switchVideoDevice(cameras[1].deviceId);
+if (result) {
+  // Update local video preview with new stream
+  localVideo.srcObject = result.videoOnlyStream;
+}
 ```
 
 ### Example: Camera Selector UI
@@ -45,7 +74,10 @@ cameras.forEach(camera => {
 
 // Handle selection
 cameraSelect.onchange = async () => {
-  await room.switchCamera(cameraSelect.value);
+  const publisher = room.localParticipant?.publisher;
+  if (publisher) {
+    await publisher.switchVideoDevice(cameraSelect.value);
+  }
 };
 ```
 
@@ -53,9 +85,10 @@ cameraSelect.onchange = async () => {
 
 ```typescript
 const { microphones } = await getDevices();
+const publisher = room.localParticipant?.publisher;
 
 // Switch to a specific microphone
-await room.switchMicrophone(microphones[1].deviceId);
+await publisher.switchAudioDevice(microphones[1].deviceId);
 ```
 
 ### Example: Microphone Selector UI
@@ -74,7 +107,10 @@ microphones.forEach(mic => {
 
 // Handle selection
 micSelect.onchange = async () => {
-  await room.switchMicrophone(micSelect.value);
+  const publisher = room.localParticipant?.publisher;
+  if (publisher) {
+    await publisher.switchAudioDevice(micSelect.value);
+  }
 };
 ```
 
@@ -92,15 +128,6 @@ navigator.mediaDevices.ondevicechange = async () => {
   // Update UI
   updateCameraDropdown(cameras);
   updateMicDropdown(microphones);
-  
-  // Check if current device was removed
-  const currentCamera = await room.getCurrentCameraId();
-  const cameraStillExists = cameras.some(c => c.deviceId === currentCamera);
-  
-  if (!cameraStillExists && cameras.length > 0) {
-    console.log('Current camera removed, switching to default');
-    await room.switchCamera(cameras[0].deviceId);
-  }
 };
 ```
 
@@ -120,7 +147,8 @@ async function switchToFrontCamera() {
   );
   
   if (frontCamera) {
-    await room.switchCamera(frontCamera.deviceId);
+    const publisher = room.localParticipant?.publisher;
+    await publisher?.switchVideoDevice(frontCamera.deviceId);
   }
 }
 
@@ -134,7 +162,8 @@ async function switchToBackCamera() {
   );
   
   if (backCamera) {
-    await room.switchCamera(backCamera.deviceId);
+    const publisher = room.localParticipant?.publisher;
+    await publisher?.switchVideoDevice(backCamera.deviceId);
   }
 }
 ```
@@ -154,7 +183,8 @@ const virtualCamera = cameras.find(c =>
 );
 
 if (virtualCamera) {
-  await room.switchCamera(virtualCamera.deviceId);
+  const publisher = room.localParticipant?.publisher;
+  await publisher?.switchVideoDevice(virtualCamera.deviceId);
 }
 ```
 
@@ -162,7 +192,8 @@ if (virtualCamera) {
 
 ```typescript
 try {
-  await room.switchCamera(deviceId);
+  const publisher = room.localParticipant?.publisher;
+  await publisher?.switchVideoDevice(deviceId);
 } catch (error) {
   if (error.name === 'NotFoundError') {
     console.error('Camera not found');

@@ -4,7 +4,7 @@
  */
 
 import type { Participant } from '../../cores/Participant';
-import { ParticipantPermissions } from '../media/publisher.types';
+import { ParticipantPermissions, PinType } from '../media/publisher.types';
 
 /**
  * Room type constants
@@ -103,6 +103,8 @@ export interface RoomInfo {
   subRoomCount: number;
   /** Pinned participant user ID */
   pinnedParticipant: string | null;
+  /** Pin type (User or ScreenShare) */
+  pinnedPinType: PinType | null;
 }
 
 /**
@@ -426,12 +428,14 @@ export interface RoomEventMap {
   participantPinnedForEveryone: {
     room: any;
     participant: Participant;
+    pinType: PinType;
   };
 
   /** Participant unpinned for everyone */
   participantUnpinnedForEveryone: {
     room: any;
     participant: Participant;
+    pinType: PinType;
   };
 
   /** Participant disconnected */

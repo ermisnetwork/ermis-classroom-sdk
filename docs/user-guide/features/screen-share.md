@@ -15,11 +15,11 @@ const screenStream = await navigator.mediaDevices.getDisplayMedia({
   audio: true, // Optional: capture system audio
 });
 
-// Start sharing
-await room.startShareScreen(screenStream);
+// Start sharing (SDK handles getDisplayMedia internally)
+await room.startScreenShare();
 
 // Stop sharing
-await room.stopShareScreen();
+await room.stopScreenShare();
 ```
 
 ## Options for getDisplayMedia
@@ -60,7 +60,7 @@ const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true 
 
 screenStream.getVideoTracks()[0].onended = () => {
   console.log('User stopped screen sharing');
-  room.stopShareScreen();
+  room.stopScreenShare();
 };
 ```
 
@@ -96,7 +96,7 @@ const isSupported = 'getDisplayMedia' in navigator.mediaDevices;
 document.getElementById('share-btn').onclick = async () => {
   try {
     const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-    await room.startShareScreen(stream);
+    await room.startScreenShare();
   } catch (err) {
     if (err.name === 'NotAllowedError') {
       console.log('User denied screen sharing');

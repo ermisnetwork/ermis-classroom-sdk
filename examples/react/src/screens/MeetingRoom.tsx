@@ -404,18 +404,27 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
   const localPinChangeTimeRef = useRef<number>(0)
   const prevRemotePinnedUserId = useRef<string | null>(null)
 
-  const remotePinnedUserId = currentRoom?.pinnedParticipant?.userId || null
+  // Get remote pin info - include pinType to determine if it's a screen share
+  const remotePinnedParticipant = currentRoom?.pinnedParticipant || null
+  const remotePinnedPinType = currentRoom?.pinnedPinType || null
+
+  // Generate the correct tile ID based on pinType
+  // pinType 2 = ScreenShare, so tile ID should be "screen-{userId}"
+  const remotePinnedTileId = remotePinnedParticipant
+    ? (remotePinnedPinType === 2 ? `screen-${remotePinnedParticipant.userId}` : remotePinnedParticipant.userId)
+    : null
 
   // Sync "everyone" pin state from server
   useEffect(() => {
     // Only act when remote actually changes
-    if (remotePinnedUserId === prevRemotePinnedUserId.current) {
+    if (remotePinnedTileId === prevRemotePinnedUserId.current) {
       return
     }
 
     log('[MeetingRoom] Remote pin changed:', {
       prev: prevRemotePinnedUserId.current,
-      current: remotePinnedUserId
+      current: remotePinnedTileId,
+      pinType: remotePinnedPinType
     })
 
     const timeSinceLocalChange = Date.now() - localPinChangeTimeRef.current
@@ -423,12 +432,12 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
 
     if (!isRecentLocalChange) {
       // We're a receiver, sync from remote
-      setEveryonePinnedUserId(remotePinnedUserId)
+      setEveryonePinnedUserId(remotePinnedTileId)
     }
 
     // Always update previous value
-    prevRemotePinnedUserId.current = remotePinnedUserId
-  }, [remotePinnedUserId])
+    prevRemotePinnedUserId.current = remotePinnedTileId
+  }, [remotePinnedTileId, remotePinnedPinType])
 
   // Determine which user should be focused (everyone pin takes priority)
   const focusedUserId = everyonePinnedUserId || localPinnedUserId
