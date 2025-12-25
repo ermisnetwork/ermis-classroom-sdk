@@ -142,6 +142,8 @@ export interface ErmisClassroomContextValue {
   currentRoom: Room | null;
   roomCode: string | undefined;
   userId: string | undefined;
+  /** Whether the current user is the room owner (host) */
+  isRoomOwner: boolean;
 
   // Participants
   participants: Map<string, Participant>;
@@ -169,6 +171,8 @@ export interface ErmisClassroomContextValue {
   authenticate: (userId: string) => Promise<void>;
   joinRoom: (code: string, customStream?: MediaStream) => Promise<void>;
   leaveRoom: () => Promise<void>;
+  /** End the meeting room (only available for room owner) */
+  endRoom: () => Promise<void>;
   toggleMicrophone: () => Promise<void>;
   toggleCamera: () => Promise<void>;
   toggleRaiseHand: () => Promise<void>;
@@ -184,5 +188,8 @@ export interface ErmisClassroomContextValue {
   // Sub-room actions
   createSubRoom: (config: any) => Promise<any>;
   closeSubRoom: () => Promise<void>;
+
+  /** Register callback for when room is ended by host */
+  onRoomEnded: (callback: () => void) => () => void;
 }
 

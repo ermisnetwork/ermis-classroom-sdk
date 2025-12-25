@@ -33,7 +33,7 @@ export class ErmisClient extends EventEmitter {
   private apiClient: any;
 
   // State management
-  private state: ClientState = {
+  private state: ClientState & { serviceToken?: string } = {
     user: null,
     isAuthenticated: false,
     currentRoom: null,
@@ -224,6 +224,7 @@ export class ErmisClient extends EventEmitter {
       // Get service token for admin operations (listRooms, createRoom)
       const serviceTokenResponse: TokenResponse = await this.apiClient.getDummyServiceToken(userId);
       this.apiClient.setServiceToken(serviceTokenResponse.access_token);
+      this.state.serviceToken = serviceTokenResponse.access_token; // Save for later restoration
 
       // Update state
       this.state.user = {
@@ -750,6 +751,10 @@ export class ErmisClient extends EventEmitter {
 
       if (this.state.isAuthenticated && this.state.user) {
         this.apiClient.setAuth(this.state.user.token, this.state.user.id);
+        // Also restore service token if available
+        if (this.state.serviceToken) {
+          this.apiClient.setServiceToken(this.state.serviceToken);
+        }
       }
     }
 
@@ -1031,6 +1036,7 @@ export class ErmisClient extends EventEmitter {
       'typingStopped',
       'creatingBreakoutRoom',
       'joiningBreakoutRoom',
+      'roomEnded',
       'error',
     ];
 

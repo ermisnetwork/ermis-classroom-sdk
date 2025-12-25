@@ -71,6 +71,7 @@ export function ErmisClassroomProvider({
   const clientRef = useRef<any>(null);
   const deviceManagerRef = useRef<MediaDeviceManager | null>(null);
   const unsubRef = useRef<(() => void)[]>([]);
+  const roomEndedCallbacksRef = useRef<Set<() => void>>(new Set());
 
   // Debounced update function to batch participant changes
   const scheduleParticipantsUpdate = useCallback(() => {
@@ -314,6 +315,33 @@ export function ErmisClassroomProvider({
       console.error(`SDK Error in ${data.action}:`, data.error?.message);
     });
 
+    // Room ended by host
+    on(events.ROOM_ENDED, () => {
+      log('[Provider] Room ended by host, cleaning up state');
+      setInRoom(false);
+      setCurrentRoom(null);
+      const emptyMap = new Map();
+      participantsRef.current = emptyMap;
+      setParticipants(emptyMap);
+      setRemoteStreams(new Map());
+      setScreenShareStreams(new Map());
+      setIsScreenSharing(false);
+      setMicEnabled(true);
+      setVideoEnabled(true);
+      setHandRaised(false);
+      setPinType(null);
+      setRoomCode(undefined);
+
+      // Call all registered callbacks
+      roomEndedCallbacksRef.current.forEach(callback => {
+        try {
+          callback();
+        } catch (e) {
+          console.error('[Provider] Error in roomEnded callback:', e);
+        }
+      });
+    });
+
     return unsubs;
   }, [scheduleParticipantsUpdate]);
 
@@ -474,6 +502,39 @@ export function ErmisClassroomProvider({
     setPinType(null);
     setRoomCode(undefined);
   }, [inRoom]);
+
+  const endRoom = useCallback(async () => {
+    const client = clientRef.current;
+    if (!client || !inRoom || !currentRoom) {
+      throw new Error('Not in a room');
+    }
+
+    // Check if user is the room owner
+    if (currentRoom.ownerId !== userId) {
+      throw new Error('Only the room owner can end the meeting');
+    }
+
+    try {
+      // Call API to end the room
+      await client.apiClient.endRoom({ room_id: currentRoom.id });
+
+      // Clean up local state like leaveRoom
+      setInRoom(false);
+      setCurrentRoom(null);
+      const emptyMap = new Map();
+      participantsRef.current = emptyMap;
+      setParticipants(emptyMap);
+      setRemoteStreams(new Map());
+      setMicEnabled(true);
+      setVideoEnabled(true);
+      setHandRaised(false);
+      setPinType(null);
+      setRoomCode(undefined);
+    } catch (error) {
+      console.error('Failed to end room:', error);
+      throw error;
+    }
+  }, [inRoom, currentRoom, userId]);
 
   const toggleMicrophone = useCallback(async () => {
     if (!userId) return;
@@ -735,6 +796,19 @@ export function ErmisClassroomProvider({
   }, [currentRoom]);
 
   // Context value
+  const isRoomOwner = useMemo(() => {
+    return !!(currentRoom && userId && currentRoom.ownerId === userId);
+  }, [currentRoom, userId]);
+
+  // Register callback for when room is ended by host
+  const onRoomEnded = useCallback((callback: () => void) => {
+    roomEndedCallbacksRef.current.add(callback);
+    // Return unsubscribe function
+    return () => {
+      roomEndedCallbacksRef.current.delete(callback);
+    };
+  }, []);
+
   const value: ErmisClassroomContextValue = useMemo(
     () => ({
       client: clientRef.current,
@@ -752,6 +826,8 @@ export function ErmisClassroomProvider({
       inRoom,
       videoEnabled,
       leaveRoom,
+      endRoom,
+      isRoomOwner,
       roomCode,
       userId,
       toggleMicrophone,
@@ -771,6 +847,7 @@ export function ErmisClassroomProvider({
       sendCustomEvent,
       createSubRoom,
       closeSubRoom,
+      onRoomEnded,
     }),
     [
       participants,
@@ -789,6 +866,8 @@ export function ErmisClassroomProvider({
       inRoom,
       videoEnabled,
       leaveRoom,
+      endRoom,
+      isRoomOwner,
       roomCode,
       userId,
       toggleMicrophone,
@@ -806,6 +885,7 @@ export function ErmisClassroomProvider({
       sendCustomEvent,
       createSubRoom,
       closeSubRoom,
+      onRoomEnded,
     ]
   );
 

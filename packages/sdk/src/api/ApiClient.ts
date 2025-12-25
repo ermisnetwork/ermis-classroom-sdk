@@ -7,14 +7,25 @@ import {
   CreateRoomResponse,
   CreateSubRoomRequest,
   CreateSubRoomResponse,
+  CustomEventRequest,
+  CustomEventResponse,
+  EndRoomRequest,
+  EndRoomResponse,
   ErmisClientConfig,
+  HealthCheckResponse,
   HttpMethod,
   JoinRoomResponse,
   JoinSubRoomRequest,
   LeaveSubRoomRequest,
+  ListParticipantsRequest,
+  ListParticipantsResponse,
   ListRoomsResponse,
+  RemoveParticipantResponse,
   RoomDetailsResponse,
-  RoomUpdateData, TokenResponse,
+  RoomUpdateData,
+  TokenResponse,
+  UpdateParticipantRequest,
+  UpdateParticipantResponse,
 } from '../types';
 
 /**
@@ -338,10 +349,10 @@ export class ApiClient {
   }
 
   /**
-   * Close sub room
+   * Close sub room (breakout rooms)
    */
   async closeSubRoom(mainRoomId: string): Promise<any> {
-    return await this.apiCall(`/rooms/${mainRoomId}/breakout/close`, 'POST');
+    return await this.apiCall(`/rooms/${mainRoomId}/breakout/close`, 'PUT');
   }
 
   /**
@@ -380,6 +391,58 @@ export class ApiClient {
    */
   async deleteRoom(roomId: string): Promise<any> {
     return await this.apiCall(`/rooms/${roomId}`, 'DELETE');
+  }
+
+  /**
+   * Send a custom event to a room
+   */
+  async sendCustomEvent(request: CustomEventRequest): Promise<CustomEventResponse> {
+    return await this.apiCall<CustomEventResponse>('/rooms/custom-event', 'POST', request);
+  }
+
+  /**
+   * End an ongoing meeting room (requires service token)
+   */
+  async endRoom(request: EndRoomRequest): Promise<EndRoomResponse> {
+    return await this.serviceApiCall<EndRoomResponse>('/rooms/end', 'PUT', request);
+  }
+
+  /**
+   * Update participant permissions or metadata (requires service token)
+   */
+  async updateParticipant(request: UpdateParticipantRequest): Promise<UpdateParticipantResponse> {
+    return await this.serviceApiCall<UpdateParticipantResponse>('/participants', 'PUT', request);
+  }
+
+  /**
+   * List all participants in a room (requires service token)
+   */
+  async listParticipants(request: ListParticipantsRequest): Promise<ListParticipantsResponse> {
+    return await this.serviceApiCall<ListParticipantsResponse>('/participants/list', 'POST', request);
+  }
+
+  /**
+   * Remove a participant from a room by stream ID (requires service token)
+   */
+  async removeParticipant(streamId: string): Promise<RemoveParticipantResponse> {
+    return await this.serviceApiCall<RemoveParticipantResponse>(`/participants/remove/${streamId}`, 'DELETE');
+  }
+
+  /**
+   * Check the operational status of the meeting service
+   * (No authentication required)
+   */
+  async healthCheck(): Promise<HealthCheckResponse> {
+    try {
+      const response = await fetch(`${this.apiBaseUrl}/health`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Health check failed:', error);
+      throw error;
+    }
   }
 }
 

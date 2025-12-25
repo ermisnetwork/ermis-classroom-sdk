@@ -288,7 +288,8 @@ export type ServerEventType =
   | 'join_sub_room'
   | 'leave_sub_room'
   | 'disconnected'
-  | 'reconnected';
+  | 'reconnected'
+  | 'room_ended';
 
 /**
  * Server event base

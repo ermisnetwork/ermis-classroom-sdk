@@ -259,6 +259,94 @@ export interface RoomUpdateData {
 }
 
 /**
+ * Update participant response
+ */
+export interface UpdateParticipantResponse {
+  /** Success status */
+  success: boolean;
+  /** Updated participant data */
+  participant?: ParticipantData;
+}
+
+/**
+ * List participants request
+ */
+export interface ListParticipantsRequest {
+  /** Room ID */
+  room_id: string;
+  /** Query parameters */
+  list_query?: ListQuery;
+}
+
+/**
+ * List participants response
+ */
+export interface ListParticipantsResponse {
+  /** Participants array */
+  data: ParticipantData[];
+  /** Total count */
+  total?: number;
+  /** Current page */
+  page?: number;
+  /** Per page count */
+  per_page?: number;
+}
+
+/**
+ * Remove participant response
+ */
+export interface RemoveParticipantResponse {
+  /** Success status */
+  success: boolean;
+  /** Message */
+  message?: string;
+}
+
+/**
+ * Custom event response
+ */
+export interface CustomEventResponse {
+  /** Success status */
+  success: boolean;
+  /** Message */
+  message?: string;
+}
+
+/**
+ * End room request
+ */
+export interface EndRoomRequest {
+  /** Room ID to end */
+  room_id: string;
+  /** Reason for ending (optional) */
+  reason?: string;
+}
+
+/**
+ * End room response
+ */
+export interface EndRoomResponse {
+  /** Success status */
+  success: boolean;
+  /** Message */
+  message?: string;
+}
+
+/**
+ * Health check response
+ */
+export interface HealthCheckResponse {
+  /** Service status */
+  status: 'healthy' | 'unhealthy' | 'degraded';
+  /** Timestamp */
+  timestamp?: string;
+  /** Version info */
+  version?: string;
+  /** Additional details */
+  details?: Record<string, any>;
+}
+
+/**
  * HTTP method types
  */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';

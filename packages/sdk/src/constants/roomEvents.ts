@@ -5,6 +5,7 @@ export const ROOM_EVENTS = {
   LEAVING: 'leaving',
   LEFT: 'left',
   ROOM_LEFT: 'roomLeft',
+  ROOM_ENDED: 'roomEnded',
   ERROR: 'error',
 
   // Participant events

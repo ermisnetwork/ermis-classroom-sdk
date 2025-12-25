@@ -10,7 +10,7 @@ import {
 } from "@ermisnetwork/ermis-classroom-react"
 import { Button } from "@/components/ui/button"
 import {
-  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers
+  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers, IconDoorExit, IconPlayerStop
 } from "@tabler/icons-react"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { cn } from "@/lib/utils"
@@ -384,9 +384,12 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     toggleRaiseHand,
     toggleScreenShare,
     leaveRoom,
+    endRoom,
+    isRoomOwner,
     userId,
     currentRoom,
     togglePin,
+    onRoomEnded,
   } = useErmisClassroom()
 
   const {
@@ -397,6 +400,14 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     selectMicrophone,
     selectCamera,
   } = useMediaDevices()
+
+  // Listen for room ended event to navigate back
+  useEffect(() => {
+    const unsubscribe = onRoomEnded(() => {
+      onLeft()
+    })
+    return unsubscribe
+  }, [onRoomEnded, onLeft])
 
   // Independent pin states
   const [localPinnedUserId, setLocalPinnedUserId] = useState<string | null>(null)
@@ -448,6 +459,15 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
       onLeft()
     } catch (err) {
       console.error("Failed to leave room:", err)
+    }
+  }
+
+  const handleEndMeeting = async () => {
+    try {
+      endRoom()
+      onLeft()
+    } catch (err) {
+      console.error("Failed to end meeting:", err)
     }
   }
 
@@ -758,15 +778,55 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
             {isScreenSharing ? <IconScreenShareOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconScreenShare className="h-4 w-4 sm:h-5 sm:w-5" />}
           </Button>
 
-          <Button
-            variant="destructive"
-            size="icon"
-            onClick={handleLeave}
-            className="h-10 w-10 sm:h-12 sm:w-12 rounded-full"
-            title="Leave meeting"
-          >
-            <IconPhoneOff className="h-4 w-4 sm:h-5 sm:w-5" />
-          </Button>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <Button
+                variant="destructive"
+                size="icon"
+                className="h-10 w-10 sm:h-12 sm:w-12 rounded-full"
+                title="Leave or End meeting"
+              >
+                <IconPhoneOff className="h-4 w-4 sm:h-5 sm:w-5" />
+              </Button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                className="min-w-[180px] bg-slate-800 rounded-lg p-1 shadow-lg border border-slate-600 z-50"
+                sideOffset={8}
+                side="top"
+              >
+                <DropdownMenu.Item
+                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                  onSelect={handleLeave}
+                >
+                  <IconDoorExit className="h-4 w-4 text-yellow-400" />
+                  Leave Meeting
+                </DropdownMenu.Item>
+
+                <DropdownMenu.Separator className="h-px bg-slate-600 my-1" />
+
+                <DropdownMenu.Item
+                  className={cn(
+                    "px-3 py-2 text-sm rounded flex items-center gap-2",
+                    isRoomOwner
+                      ? "text-white cursor-pointer outline-none hover:bg-red-600 focus:bg-red-600"
+                      : "text-slate-500 cursor-not-allowed"
+                  )}
+                  disabled={!isRoomOwner}
+                  onSelect={(e) => {
+                    if (!isRoomOwner) {
+                      e.preventDefault()
+                      return
+                    }
+                    handleEndMeeting()
+                  }}
+                >
+                  <IconPlayerStop className={cn("h-4 w-4", isRoomOwner ? "text-red-400" : "text-slate-500")} />
+                  End Meeting {!isRoomOwner && "(Host only)"}
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
         </div>
       </div>
     </div>

@@ -1449,7 +1449,20 @@ export class Room extends EventEmitter {
         });
       }
     }
-
+    if (event.type === "room_ended") {
+      log("[Room] Room ended by host, leaving room automatically");
+      // Emit event first so listeners can handle cleanup
+      this.emit("roomEnded", {
+        room: this,
+        reason: "host_ended",
+      });
+      // Auto leave the room
+      try {
+        await this.leave();
+      } catch (error) {
+        console.error("[Room] Error leaving room after room_ended:", error);
+      }
+    }
     // Handle custom events
     if ((event as any).type === "custom") {
       const customEvent = event as any;
