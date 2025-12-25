@@ -256,7 +256,7 @@ export class ApiClient {
         page,
         per_page: perPage,
         sort_by: 'created_at',
-        sort_order: 'Desc',
+        sort_order: 'desc',
       },
       conditions: {
         is_active: true,
