@@ -477,6 +477,215 @@ export class Room extends EventEmitter {
     }
   }
 
+  // ============================================
+  // HOST-ONLY METHODS
+  // ============================================
+
+  /**
+   * Check if current user is the room owner (host)
+   */
+  isHost(): boolean {
+    return this.localUserId === this.ownerId;
+  }
+
+  /**
+   * Update participant permissions (HOST ONLY)
+   * Used to mute mic, disable camera, etc.
+   * 
+   * @example
+   * // Mute mic
+   * room.updateParticipantPermission(streamId, { can_publish_sources: [["mic_48k", false]] })
+   * 
+   * // Disable camera
+   * room.updateParticipantPermission(streamId, { can_publish_sources: [["video_360p", false], ["video_720p", false]] })
+   * 
+   * // Mute mic + disable camera
+   * room.updateParticipantPermission(streamId, { 
+   *   can_publish_sources: [["mic_48k", false], ["video_360p", false], ["video_720p", false]] 
+   * })
+   * 
+   * // Re-enable mic + camera
+   * room.updateParticipantPermission(streamId, { 
+   *   can_publish_sources: [["mic_48k", true], ["video_360p", true], ["video_720p", true]] 
+   * })
+   */
+  async updateParticipantPermission(
+    streamId: string,
+    permissionChanged: {
+      can_subscribe?: boolean | null;
+      can_publish?: boolean | null;
+      can_publish_data?: boolean | null;
+      can_publish_sources?: Array<[string, boolean]> | null;
+      hidden?: boolean | null;
+      can_update_metadata?: boolean | null;
+    }
+  ): Promise<any> {
+    if (!this.isHost()) {
+      throw new Error("Only the room host can update participant permissions");
+    }
+
+    if (!this.isActive) {
+      throw new Error("Room is not active");
+    }
+
+    try {
+      log("[Room] Updating participant permission:", streamId, permissionChanged);
+
+      const response = await this.apiClient.updateParticipant({
+        room_id: this.id,
+        stream_id: streamId,
+        permission_changed: permissionChanged,
+      });
+
+      log("[Room] Participant permission updated successfully");
+      return response;
+    } catch (error) {
+      this.emit("error", {
+        room: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "updateParticipantPermission",
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch list of participants from server (HOST ONLY)
+   * Returns fresh participant data from API
+   */
+  async fetchParticipants(): Promise<any[]> {
+    if (!this.isHost()) {
+      throw new Error("Only the room host can fetch participants list");
+    }
+
+    if (!this.isActive) {
+      throw new Error("Room is not active");
+    }
+
+    try {
+      log("[Room] Fetching participants list for room:", this.id);
+
+      const response = await this.apiClient.listParticipants({
+        room_id: this.id,
+      });
+
+      log("[Room] Fetched participants:", response);
+      return response.data || response || [];
+    } catch (error) {
+      this.emit("error", {
+        room: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "fetchParticipants",
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Remove/Kick a participant from the room (HOST ONLY)
+   * 
+   * @param participantUserId - User ID of the participant to kick
+   */
+  async kickParticipant(participantUserId: string): Promise<any> {
+    if (!this.isHost()) {
+      throw new Error("Only the room host can kick participants");
+    }
+
+    if (!this.isActive) {
+      throw new Error("Room is not active");
+    }
+
+    // Find participant to get their stream ID
+    const participant = this.participants.get(participantUserId);
+    if (!participant) {
+      throw new Error(`Participant ${participantUserId} not found in room`);
+    }
+
+    if (participant.userId === this.ownerId) {
+      throw new Error("Cannot kick the room owner");
+    }
+
+    try {
+      log("[Room] Kicking participant:", participantUserId, "stream:", participant.streamId);
+
+      const response = await this.apiClient.removeParticipant(participant.streamId);
+
+      log("[Room] Participant kicked successfully");
+
+      // The participant will be removed when we receive the 'leave' event from server
+      // No need to manually remove here
+
+      return response;
+    } catch (error) {
+      this.emit("error", {
+        room: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "kickParticipant",
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Mute a participant's microphone (HOST ONLY)
+   * Convenience method for updateParticipantPermission
+   */
+  async muteParticipant(participantUserId: string): Promise<any> {
+    const participant = this.participants.get(participantUserId);
+    if (!participant) {
+      throw new Error(`Participant ${participantUserId} not found`);
+    }
+
+    return this.updateParticipantPermission(participant.streamId, {
+      can_publish_sources: [["mic_48k", false]],
+    });
+  }
+
+  /**
+   * Unmute a participant's microphone (HOST ONLY)
+   * Convenience method for updateParticipantPermission
+   */
+  async unmuteParticipant(participantUserId: string): Promise<any> {
+    const participant = this.participants.get(participantUserId);
+    if (!participant) {
+      throw new Error(`Participant ${participantUserId} not found`);
+    }
+
+    return this.updateParticipantPermission(participant.streamId, {
+      can_publish_sources: [["mic_48k", true]],
+    });
+  }
+
+  /**
+   * Disable a participant's camera (HOST ONLY)
+   * Convenience method for updateParticipantPermission
+   */
+  async disableParticipantCamera(participantUserId: string): Promise<any> {
+    const participant = this.participants.get(participantUserId);
+    if (!participant) {
+      throw new Error(`Participant ${participantUserId} not found`);
+    }
+
+    return this.updateParticipantPermission(participant.streamId, {
+      can_publish_sources: [["video_360p", false], ["video_720p", false]],
+    });
+  }
+
+  /**
+   * Enable a participant's camera (HOST ONLY)
+   * Convenience method for updateParticipantPermission
+   */
+  async enableParticipantCamera(participantUserId: string): Promise<any> {
+    const participant = this.participants.get(participantUserId);
+    if (!participant) {
+      throw new Error(`Participant ${participantUserId} not found`);
+    }
+
+    return this.updateParticipantPermission(participant.streamId, {
+      can_publish_sources: [["video_360p", true], ["video_720p", true]],
+    });
+  }
+
   /**
    * Send a chat message
    */
@@ -1463,6 +1672,25 @@ export class Room extends EventEmitter {
         console.error("[Room] Error leaving room after room_ended:", error);
       }
     }
+
+    if (event.type === "update_permission") {
+      const permissionEvent = event as any;
+      const participant = this.participants.get(permissionEvent.participant.user_id);
+      if (participant) {
+        const permissionChanged = permissionEvent.permission_changed;
+        log("[Room] Permission updated for:", permissionEvent.participant.user_id, permissionChanged);
+
+        // Update permissions on participant
+        participant.updatePermissions(permissionChanged);
+
+        this.emit("permissionUpdated", {
+          room: this,
+          participant,
+          permissionChanged,
+        });
+      }
+    }
+
     // Handle custom events
     if ((event as any).type === "custom") {
       const customEvent = event as any;

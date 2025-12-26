@@ -10,7 +10,7 @@ import {
 } from "@ermisnetwork/ermis-classroom-react"
 import { Button } from "@/components/ui/button"
 import {
-  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers, IconDoorExit, IconPlayerStop
+  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers, IconDoorExit, IconPlayerStop, IconUserMinus, IconBan
 } from "@tabler/icons-react"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { cn } from "@/lib/utils"
@@ -30,6 +30,13 @@ function CustomParticipantTile({
   onPinForEveryone,
   onUnpinForEveryone,
   canPin,
+  // Host action props
+  isHost,
+  onMuteParticipant,
+  onUnmuteParticipant,
+  onDisableCamera,
+  onEnableCamera,
+  onKickParticipant,
 }: {
   participant: ParticipantData
   size: { width: number; height: number }
@@ -40,6 +47,13 @@ function CustomParticipantTile({
   onPinForEveryone?: (id: string) => void
   onUnpinForEveryone?: (id: string) => void
   canPin: boolean
+  // Host action props
+  isHost?: boolean
+  onMuteParticipant?: (id: string) => void
+  onUnmuteParticipant?: (id: string) => void
+  onDisableCamera?: (id: string) => void
+  onEnableCamera?: (id: string) => void
+  onKickParticipant?: (id: string) => void
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
 
@@ -50,6 +64,7 @@ function CustomParticipantTile({
   }, [participant.stream])
 
   const isPinned = isPinnedLocal || isPinnedForEveryone
+  const showHostActions = isHost && !participant.isLocal
 
   return (
     <div
@@ -76,7 +91,7 @@ function CustomParticipantTile({
           </div>
         </div>
       )}
-      {canPin && (
+      {(canPin || showHostActions) && (
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
             <button
@@ -85,7 +100,7 @@ function CustomParticipantTile({
                 "bg-black/50 hover:bg-black/70",
                 isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"
               )}
-              title="Pin options"
+              title="Options"
               onClick={(e) => e.stopPropagation()}
             >
               {isPinned ? (
@@ -101,56 +116,133 @@ function CustomParticipantTile({
               sideOffset={5}
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Local Pin */}
-              {isPinnedLocal ? (
-                <DropdownMenu.Item
-                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
-                  onSelect={(e) => {
-                    e.preventDefault()
-                    onUnpinLocal?.(participant.id)
-                  }}
-                >
-                  <IconPinnedOff className="h-4 w-4 text-green-400" />
-                  Unpin for me
-                </DropdownMenu.Item>
-              ) : (
-                <DropdownMenu.Item
-                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
-                  onSelect={(e) => {
-                    e.preventDefault()
-                    onPinLocal?.(participant.id)
-                  }}
-                >
-                  <IconPin className="h-4 w-4 text-green-400" />
-                  Pin for me
-                </DropdownMenu.Item>
+              {canPin && (
+                <>
+                  {/* Local Pin */}
+                  {isPinnedLocal ? (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onUnpinLocal?.(participant.id)
+                      }}
+                    >
+                      <IconPinnedOff className="h-4 w-4 text-green-400" />
+                      Unpin for me
+                    </DropdownMenu.Item>
+                  ) : (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onPinLocal?.(participant.id)
+                      }}
+                    >
+                      <IconPin className="h-4 w-4 text-green-400" />
+                      Pin for me
+                    </DropdownMenu.Item>
+                  )}
+
+                  <DropdownMenu.Separator className="h-px bg-slate-600 my-1" />
+
+                  {/* Everyone Pin */}
+                  {isPinnedForEveryone ? (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onUnpinForEveryone?.(participant.id)
+                      }}
+                    >
+                      <IconPinnedOff className="h-4 w-4 text-blue-400" />
+                      Unpin for everyone
+                    </DropdownMenu.Item>
+                  ) : (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onPinForEveryone?.(participant.id)
+                      }}
+                    >
+                      <IconUsers className="h-4 w-4 text-blue-400" />
+                      Pin for everyone
+                    </DropdownMenu.Item>
+                  )}
+                </>
               )}
 
-              <DropdownMenu.Separator className="h-px bg-slate-600 my-1" />
+              {/* Host Actions */}
+              {showHostActions && (
+                <>
+                  {canPin && <DropdownMenu.Separator className="h-px bg-slate-600 my-1" />}
 
-              {/* Everyone Pin */}
-              {isPinnedForEveryone ? (
-                <DropdownMenu.Item
-                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
-                  onSelect={(e) => {
-                    e.preventDefault()
-                    onUnpinForEveryone?.(participant.id)
-                  }}
-                >
-                  <IconPinnedOff className="h-4 w-4 text-blue-400" />
-                  Unpin for everyone
-                </DropdownMenu.Item>
-              ) : (
-                <DropdownMenu.Item
-                  className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
-                  onSelect={(e) => {
-                    e.preventDefault()
-                    onPinForEveryone?.(participant.id)
-                  }}
-                >
-                  <IconUsers className="h-4 w-4 text-blue-400" />
-                  Pin for everyone
-                </DropdownMenu.Item>
+                  {/* Mute/Unmute */}
+                  {participant.isMuted ? (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onUnmuteParticipant?.(participant.id)
+                      }}
+                    >
+                      <IconMicrophone className="h-4 w-4 text-green-400" />
+                      Unmute participant
+                    </DropdownMenu.Item>
+                  ) : (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onMuteParticipant?.(participant.id)
+                      }}
+                    >
+                      <IconMicrophoneOff className="h-4 w-4 text-orange-400" />
+                      Mute participant
+                    </DropdownMenu.Item>
+                  )}
+
+                  {/* Disable/Enable Camera */}
+                  {participant.isVideoOff ? (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onEnableCamera?.(participant.id)
+                      }}
+                    >
+                      <IconVideo className="h-4 w-4 text-green-400" />
+                      Enable camera
+                    </DropdownMenu.Item>
+                  ) : (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onDisableCamera?.(participant.id)
+                      }}
+                    >
+                      <IconVideoOff className="h-4 w-4 text-orange-400" />
+                      Disable camera
+                    </DropdownMenu.Item>
+                  )}
+
+                  <DropdownMenu.Separator className="h-px bg-slate-600 my-1" />
+
+                  {/* Kick */}
+                  <DropdownMenu.Item
+                    className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-red-600 focus:bg-red-600 flex items-center gap-2"
+                    onSelect={(e) => {
+                      e.preventDefault()
+                      if (confirm(`Kick ${participant.name} from the meeting?`)) {
+                        onKickParticipant?.(participant.id)
+                      }
+                    }}
+                  >
+                    <IconUserMinus className="h-4 w-4 text-red-400" />
+                    Kick from meeting
+                  </DropdownMenu.Item>
+                </>
               )}
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
@@ -177,9 +269,19 @@ function CustomParticipantTile({
                 <IconHandStop className="h-3 w-3 text-white" />
               </div>
             )}
-            {participant.isMuted && (
-              <div className="p-1 rounded bg-red-500">
+            {/* Show ban indicator or mute indicator */}
+            {participant.isMicBanned ? (
+              <div className="p-1 rounded bg-red-700 ring-1 ring-red-400" title="Mic banned by host">
+                <IconBan className="h-3 w-3 text-white" />
+              </div>
+            ) : participant.isMuted && (
+              <div className="p-1 rounded bg-red-500" title="Muted">
                 <IconMicrophoneOff className="h-3 w-3 text-white" />
+              </div>
+            )}
+            {participant.isCameraBanned && (
+              <div className="p-1 rounded bg-red-700 ring-1 ring-red-400" title="Camera banned by host">
+                <IconVideoOff className="h-3 w-3 text-white" />
               </div>
             )}
           </div>
@@ -390,6 +492,12 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     currentRoom,
     togglePin,
     onRoomEnded,
+    // Host actions
+    muteParticipant,
+    unmuteParticipant,
+    disableParticipantCamera,
+    enableParticipantCamera,
+    kickParticipant,
   } = useErmisClassroom()
 
   const {
@@ -408,6 +516,15 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     })
     return unsubscribe
   }, [onRoomEnded, onLeft])
+
+  // Get local participant ban status
+  const localParticipant = useMemo(() => {
+    if (!userId) return null
+    return participants.get(userId) || null
+  }, [participants, userId])
+
+  const isMicBanned = localParticipant?.isMicBanned ?? false
+  const isCameraBanned = localParticipant?.isCameraBanned ?? false
 
   // Independent pin states
   const [localPinnedUserId, setLocalPinnedUserId] = useState<string | null>(null)
@@ -564,6 +681,8 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
           isVideoOff: !participant.isVideoEnabled,
           isHandRaised: participant.isHandRaised,
           isPinned: false, // Will be calculated in render
+          isMicBanned: participant.isMicBanned,
+          isCameraBanned: participant.isCameraBanned,
         })
       })
 
@@ -613,9 +732,16 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         onPinForEveryone={handlePinForEveryone}
         onUnpinForEveryone={handleUnpinForEveryone}
         canPin={canPin}
+        // Host actions
+        isHost={isRoomOwner}
+        onMuteParticipant={muteParticipant}
+        onUnmuteParticipant={unmuteParticipant}
+        onDisableCamera={disableParticipantCamera}
+        onEnableCamera={enableParticipantCamera}
+        onKickParticipant={kickParticipant}
       />
     ),
-    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId]
+    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId, isRoomOwner, muteParticipant, unmuteParticipant, disableParticipantCamera, enableParticipantCamera, kickParticipant]
   )
 
   const renderScreenShare = useCallback(
@@ -703,13 +829,23 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
             <Button
-              variant={micEnabled ? "secondary" : "destructive"}
+              variant={isMicBanned ? "destructive" : micEnabled ? "secondary" : "destructive"}
               size="icon"
-              onClick={toggleMicrophone}
-              className="h-10 w-10 sm:h-12 sm:w-12 rounded-full"
-              title={micEnabled ? "Mute microphone" : "Unmute microphone"}
+              onClick={isMicBanned ? undefined : toggleMicrophone}
+              disabled={isMicBanned}
+              className={cn(
+                "h-10 w-10 sm:h-12 sm:w-12 rounded-full",
+                isMicBanned && "opacity-70 cursor-not-allowed ring-2 ring-red-400"
+              )}
+              title={isMicBanned ? "Mic banned by host" : micEnabled ? "Mute microphone" : "Unmute microphone"}
             >
-              {micEnabled ? <IconMicrophone className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconMicrophoneOff className="h-4 w-4 sm:h-5 sm:w-5" />}
+              {isMicBanned ? (
+                <IconBan className="h-4 w-4 sm:h-5 sm:w-5" />
+              ) : micEnabled ? (
+                <IconMicrophone className="h-4 w-4 sm:h-5 sm:w-5" />
+              ) : (
+                <IconMicrophoneOff className="h-4 w-4 sm:h-5 sm:w-5" />
+              )}
             </Button>
           </div>
 
@@ -748,13 +884,23 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
             <Button
-              variant={videoEnabled ? "secondary" : "destructive"}
+              variant={isCameraBanned ? "destructive" : videoEnabled ? "secondary" : "destructive"}
               size="icon"
-              onClick={toggleCamera}
-              className="h-10 w-10 sm:h-12 sm:w-12 rounded-full"
-              title={videoEnabled ? "Turn off camera" : "Turn on camera"}
+              onClick={isCameraBanned ? undefined : toggleCamera}
+              disabled={isCameraBanned}
+              className={cn(
+                "h-10 w-10 sm:h-12 sm:w-12 rounded-full",
+                isCameraBanned && "opacity-70 cursor-not-allowed ring-2 ring-red-400"
+              )}
+              title={isCameraBanned ? "Camera banned by host" : videoEnabled ? "Turn off camera" : "Turn on camera"}
             >
-              {videoEnabled ? <IconVideo className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconVideoOff className="h-4 w-4 sm:h-5 sm:w-5" />}
+              {isCameraBanned ? (
+                <IconBan className="h-4 w-4 sm:h-5 sm:w-5" />
+              ) : videoEnabled ? (
+                <IconVideo className="h-4 w-4 sm:h-5 sm:w-5" />
+              ) : (
+                <IconVideoOff className="h-4 w-4 sm:h-5 sm:w-5" />
+              )}
             </Button>
           </div>
 

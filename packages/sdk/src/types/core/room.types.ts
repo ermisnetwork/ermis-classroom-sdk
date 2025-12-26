@@ -289,7 +289,33 @@ export type ServerEventType =
   | 'leave_sub_room'
   | 'disconnected'
   | 'reconnected'
-  | 'room_ended';
+  | 'room_ended'
+  | 'update_permission';
+
+/**
+ * Media channel types (matching server MediaChannel enum)
+ */
+export type MediaChannel =
+  | 'meeting_control'
+  | 'video_360p'
+  | 'video_720p'
+  | 'screen_share_720p'
+  | 'screen_share_1080p'
+  | 'mic_48k'
+  | 'screen_share_audio';
+
+/**
+ * Permission changed data from server
+ */
+export interface PermissionChangedData {
+  can_subscribe?: boolean;
+  can_publish?: boolean;
+  can_publish_data?: boolean;
+  can_publish_sources?: Array<[MediaChannel, boolean]>;
+  hidden?: boolean;
+  can_update_metadata?: boolean;
+  can_subscribe_metrics?: boolean;
+}
 
 /**
  * Server event base
@@ -327,11 +353,23 @@ export interface LeaveEvent extends ServerEventBase {
 }
 
 /**
+ * Update permission event
+ */
+export interface UpdatePermissionEvent extends ServerEventBase {
+  type: 'update_permission';
+  participant: {
+    user_id: string;
+    stream_id?: string;
+  };
+  permission_changed: PermissionChangedData;
+}
+
+/**
  * Server event union type
  * Only includes events from ServerMeetingEvent (Rust server)
  * Note: Chat/message events are handled separately via API/WebSocket
  */
-export type ServerEvent = JoinEvent | LeaveEvent | ServerEventBase;
+export type ServerEvent = JoinEvent | LeaveEvent | UpdatePermissionEvent | ServerEventBase;
 
 /**
  * Chat message event (handled separately, not part of ServerMeetingEvent)
@@ -630,5 +668,18 @@ export interface RoomEventMap {
     error: Error;
     action: string;
     err?: Error;
+  };
+
+  /** Room ended by host */
+  roomEnded: {
+    room: any;
+    reason: string;
+  };
+
+  /** Participant permission updated */
+  permissionUpdated: {
+    room: any;
+    participant: Participant;
+    permissionChanged: PermissionChangedData;
   };
 }

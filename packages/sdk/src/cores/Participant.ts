@@ -13,7 +13,7 @@ import type {
 } from "../types/core/participant.types";
 import type { Publisher } from "../media/publisher/Publisher";
 import type { Subscriber } from "../media/subscriber/Subscriber";
-import { ParticipantPermissions, PinType } from "../types/media/publisher.types";
+import { ChannelName, ParticipantPermissions, PinType } from "../types/media/publisher.types";
 
 export class Participant extends EventEmitter {
   // Identity
@@ -482,6 +482,70 @@ export class Participant extends EventEmitter {
     this.emit("remoteHandRaisingStatusChanged", {
       participant: this,
       enabled: this.isHandRaised,
+    });
+  }
+
+  /**
+   * Check if mic is banned by host
+   */
+  get isMicBanned(): boolean {
+    if (!this.permissions.can_publish_sources) return false;
+    for (const [channel, allowed] of this.permissions.can_publish_sources) {
+      if (channel === "mic_48k" && allowed === false) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Check if camera is banned by host
+   */
+  get isCameraBanned(): boolean {
+    if (!this.permissions.can_publish_sources) return false;
+    for (const [channel, allowed] of this.permissions.can_publish_sources) {
+      if ((channel === "video_360p" || channel === "video_720p") && allowed === false) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Update permissions from server update_permission event
+   */
+  updatePermissions(permissionChanged: {
+    can_subscribe?: boolean;
+    can_publish?: boolean;
+    can_publish_data?: boolean;
+    can_publish_sources?: Array<[string, boolean]>;
+    hidden?: boolean;
+    can_update_metadata?: boolean;
+  }): void {
+    if (permissionChanged.can_subscribe !== undefined) {
+      this.permissions.can_subscribe = permissionChanged.can_subscribe;
+    }
+    if (permissionChanged.can_publish !== undefined) {
+      this.permissions.can_publish = permissionChanged.can_publish;
+    }
+    if (permissionChanged.can_publish_data !== undefined) {
+      this.permissions.can_publish_data = permissionChanged.can_publish_data;
+    }
+    if (permissionChanged.can_publish_sources !== undefined) {
+      this.permissions.can_publish_sources = permissionChanged.can_publish_sources as Array<[ChannelName, boolean]>;
+    }
+    if (permissionChanged.hidden !== undefined) {
+      this.permissions.hidden = permissionChanged.hidden;
+    }
+    if (permissionChanged.can_update_metadata !== undefined) {
+      this.permissions.can_update_metadata = permissionChanged.can_update_metadata;
+    }
+
+    this.emit("permissionUpdated", {
+      participant: this,
+      permissions: this.permissions,
+      isMicBanned: this.isMicBanned,
+      isCameraBanned: this.isCameraBanned,
     });
   }
 

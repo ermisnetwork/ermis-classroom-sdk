@@ -191,5 +191,19 @@ export interface ErmisClassroomContextValue {
 
   /** Register callback for when room is ended by host */
   onRoomEnded: (callback: () => void) => () => void;
+
+  // Host-only actions
+  /** Mute a participant's microphone (HOST ONLY) */
+  muteParticipant: (participantUserId: string) => Promise<void>;
+  /** Unmute a participant's microphone (HOST ONLY) */
+  unmuteParticipant: (participantUserId: string) => Promise<void>;
+  /** Disable a participant's camera (HOST ONLY) */
+  disableParticipantCamera: (participantUserId: string) => Promise<void>;
+  /** Enable a participant's camera (HOST ONLY) */
+  enableParticipantCamera: (participantUserId: string) => Promise<void>;
+  /** Kick a participant from the room (HOST ONLY) */
+  kickParticipant: (participantUserId: string) => Promise<void>;
+  /** Fetch participants list from server (HOST ONLY) */
+  fetchParticipants: () => Promise<any[]>;
 }
 

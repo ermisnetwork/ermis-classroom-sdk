@@ -16,6 +16,7 @@ export const ROOM_EVENTS = {
   PARTICIPANT_ERROR: 'participantError',
   PARTICIPANT_DISCONNECTED: 'participantDisconnected',
   PARTICIPANT_RECONNECTED: 'participantReconnected',
+  PERMISSION_UPDATED: 'permissionUpdated',
 
   // Media status events
   LOCAL_STREAM_READY: 'localStreamReady',

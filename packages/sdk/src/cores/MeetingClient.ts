@@ -1037,6 +1037,7 @@ export class ErmisClient extends EventEmitter {
       'creatingBreakoutRoom',
       'joiningBreakoutRoom',
       'roomEnded',
+      'permissionUpdated',
       'error',
     ];
 

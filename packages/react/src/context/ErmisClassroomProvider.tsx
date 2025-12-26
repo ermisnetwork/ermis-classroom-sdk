@@ -342,6 +342,16 @@ export function ErmisClassroomProvider({
       });
     });
 
+    // Permission updated
+    on(events.PERMISSION_UPDATED, (data: any) => {
+      log('[Provider] Permission updated for participant:', data.participant?.userId);
+      const p = participantsRef.current.get(data.participant?.userId);
+      if (p) {
+        // Trigger a re-render by updating participants map
+        scheduleParticipantsUpdate();
+      }
+    });
+
     return unsubs;
   }, [scheduleParticipantsUpdate]);
 
@@ -809,6 +819,40 @@ export function ErmisClassroomProvider({
     };
   }, []);
 
+  // ============================================
+  // HOST-ONLY ACTIONS
+  // ============================================
+
+  const muteParticipant = useCallback(async (participantUserId: string) => {
+    if (!currentRoom) throw new Error('Not in a room');
+    await currentRoom.muteParticipant(participantUserId);
+  }, [currentRoom]);
+
+  const unmuteParticipant = useCallback(async (participantUserId: string) => {
+    if (!currentRoom) throw new Error('Not in a room');
+    await currentRoom.unmuteParticipant(participantUserId);
+  }, [currentRoom]);
+
+  const disableParticipantCamera = useCallback(async (participantUserId: string) => {
+    if (!currentRoom) throw new Error('Not in a room');
+    await currentRoom.disableParticipantCamera(participantUserId);
+  }, [currentRoom]);
+
+  const enableParticipantCamera = useCallback(async (participantUserId: string) => {
+    if (!currentRoom) throw new Error('Not in a room');
+    await currentRoom.enableParticipantCamera(participantUserId);
+  }, [currentRoom]);
+
+  const kickParticipant = useCallback(async (participantUserId: string) => {
+    if (!currentRoom) throw new Error('Not in a room');
+    await currentRoom.kickParticipant(participantUserId);
+  }, [currentRoom]);
+
+  const fetchParticipants = useCallback(async () => {
+    if (!currentRoom) throw new Error('Not in a room');
+    return await currentRoom.fetchParticipants();
+  }, [currentRoom]);
+
   const value: ErmisClassroomContextValue = useMemo(
     () => ({
       client: clientRef.current,
@@ -848,6 +892,13 @@ export function ErmisClassroomProvider({
       createSubRoom,
       closeSubRoom,
       onRoomEnded,
+      // Host-only actions
+      muteParticipant,
+      unmuteParticipant,
+      disableParticipantCamera,
+      enableParticipantCamera,
+      kickParticipant,
+      fetchParticipants,
     }),
     [
       participants,
@@ -886,6 +937,12 @@ export function ErmisClassroomProvider({
       createSubRoom,
       closeSubRoom,
       onRoomEnded,
+      muteParticipant,
+      unmuteParticipant,
+      disableParticipantCamera,
+      enableParticipantCamera,
+      kickParticipant,
+      fetchParticipants,
     ]
   );
 
