@@ -69,7 +69,7 @@ export async function initAudioRecorder(audioStream, options = {}) {
     numberOfChannels: configNumberOfChannels,
     // numberOfChannels: 2,
     encoderSampleRate: 48000,
-    encoderBitRate: 32000,
+    encoderBitRate: 64000,
     encoderApplication: 2051, // 2048=Voice, 2049=Audio, 2051=Low Delay
     encoderComplexity: 0,
     encoderFrameSize: 20,

@@ -636,6 +636,39 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         id: 0,
         negotiated: true,
       });
+
+
+      rtc.oniceconnectionstatechange = () => {
+        console.log(`[ICE] State: ${rtc.iceConnectionState}`);
+
+        if (rtc.iceConnectionState === 'failed' ||
+          rtc.iceConnectionState === 'disconnected') {
+          console.error('ICE connection lost!');
+        }
+      };
+
+
+      dataChannel.onerror = (error) => {
+        console.error(`[Subscriber] Data channel ${mediaChannel} error:`, error);
+        console.error(`[Subscriber] Closed: ${mediaChannel}`, {
+          readyState: dataChannel.readyState,
+          iceConnectionState: rtc.iceConnectionState,
+          connectionState: rtc.connectionState,
+          bufferedAmount: dataChannel.bufferedAmount,
+        });
+      };
+
+      dataChannel.onclose = () => {
+        console.log(`[Subscriber] Data channel ${mediaChannel} closed`);
+        console.error(`[Subscriber] Closed: ${mediaChannel}`, {
+          readyState: dataChannel.readyState,
+          iceConnectionState: rtc.iceConnectionState,
+          connectionState: rtc.connectionState,
+          bufferedAmount: dataChannel.bufferedAmount,
+        });
+      };
+
+
       console.log(`Data channel created for ${mediaChannel}, id:`, dataChannel.id);
       this.workerManager.attachDataChannel(mediaChannel, dataChannel);
 

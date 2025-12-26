@@ -92,10 +92,12 @@ export class AudioEncoderManager extends EventEmitter<{
         encoderFrameSize: 20, // 20ms frames
         timeSlice: 100, // Send data every 100ms
         numberOfChannels: AUDIO_CONFIG.CHANNEL_COUNT,
+        encoderBitrate: AUDIO_CONFIG.BITRATE,
       };
 
       log(
-        `[AudioEncoder] Initializing recorder for ${this.channelName}`,
+        `[AudioEncoder] Initializing recorder for ${this.channelName}, options:`,
+        audioRecorderOptions,
       );
 
       if (!this.initAudioRecorder || typeof this.initAudioRecorder !== 'function') {
@@ -140,7 +142,8 @@ export class AudioEncoderManager extends EventEmitter<{
     try {
       // CRITICAL: Must pass timeSlice to emit ondataavailable every 100ms
       // Without this, the recorder may only emit data at the end or stop after 2 chunks
-      this.audioRecorder.start({ timeSlice: 100 });
+      // this.audioRecorder.start({ timeSlice: 100 });
+      this.audioRecorder.start();
 
       // Reset timing
       this.baseTime = 0;
@@ -195,7 +198,7 @@ export class AudioEncoderManager extends EventEmitter<{
    */
   private handleAudioData(typedArray: Uint8Array): void {
     // Debug: log every call to handleAudioData
-    // log(`[AudioEncoder] handleAudioData called for ${this.channelName}, size: ${typedArray?.byteLength || 0}, chunk#: ${this.chunkCount + 1}`);
+    // console.log(`[AudioEncoder] handleAudioData called for ${this.channelName}, size: ${typedArray?.byteLength || 0}, chunk#: ${this.chunkCount + 1}`);
 
     if (!typedArray || typedArray.byteLength === 0) {
       console.warn(`[AudioEncoder] Empty data received for ${this.channelName}`);
