@@ -1,4 +1,4 @@
 export const AppConfig = {
-  apiHosts: ['daibo.ermis.network:9935', 'daibo.ermis.network:9936'],
-  nodes: ['daibo.ermis.network:9995', 'admin.bandia.vn:9995', 'admin.bandia.vn:9996'],
+  apiHosts: ['ubuntu-server.trungdt.xyz:9937', 'daibo.ermis.network:9935', 'daibo.ermis.network:9936'],
+  nodes: ['ubuntu-server.trungdt.xyz:9900', 'ubuntu-server.trungdt.xyz:9901', 'daibo.ermis.network:9995', 'admin.bandia.vn:9995', 'admin.bandia.vn:9996'],
 }
