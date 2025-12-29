@@ -513,6 +513,8 @@ export class Participant extends EventEmitter {
 
   /**
    * Update permissions from server update_permission event
+   * NOTE: can_publish_sources is MERGED, not overwritten, to preserve existing bans
+   * This is because server sends only the changed permissions, not the full list
    */
   updatePermissions(permissionChanged: {
     can_subscribe?: boolean;
@@ -532,7 +534,19 @@ export class Participant extends EventEmitter {
       this.permissions.can_publish_data = permissionChanged.can_publish_data;
     }
     if (permissionChanged.can_publish_sources !== undefined) {
-      this.permissions.can_publish_sources = permissionChanged.can_publish_sources as Array<[ChannelName, boolean]>;
+      // MERGE instead of overwrite: update existing sources or add new ones
+      // This ensures that banning mic and then banning camera preserves both ban states
+      const existingSourcesMap = new Map<string, boolean>(
+        this.permissions.can_publish_sources || []
+      );
+
+      // Apply changes from server
+      for (const [channel, allowed] of permissionChanged.can_publish_sources) {
+        existingSourcesMap.set(channel, allowed);
+      }
+
+      // Convert back to array format
+      this.permissions.can_publish_sources = Array.from(existingSourcesMap.entries()) as Array<[ChannelName, boolean]>;
     }
     if (permissionChanged.hidden !== undefined) {
       this.permissions.hidden = permissionChanged.hidden;

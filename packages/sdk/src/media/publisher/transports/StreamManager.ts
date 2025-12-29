@@ -853,10 +853,11 @@ export class StreamManager extends EventEmitter<{
         await this.sendViaWebTransport(streamData, packet);
       }
     } catch (error) {
-      console.error(
-        `[StreamManager] Error sending packet on ${channelName}:`,
-        error,
-      );
+      // ? thêm log cho trường hợp ban
+      // console.error(
+      //   `[StreamManager] Error sending packet on ${channelName}:`,
+      //   error,
+      // );
       this.emit("sendError", { channelName, error });
       throw error;
     }

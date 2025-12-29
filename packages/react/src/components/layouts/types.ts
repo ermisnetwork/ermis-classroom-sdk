@@ -32,6 +32,10 @@ export interface TileData {
   isVideoOff?: boolean;
   isHandRaised?: boolean;
   isPinned?: boolean;
+  /** Mic banned by host */
+  isMicBanned?: boolean;
+  /** Camera banned by host */
+  isCameraBanned?: boolean;
 }
 
 export interface GridLayoutInfo {

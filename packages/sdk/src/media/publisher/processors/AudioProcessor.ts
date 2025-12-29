@@ -134,7 +134,8 @@ export class AudioProcessor extends EventEmitter<{
           byteLength: data.data.length,
         });
       } catch (error) {
-        console.error("[AudioProcessor] Error sending chunk:", error);
+        // ? add exception handling for microphone banned
+        // console.error("[AudioProcessor] Error sending chunk:", error);
         this.emit("chunkError", { channelName: this.channelName, error });
       }
     });

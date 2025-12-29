@@ -177,8 +177,8 @@ function CustomParticipantTile({
                 <>
                   {canPin && <DropdownMenu.Separator className="h-px bg-slate-600 my-1" />}
 
-                  {/* Mute/Unmute */}
-                  {participant.isMuted ? (
+                  {/* Mute/Unmute - Use isMicBanned to check host ban status */}
+                  {participant.isMicBanned ? (
                     <DropdownMenu.Item
                       className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
                       onSelect={(e) => {
@@ -202,8 +202,8 @@ function CustomParticipantTile({
                     </DropdownMenu.Item>
                   )}
 
-                  {/* Disable/Enable Camera */}
-                  {participant.isVideoOff ? (
+                  {/* Disable/Enable Camera - Use isCameraBanned to check host ban status */}
+                  {participant.isCameraBanned ? (
                     <DropdownMenu.Item
                       className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
                       onSelect={(e) => {

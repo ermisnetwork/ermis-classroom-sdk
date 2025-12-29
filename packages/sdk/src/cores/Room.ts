@@ -538,6 +538,54 @@ export class Room extends EventEmitter {
       });
 
       log("[Room] Participant permission updated successfully");
+
+      // Also update local state immediately for host's UI
+      // Find participant by streamId and update their permissions
+      for (const participant of this.participants.values()) {
+        if (participant.streamId === streamId) {
+          // Convert null values to proper format for updatePermissions
+          const cleanPermission: {
+            can_subscribe?: boolean;
+            can_publish?: boolean;
+            can_publish_data?: boolean;
+            can_publish_sources?: Array<[string, boolean]>;
+            hidden?: boolean;
+            can_update_metadata?: boolean;
+          } = {};
+
+          if (permissionChanged.can_subscribe !== undefined && permissionChanged.can_subscribe !== null) {
+            cleanPermission.can_subscribe = permissionChanged.can_subscribe;
+          }
+          if (permissionChanged.can_publish !== undefined && permissionChanged.can_publish !== null) {
+            cleanPermission.can_publish = permissionChanged.can_publish;
+          }
+          if (permissionChanged.can_publish_data !== undefined && permissionChanged.can_publish_data !== null) {
+            cleanPermission.can_publish_data = permissionChanged.can_publish_data;
+          }
+          if (permissionChanged.can_publish_sources !== undefined && permissionChanged.can_publish_sources !== null) {
+            cleanPermission.can_publish_sources = permissionChanged.can_publish_sources;
+          }
+          if (permissionChanged.hidden !== undefined && permissionChanged.hidden !== null) {
+            cleanPermission.hidden = permissionChanged.hidden;
+          }
+          if (permissionChanged.can_update_metadata !== undefined && permissionChanged.can_update_metadata !== null) {
+            cleanPermission.can_update_metadata = permissionChanged.can_update_metadata;
+          }
+
+          participant.updatePermissions(cleanPermission);
+
+          // Emit event so React components can update
+          this.emit("permissionUpdated", {
+            room: this,
+            participant,
+            permissionChanged: cleanPermission,
+            isMicBanned: participant.isMicBanned,
+            isCameraBanned: participant.isCameraBanned,
+          });
+          break;
+        }
+      }
+
       return response;
     } catch (error) {
       this.emit("error", {
@@ -1675,19 +1723,32 @@ export class Room extends EventEmitter {
 
     if (event.type === "update_permission") {
       const permissionEvent = event as any;
+      log("[Room] 📥 Received update_permission event:", JSON.stringify(permissionEvent, null, 2));
+      log("[Room] Looking for participant with user_id:", permissionEvent.participant?.user_id);
+      log("[Room] Current participants:", Array.from(this.participants.keys()));
+
       const participant = this.participants.get(permissionEvent.participant.user_id);
       if (participant) {
         const permissionChanged = permissionEvent.permission_changed;
-        log("[Room] Permission updated for:", permissionEvent.participant.user_id, permissionChanged);
+        log("[Room] ✅ Found participant, updating permissions:", permissionEvent.participant.user_id, permissionChanged);
+        log("[Room] Participant permissions BEFORE:", JSON.stringify(participant.permissions, null, 2));
 
         // Update permissions on participant
         participant.updatePermissions(permissionChanged);
+
+        log("[Room] Participant permissions AFTER:", JSON.stringify(participant.permissions, null, 2));
+        log("[Room] isMicBanned:", participant.isMicBanned, "isCameraBanned:", participant.isCameraBanned);
 
         this.emit("permissionUpdated", {
           room: this,
           participant,
           permissionChanged,
+          isMicBanned: participant.isMicBanned,
+          isCameraBanned: participant.isCameraBanned,
         });
+        log("[Room] ✅ Emitted permissionUpdated event");
+      } else {
+        log("[Room] ❌ Participant not found for update_permission event:", permissionEvent.participant?.user_id);
       }
     }
 

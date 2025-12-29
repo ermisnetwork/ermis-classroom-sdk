@@ -373,12 +373,12 @@ export class VideoProcessor extends EventEmitter<{
       }
 
       // Debug: log sending video chunk for screen share
-   // todo: implement logic send stream per GOP
-  //  if (chunk.type === "key") {
-  //   await this.streamManager.beginGopWith(channelName, chunk);
-  //  } else {
-  //   await this.streamManager.sendFrame(channelName, chunk);
-  //  }
+      // todo: implement logic send stream per GOP
+      //  if (chunk.type === "key") {
+      //   await this.streamManager.beginGopWith(channelName, chunk);
+      //  } else {
+      //   await this.streamManager.sendFrame(channelName, chunk);
+      //  }
 
       // Send video chunk
       await this.streamManager.sendVideoChunk(channelName, chunk, metadata);
@@ -390,7 +390,8 @@ export class VideoProcessor extends EventEmitter<{
         byteLength: chunk.byteLength,
       });
     } catch (error) {
-      console.error("[VideoProcessor] Error handling chunk:", error);
+      // ? add exception handling for camera banned
+      // console.error("[VideoProcessor] Error handling chunk:", error);
       this.emit("chunkError", { channelName, error });
     }
   }
