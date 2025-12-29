@@ -1116,6 +1116,19 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
+   * Reset configSent flag for a channel
+   * Used when reconnecting streams after unban for WebRTC
+   * This allows resending config without closing the data channel
+   */
+  resetConfigSent(channelName: ChannelName): void {
+    const streamData = this.streams.get(channelName);
+    if (streamData) {
+      streamData.configSent = false;
+      log(`[StreamManager] Config reset for ${channelName}`);
+    }
+  }
+
+  /**
    * Close specific stream
    */
   async closeStream(channelName: ChannelName): Promise<void> {

@@ -772,25 +772,41 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     try {
       log("[Publisher] 🔄 Reconnecting streams for channels:", channelNames);
 
-      // IMPORTANT: When unbanned, we need to close existing streams first because
-      // the server has already closed them with STOP_SENDING. The stream exists
-      // on client side but is no longer valid.
-      for (const channelName of channelNames) {
-        if (this.streamManager.isStreamReady(channelName)) {
-          log(`[Publisher] Closing old stream ${channelName} before reconnecting...`);
-          await this.streamManager.closeStream(channelName);
-        }
-      }
-
-      log("[Publisher] Channels to reconnect:", channelNames);
-
       if (this.options.useWebRTC) {
-        // WebRTC: reconnect via WebRTCManager
-        if (this.webRtcManager) {
-          await this.webRtcManager.connectMultipleChannels(channelNames, this.streamManager);
-          log("[Publisher] ✅ WebRTC channels reconnected");
+        // WebRTC: DON'T close data channels - server interprets channel close as participant leaving
+        // Instead, check if channels are still open and just reset config state
+        const channelsToRecreate: ChannelName[] = [];
+
+        for (const channelName of channelNames) {
+          const stream = this.streamManager.getStream(channelName);
+          if (stream?.dataChannel?.readyState === 'open') {
+            // Data channel is still open - just reset config and resend
+            log(`[Publisher] WebRTC channel ${channelName} is still open, resetting config only`);
+            this.streamManager.resetConfigSent(channelName);
+          } else {
+            // Data channel is closed/errored - need to recreate
+            log(`[Publisher] WebRTC channel ${channelName} needs full reconnection`);
+            channelsToRecreate.push(channelName);
+          }
+        }
+
+        // Only recreate channels that need it
+        if (channelsToRecreate.length > 0 && this.webRtcManager) {
+          log("[Publisher] Recreating WebRTC channels:", channelsToRecreate);
+          await this.webRtcManager.connectMultipleChannels(channelsToRecreate, this.streamManager);
+          log("[Publisher] ✅ WebRTC channels recreated");
         }
       } else {
+        // WebTransport: Close and recreate streams (server handles this correctly)
+        for (const channelName of channelNames) {
+          if (this.streamManager.isStreamReady(channelName)) {
+            log(`[Publisher] Closing old stream ${channelName} before reconnecting...`);
+            await this.streamManager.closeStream(channelName);
+          }
+        }
+
+        log("[Publisher] Channels to reconnect:", channelNames);
+
         // WebTransport: reconnect via WebTransportManager
         if (this.webTransportManager) {
           const webTransport = this.webTransportManager.getTransport();
