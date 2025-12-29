@@ -754,6 +754,118 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     await this.streamManager.sendEvent(eventData);
   }
 
+  /**
+   * Reconnect streams for channels that were unbanned
+   * Called when local participant receives update_permission event with allowed: true
+   * 
+   * When banned, server sends STOP_SENDING to close the stream but the stream still exists
+   * on client side. We need to close the old stream and create a new one.
+   * 
+   * @param channelNames - Array of channel names to reconnect (e.g., ["mic_48k", "video_360p", "video_720p"])
+   */
+  async reconnectStreams(channelNames: ChannelName[]): Promise<void> {
+    if (!this.isPublishing || !this.streamManager) {
+      log("[Publisher] Cannot reconnect streams - not publishing or no stream manager");
+      return;
+    }
+
+    try {
+      log("[Publisher] 🔄 Reconnecting streams for channels:", channelNames);
+
+      // IMPORTANT: When unbanned, we need to close existing streams first because
+      // the server has already closed them with STOP_SENDING. The stream exists
+      // on client side but is no longer valid.
+      for (const channelName of channelNames) {
+        if (this.streamManager.isStreamReady(channelName)) {
+          log(`[Publisher] Closing old stream ${channelName} before reconnecting...`);
+          await this.streamManager.closeStream(channelName);
+        }
+      }
+
+      log("[Publisher] Channels to reconnect:", channelNames);
+
+      if (this.options.useWebRTC) {
+        // WebRTC: reconnect via WebRTCManager
+        if (this.webRtcManager) {
+          await this.webRtcManager.connectMultipleChannels(channelNames, this.streamManager);
+          log("[Publisher] ✅ WebRTC channels reconnected");
+        }
+      } else {
+        // WebTransport: reconnect via WebTransportManager
+        if (this.webTransportManager) {
+          const webTransport = this.webTransportManager.getTransport();
+          if (webTransport) {
+            await this.streamManager.initWebTransportStreams(webTransport, channelNames);
+            log("[Publisher] ✅ WebTransport streams reconnected");
+          } else {
+            // WebTransport connection lost, need full reconnect
+            log("[Publisher] ⚠️ WebTransport connection lost, attempting full reconnect...");
+            await this.webTransportManager.close();
+            const newWebTransport = await this.webTransportManager.connect();
+            await this.streamManager.initWebTransportStreams(newWebTransport, channelNames);
+            log("[Publisher] ✅ WebTransport fully reconnected");
+          }
+        }
+      }
+
+      // Resend config for reconnected channels
+      // Audio config
+      if (channelNames.includes(ChannelName.MICROPHONE) && this.audioProcessor && this.audioEncoderManager) {
+        log("[Publisher] Resending audio config...");
+        // Manually resend saved audio config
+        await this.audioProcessor.resendConfig();
+      }
+
+      // Video config - resend saved config directly
+      const videoChannels = channelNames.filter(
+        (ch: ChannelName) => ch === ChannelName.VIDEO_360P || ch === ChannelName.VIDEO_720P
+      );
+      if (videoChannels.length > 0 && this.videoProcessor) {
+        log("[Publisher] Video channels reconnected, resending config...");
+        // Resend saved config and request keyframe
+        await this.videoProcessor.requestKeyframe();
+      }
+
+      this.updateStatus("Streams reconnected");
+    } catch (error) {
+      console.error("[Publisher] Failed to reconnect streams:", error);
+      this.updateStatus("Failed to reconnect streams", true);
+      throw error;
+    }
+  }
+
+  /**
+   * Update permissions and reconnect streams if needed
+   * Called when local participant's permissions change
+   * 
+   * @param permissionChanged - Changed permissions from server
+   */
+  async handlePermissionChange(permissionChanged: {
+    can_publish_sources?: Array<[string, boolean]>;
+  }): Promise<void> {
+    if (!permissionChanged.can_publish_sources) {
+      return;
+    }
+
+    // Find channels that were just unbanned (changed from false to true)
+    const channelsToReconnect: ChannelName[] = [];
+
+    for (const [channel, allowed] of permissionChanged.can_publish_sources) {
+      if (allowed) {
+        // Channel was unbanned, need to reconnect
+        channelsToReconnect.push(channel as ChannelName);
+        log(`[Publisher] Channel ${channel} was unbanned, will reconnect`);
+      } else {
+        log(`[Publisher] Channel ${channel} was banned`);
+        // Note: We don't need to do anything when banned - server will reject packets
+      }
+    }
+
+    if (channelsToReconnect.length > 0) {
+      await this.reconnectStreams(channelsToReconnect);
+    }
+  }
+
   // ========== Screen Sharing Methods ==========
 
   private screenStream: MediaStream | null = null;

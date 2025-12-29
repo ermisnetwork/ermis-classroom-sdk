@@ -555,4 +555,48 @@ export class VideoProcessor extends EventEmitter<{
   getSubStreams(): SubStream[] {
     return this.subStreams;
   }
+
+  /**
+   * Request keyframe from all encoders and resend config
+   * Used when reconnecting streams after unban
+   */
+  async requestKeyframe(): Promise<void> {
+    log("[VideoProcessor] Requesting keyframe and resending config for all encoders");
+
+    // Resend saved config for each encoder
+    for (const subStream of this.subStreams) {
+      try {
+        const savedConfig = this.videoEncoderManager.getSavedDecoderConfig(subStream.name);
+
+        if (savedConfig) {
+          log(`[VideoProcessor] Resending saved config for ${subStream.channelName}`);
+
+          // Send config to server
+          await this.streamManager.sendConfig(
+            subStream.channelName,
+            {
+              codec: savedConfig.codec,
+              codedWidth: savedConfig.codedWidth!,
+              codedHeight: savedConfig.codedHeight!,
+              frameRate: subStream.framerate || 30,
+              quality: subStream.bitrate || 800_000,
+              description: savedConfig.description,
+            },
+            "video",
+          );
+
+          log(`[VideoProcessor] ✅ Config resent for ${subStream.channelName}`);
+        } else {
+          log(`[VideoProcessor] ⚠️ No saved config for ${subStream.name}, will wait for encoder`);
+          // Reset metadata so it will be captured from next keyframe
+          this.videoEncoderManager.resetMetadata(subStream.name);
+        }
+
+        // Request keyframe from encoder
+        this.videoEncoderManager.requestKeyframe(subStream.name);
+      } catch (error) {
+        console.error(`[VideoProcessor] Failed to resend config for ${subStream.name}:`, error);
+      }
+    }
+  }
 }

@@ -147,7 +147,52 @@ export class AudioProcessor extends EventEmitter<{
   }
 
   /**
+   * Resend audio configuration from saved state
+   * Used when reconnecting streams after unban
+   */
+  async resendConfig(): Promise<void> {
+    const savedConfig = this.audioEncoderManager.getConfig();
+    if (!savedConfig) {
+      log(`[AudioProcessor] ⚠️ No saved config for ${this.channelName}, valid config will be captured from next chunks`);
+      return;
+    }
+
+    log(`[AudioProcessor] Resending saved audio config for ${this.channelName}...`);
+
+    // Copy config to avoid modifying original
+    const configToSend = { ...savedConfig };
+
+    // Process description if needed (add packet header)
+    // Process description if needed (add packet header)
+    if (configToSend.description && configToSend.description instanceof Uint8Array) {
+      // Always wrap the raw OggS header in an Ermis packet, matching setupEncoderHandlers logic
+      const packetWithHeader = this.streamManager.createAudioConfigPacket(
+        this.channelName,
+        configToSend.description,
+      );
+      configToSend.description = packetWithHeader;
+    }
+
+    // Send config to server
+    await this.streamManager.sendConfig(
+      this.channelName,
+      {
+        codec: configToSend.codec!,
+        sampleRate: configToSend.sampleRate,
+        numberOfChannels: configToSend.numberOfChannels,
+        ...(configToSend.description && { description: configToSend.description }),
+      },
+      "audio"
+    );
+
+    this.audioEncoderManager.setConfigSent();
+    log(`[AudioProcessor] ✅ Audio config resent for ${this.channelName}`);
+  }
+
+  /**
    * Initialize audio processing
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
    *
    * @param audioStream - MediaStream containing audio track
    */

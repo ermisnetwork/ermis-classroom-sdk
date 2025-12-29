@@ -1739,6 +1739,46 @@ export class Room extends EventEmitter {
         log("[Room] Participant permissions AFTER:", JSON.stringify(participant.permissions, null, 2));
         log("[Room] isMicBanned:", participant.isMicBanned, "isCameraBanned:", participant.isCameraBanned);
 
+        // Check if any channel was unbanned (allowed: true)
+        const unbannedChannels: string[] = [];
+        if (permissionChanged.can_publish_sources) {
+          for (const [channel, allowed] of permissionChanged.can_publish_sources) {
+            if (allowed === true) {
+              unbannedChannels.push(channel);
+            }
+          }
+        }
+
+        // If this is the local participant and they were unbanned, reconnect publisher streams
+        if (participant === this.localParticipant && participant.publisher) {
+          log("[Room] 🔄 Local participant permission changed, checking if streams need reconnection...");
+          try {
+            // handlePermissionChange will check which channels were unbanned and reconnect them
+            await participant.publisher.handlePermissionChange(permissionChanged);
+          } catch (error) {
+            console.error("[Room] Failed to handle permission change for local participant:", error);
+          }
+        }
+
+        // If this is a remote participant and they were unbanned, reconnect their subscriber
+        if (participant !== this.localParticipant && unbannedChannels.length > 0 && participant.subscriber) {
+          log("[Room] 🔄 Remote participant was unbanned, reconnecting subscriber...", participant.userId, unbannedChannels);
+          try {
+            // Stop old subscriber (this also calls cleanup internally)
+            participant.subscriber.stop();
+            participant.setSubscriber(null as any);
+
+            // Wait a bit for cleanup
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // Recreate subscriber
+            await this._setupRemoteSubscriber(participant);
+            log("[Room] ✅ Subscriber reconnected for remote participant:", participant.userId);
+          } catch (error) {
+            console.error("[Room] Failed to reconnect subscriber for remote participant:", error);
+          }
+        }
+
         this.emit("permissionUpdated", {
           room: this,
           participant,

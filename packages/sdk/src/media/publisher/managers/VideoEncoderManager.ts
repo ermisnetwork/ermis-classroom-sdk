@@ -244,6 +244,42 @@ export class VideoEncoderManager extends EventEmitter<{
   }
 
   /**
+   * Reset encoder metadata flag to force resend config
+   * Called when streams are reconnected after unban
+   *
+   * @param name - Encoder name
+   */
+  resetMetadata(name: string): void {
+    const encoderObj = this.encoders.get(name);
+    if (encoderObj) {
+      encoderObj.metadataReady = false;
+      log(`[VideoEncoder] Metadata reset for ${name}, config will be resent`);
+    }
+  }
+
+  /**
+   * Reset metadata for all encoders
+   * Called when streams are reconnected after unban
+   */
+  resetAllMetadata(): void {
+    for (const [name, encoderObj] of this.encoders) {
+      encoderObj.metadataReady = false;
+      log(`[VideoEncoder] Metadata reset for ${name}`);
+    }
+  }
+
+  /**
+   * Get saved decoder config for an encoder
+   * Used to resend config after stream reconnection
+   *
+   * @param name - Encoder name
+   * @returns Saved decoder config or null
+   */
+  getSavedDecoderConfig(name: string): VideoDecoderConfig | null {
+    return this.encoders.get(name)?.videoDecoderConfig ?? null;
+  }
+
+  /**
    * Get encoder by name
    *
    * @param name - Encoder name
@@ -430,5 +466,24 @@ export class VideoEncoderManager extends EventEmitter<{
     return Array.from(this.encoders.values()).some(
       (obj) => obj.encoder.encodeQueueSize > 0,
     );
+  }
+
+  /**
+   * Request a keyframe from a specific encoder
+   * Forces the next encoded frame to be a keyframe
+   *
+   * @param name - Encoder name
+   */
+  requestKeyframe(name: string): void {
+    const encoderObj = this.encoders.get(name);
+    if (!encoderObj) {
+      console.warn(`[VideoEncoder] Encoder ${name} not found for keyframe request`);
+      return;
+    }
+
+    // Set frameCounter to make next frame a keyframe
+    // By setting it to keyframeInterval - 1, the next encodeFrame will produce a keyframe
+    this.frameCounter = this.keyframeInterval - 1;
+    log(`[VideoEncoder] Keyframe requested for ${name}, next frame will be keyframe`);
   }
 }
