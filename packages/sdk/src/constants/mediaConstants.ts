@@ -33,7 +33,7 @@ export const DATA_CHANNEL_IDS: Record<ChannelName, number> = {
 export const MEDIA_CONSTRAINTS = {
   AUDIO: {
     SAMPLE_RATE: 48000,
-    CHANNEL_COUNT: 1,
+    CHANNEL_COUNT: 2,
     ECHO_CANCELLATION: true,
     NOISE_SUPPRESSION: true,
   },
@@ -85,4 +85,5 @@ export const AUDIO_CONFIG = {
   SAMPLE_RATE: 48000,
   CHANNEL_COUNT: 1,
   OPUS_SAMPLES_PER_CHUNK: 960, // 20ms at 48kHz
+  BITRATE: 64000,
 } as const;

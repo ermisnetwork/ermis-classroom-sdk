@@ -92,6 +92,7 @@ export class AudioEncoderManager extends EventEmitter<{
         encoderFrameSize: 20, // 20ms frames
         timeSlice: 100, // Send data every 100ms
         numberOfChannels: AUDIO_CONFIG.CHANNEL_COUNT,
+        encoderBitrate: AUDIO_CONFIG.BITRATE,
       };
 
       if (!this.initAudioRecorder || typeof this.initAudioRecorder !== 'function') {
@@ -133,7 +134,7 @@ export class AudioEncoderManager extends EventEmitter<{
     try {
       // CRITICAL: Must pass timeSlice to emit ondataavailable every 100ms
       // Without this, the recorder may only emit data at the end or stop after 2 chunks
-      this.audioRecorder.start({ timeSlice: 100 });
+      this.audioRecorder.start();
 
       // Reset timing
       this.baseTime = 0;

@@ -72,10 +72,17 @@ const createVideoInit = (channelName) => ({
 const audioInit = {
   output: (audioData) => {
     const channelData = [];
-    for (let i = 0; i < audioData.numberOfChannels; i++) {
-      const channel = new Float32Array(audioData.numberOfFrames);
-      audioData.copyTo(channel, { planeIndex: i });
-      channelData.push(channel);
+    if (audioData.numberOfChannels === 1) {
+      const monoChannel = new Float32Array(audioData.numberOfFrames);
+      audioData.copyTo(monoChannel, { planeIndex: 0 });
+      channelData.push(monoChannel);
+      channelData.push(new Float32Array(monoChannel));
+    } else {
+      for (let i = 0; i < audioData.numberOfChannels; i++) {
+        const channel = new Float32Array(audioData.numberOfFrames);
+        audioData.copyTo(channel, { planeIndex: i });
+        channelData.push(channel);
+      }
     }
 
     if (workletPort) {
