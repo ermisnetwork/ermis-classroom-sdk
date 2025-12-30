@@ -154,7 +154,7 @@ export class CommandSender {
     // Determine quality based on subscriber type
     const initQuality = subscriberType === 'screen_share'
       ? ChannelName.SCREEN_SHARE_720P
-      : ChannelName.VIDEO_720P;
+      : ChannelName.VIDEO_360P;
 
     // Use options directly - dynamically determined based on publisher's screen share audio
     const audioEnabled = options.audio !== undefined ? options.audio : true;

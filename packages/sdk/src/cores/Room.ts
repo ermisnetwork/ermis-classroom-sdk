@@ -1363,12 +1363,21 @@ export class Room extends EventEmitter {
 
     const publishUrl = `${this.mediaConfig.webtpUrl}/publish/${this.id}/${this.streamId}`;
 
+    // Determine hasCamera and hasMic based on the provided mediaStream
+    // If no stream provided, both are false (permission denied or no devices)
+    const hasCamera = mediaStream ? mediaStream.getVideoTracks().length > 0 : false;
+    const hasMic = mediaStream ? mediaStream.getAudioTracks().length > 0 : false;
+
+    log("[Room] Setting up local publisher with hasCamera:", hasCamera, "hasMic:", hasMic);
+
     const publisher = new Publisher({
       publishUrl,
       streamType: "camera",
       streamId: this.streamId,
       userId: this.localParticipant.userId,
       mediaStream: mediaStream,
+      hasCamera,  // Pass to Publisher so it knows device availability
+      hasMic,     // Pass to Publisher so it knows device availability
       width: 1280,
       height: 720,
       framerate: 30,

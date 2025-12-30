@@ -178,7 +178,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       this.hasVideo = videoTracks.length > 0;
       this.hasAudio = audioTracks.length > 0;
-
+      log("[Publisher] hasVideo: ", this.hasVideo);
+      log("[Publisher] hasAudio: ", this.hasAudio);
       // Check initial track enabled state from the stream
       // If track exists but is disabled, set our state accordingly
       if (this.hasVideo) {
@@ -282,7 +283,13 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
         stream = displayStream;
       } else {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        // Handle case when both mic and camera are unavailable
+        if (!constraints.video && !constraints.audio) {
+          log("[Publisher] No mic and no camera available, creating empty MediaStream");
+          stream = new MediaStream();
+        } else {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+        }
       }
     }
 
@@ -342,13 +349,26 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     });
 
     // StreamManager now emits to globalEventBus directly - no need to re-emit
-    const channelNames: ChannelName[] = [
-      ...this.subStreams.map(s => s.channelName as ChannelName),
-    ];
+    // Filter channels based on actual device availability
+    const channelNames: ChannelName[] = this.subStreams
+      .map(s => s.channelName as ChannelName)
+      .filter(channelName => {
+        // MEETING_CONTROL is always required
+        if (channelName === ChannelName.MEETING_CONTROL) return true;
+        // MICROPHONE only if we have audio
+        if (channelName === ChannelName.MICROPHONE) return this.hasAudio;
+        // Video channels only if we have video
+        if (channelName === ChannelName.VIDEO_360P || channelName === ChannelName.VIDEO_720P) return this.hasVideo;
+        // Allow other channels by default
+        return true;
+      });
 
-    // if (this.hasAudio) {
-    //   channelNames.push(ChannelName.MICROPHONE);
-    // }
+    log("[Publisher] WebTransport channels to initialize (filtered by device availability):", channelNames);
+
+    // Only initialize if there are channels (at minimum MEETING_CONTROL)
+    if (channelNames.length === 0) {
+      throw new Error("No channels available - at least MEETING_CONTROL should be present");
+    }
 
     await this.streamManager.initWebTransportStreams(webTransport, channelNames);
 
@@ -387,10 +407,26 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     // Set WebRTC manager reference for screen share support
     this.streamManager.setWebRTCManager(this.webRtcManager);
 
-    // Get all channel names from subStreams (already includes MEETING_CONTROL, MIC_AUDIO, and video channels)
-    const channelNames: ChannelName[] = this.subStreams.map(s => s.channelName as ChannelName);
+    // Get channel names from subStreams, filtered by actual device availability
+    const channelNames: ChannelName[] = this.subStreams
+      .map(s => s.channelName as ChannelName)
+      .filter(channelName => {
+        // MEETING_CONTROL is always required
+        if (channelName === ChannelName.MEETING_CONTROL) return true;
+        // MICROPHONE only if we have audio
+        if (channelName === ChannelName.MICROPHONE) return this.hasAudio;
+        // Video channels only if we have video
+        if (channelName === ChannelName.VIDEO_360P || channelName === ChannelName.VIDEO_720P) return this.hasVideo;
+        // Allow other channels by default
+        return true;
+      });
 
-    log("[Publisher] Setting up WebRTC for channels:", channelNames);
+    log("[Publisher] Setting up WebRTC for channels (filtered by device availability):", channelNames);
+
+    // Only initialize if there are channels (at minimum MEETING_CONTROL)
+    if (channelNames.length === 0) {
+      throw new Error("No channels available - at least MEETING_CONTROL should be present");
+    }
 
     // Connect all channels (WebRTCManager handles creating multiple peer connections)
     await this.webRtcManager.connectMultipleChannels(channelNames, this.streamManager);
@@ -950,11 +986,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       // Send event with has_audio so subscribers know whether to subscribe to audio
       console.warn(`[Publisher] Sending START_SCREEN_SHARE event with has_audio: ${hasAudio}`);
-      await this.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE, {
-        has_audio: hasAudio,
-      });
 
-      this.updateStatus(`Screen sharing started (Video: ${hasVideo}, Audio: ${hasAudio})`);
 
       // Create video-only stream for UI (similar to localStreamReady)
       const videoOnlyStream = new MediaStream();
@@ -977,7 +1009,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         hasAudio,
         hasVideo,
       };
-
+      log("[Publisher] Screen share data: ", screenShareData);
       // Emit to global event bus
       globalEventBus.emit(GlobalEvents.LOCAL_SCREEN_SHARE_READY, screenShareData);
 
@@ -987,6 +1019,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         hasVideo,
         hasAudio,
       });
+      await this.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE, {
+        has_audio: hasAudio,
+      });
+      this.updateStatus(`Screen sharing started (Video: ${hasVideo}, Audio: ${hasAudio})`);
 
     } catch (error) {
       this.updateStatus(`Failed to start screen sharing: ${error}`, true);
