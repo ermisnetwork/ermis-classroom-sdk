@@ -541,9 +541,11 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         await this.attachWebSocketConnection();
       } else if (this.protocol === "webrtc") {
         if (this.subscribeType === "camera") {
+          // todo: init subscribe with 360 quality, can switch to 720p later on demand 
        this.attachDataChannel(ChannelName.VIDEO_360P);
        this.attachDataChannel(ChannelName.MICROPHONE);} 
        else if (this.subscribeType === "screen_share") {
+        // todo: this is example, attach datachannel depending on publisher status, may be include both screen share audio!!!
         this.attachDataChannel(ChannelName.SCREEN_SHARE_720P);
        }
        
@@ -555,17 +557,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     }
   }
 
-  // async createWrtcDataChannel(channelName: any, webRtcConnection: RTCPeerConnection): Promise<RTCDataChannel> {
-  //   const id = getDataChannelId(channelName);
 
-  //   const dataChannel = webRtcConnection.createDataChannel(channelName, {
-  //     ordered: false,
-  //     id,
-  //     negotiated: true,
-  //   });
-
-  //   return dataChannel;
-  // }
 
   /**
    * Attach WebTransport streams to worker
@@ -621,6 +613,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   /**
    * Attach data channel via WebRTC to worker
    */
+
+  // todo: implement retry logic when channel closed from server side
   async attachDataChannel(mediaChannel: ChannelName): Promise<{
     rtc: RTCPeerConnection;
     dataChannel: RTCDataChannel;
