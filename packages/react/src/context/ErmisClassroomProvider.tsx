@@ -848,6 +848,16 @@ export function ErmisClassroomProvider({
     await currentRoom.kickParticipant(participantUserId);
   }, [currentRoom]);
 
+  const enableParticipantScreenShare = useCallback(async (participantUserId: string) => {
+    if (!currentRoom) throw new Error('Not in a room');
+    await currentRoom.enableParticipantScreenShare(participantUserId);
+  }, [currentRoom]);
+
+  const disableParticipantScreenShare = useCallback(async (participantUserId: string) => {
+    if (!currentRoom) throw new Error('Not in a room');
+    await currentRoom.disableParticipantScreenShare(participantUserId);
+  }, [currentRoom]);
+
   const fetchParticipants = useCallback(async () => {
     if (!currentRoom) throw new Error('Not in a room');
     return await currentRoom.fetchParticipants();
@@ -899,6 +909,8 @@ export function ErmisClassroomProvider({
       enableParticipantCamera,
       kickParticipant,
       fetchParticipants,
+      enableParticipantScreenShare,
+      disableParticipantScreenShare,
     }),
     [
       participants,
@@ -943,6 +955,8 @@ export function ErmisClassroomProvider({
       enableParticipantCamera,
       kickParticipant,
       fetchParticipants,
+      enableParticipantScreenShare,
+      disableParticipantScreenShare,
     ]
   );
 

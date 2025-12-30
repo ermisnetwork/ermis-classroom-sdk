@@ -512,6 +512,19 @@ export class Participant extends EventEmitter {
   }
 
   /**
+   * Check if screen share is banned by host
+   */
+  get isScreenShareBanned(): boolean {
+    if (!this.permissions.can_publish_sources) return false;
+    for (const [channel, allowed] of this.permissions.can_publish_sources) {
+      if ((channel === "screen_share_720p" || channel === "screen_share_1080p" || channel === "screen_share_audio") && allowed === false) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Update permissions from server update_permission event
    * NOTE: can_publish_sources is MERGED, not overwritten, to preserve existing bans
    * This is because server sends only the changed permissions, not the full list
@@ -560,6 +573,7 @@ export class Participant extends EventEmitter {
       permissions: this.permissions,
       isMicBanned: this.isMicBanned,
       isCameraBanned: this.isCameraBanned,
+      isScreenShareBanned: this.isScreenShareBanned,
     });
   }
 

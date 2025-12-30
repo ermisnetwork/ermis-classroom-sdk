@@ -36,6 +36,8 @@ function CustomParticipantTile({
   onUnmuteParticipant,
   onDisableCamera,
   onEnableCamera,
+  onDisableScreenShare,
+  onEnableScreenShare,
   onKickParticipant,
 }: {
   participant: ParticipantData
@@ -53,6 +55,8 @@ function CustomParticipantTile({
   onUnmuteParticipant?: (id: string) => void
   onDisableCamera?: (id: string) => void
   onEnableCamera?: (id: string) => void
+  onDisableScreenShare?: (id: string) => void
+  onEnableScreenShare?: (id: string) => void
   onKickParticipant?: (id: string) => void
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -224,6 +228,31 @@ function CustomParticipantTile({
                     >
                       <IconVideoOff className="h-4 w-4 text-orange-400" />
                       Disable camera
+                    </DropdownMenu.Item>
+                  )}
+
+                  {/* Disable/Enable Screen Share - Use isScreenShareBanned to check host ban status */}
+                  {participant.isScreenShareBanned ? (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onEnableScreenShare?.(participant.id)
+                      }}
+                    >
+                      <IconScreenShare className="h-4 w-4 text-green-400" />
+                      Enable screen share
+                    </DropdownMenu.Item>
+                  ) : (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onDisableScreenShare?.(participant.id)
+                      }}
+                    >
+                      <IconScreenShareOff className="h-4 w-4 text-orange-400" />
+                      Disable screen share
                     </DropdownMenu.Item>
                   )}
 
@@ -497,6 +526,8 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     unmuteParticipant,
     disableParticipantCamera,
     enableParticipantCamera,
+    disableParticipantScreenShare,
+    enableParticipantScreenShare,
     kickParticipant,
   } = useErmisClassroom()
 
@@ -525,6 +556,126 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
 
   const isMicBanned = localParticipant?.isMicBanned ?? false
   const isCameraBanned = localParticipant?.isCameraBanned ?? false
+
+  // Screen share permission states
+  const [screenShareApproved, setScreenShareApproved] = useState(false)
+  const [pendingScreenShareRequest, setPendingScreenShareRequest] = useState(false)
+  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null)
+  const [incomingPermissionRequest, setIncomingPermissionRequest] = useState<{
+    requestId: string
+    participantAuthId: string
+    permissionType: string
+    reason: string
+  } | null>(null)
+
+  // Helper function to generate request ID
+  const generateRequestId = () => `req_${Math.random().toString(36).substring(2, 12)}`
+
+  // Listen for custom events (permission requests/approvals)
+  useEffect(() => {
+    if (!currentRoom) return
+
+    const unsubscribe = currentRoom.onCustomEvent((event: any) => {
+      const eventData = event?.value || event
+
+      log('[MeetingRoom] Received custom event:', eventData)
+
+      // Host receives permission request
+      if (eventData?.type === 'permission_request' && isRoomOwner) {
+        if (eventData.permissionType === 'screenShare') {
+          setIncomingPermissionRequest({
+            requestId: eventData.requestId,
+            participantAuthId: eventData.participantAuthId,
+            permissionType: eventData.permissionType,
+            reason: eventData.reason,
+          })
+        }
+      }
+
+      // Member receives approval
+      if (eventData?.type === 'permission_approved' && !isRoomOwner) {
+        if (eventData.permissionType === 'screenShare' && eventData.requestId === pendingRequestId) {
+          setScreenShareApproved(true)
+          setPendingScreenShareRequest(false)
+          setPendingRequestId(null)
+          log('[MeetingRoom] Screen share permission approved!')
+        }
+      }
+    })
+
+    return () => { unsubscribe() }
+  }, [currentRoom, isRoomOwner, pendingRequestId])
+
+  // Handle screen share button click
+  const handleScreenShareClick = useCallback(async () => {
+    // If currently sharing, just toggle off
+    if (isScreenSharing) {
+      toggleScreenShare()
+      setScreenShareApproved(false)
+      return
+    }
+
+    // Host can share directly
+    if (isRoomOwner) {
+      toggleScreenShare()
+      return
+    }
+
+    // Member: if already approved, share screen and reset
+    if (screenShareApproved) {
+      toggleScreenShare()
+      setScreenShareApproved(false)
+      return
+    }
+
+    // Member: request permission
+    if (!pendingScreenShareRequest && currentRoom) {
+      const requestId = generateRequestId()
+      setPendingRequestId(requestId)
+      setPendingScreenShareRequest(true)
+
+      try {
+        await currentRoom.sendCustomEvent([], {
+          type: 'permission_request',
+          requestId,
+          participantAuthId: userId,
+          permissionType: 'screenShare',
+          reason: 'Yêu cầu bật Chia sẻ màn hình',
+          timestamp: new Date().toISOString(),
+        })
+        log('[MeetingRoom] Sent screen share permission request:', requestId)
+      } catch (error) {
+        console.error('Failed to send permission request:', error)
+        setPendingScreenShareRequest(false)
+        setPendingRequestId(null)
+      }
+    }
+  }, [isScreenSharing, isRoomOwner, screenShareApproved, pendingScreenShareRequest, currentRoom, userId, toggleScreenShare])
+
+  // Host approves permission request
+  const handleApprovePermission = useCallback(async () => {
+    if (!incomingPermissionRequest || !currentRoom) return
+
+    try {
+      await currentRoom.sendCustomEvent([], {
+        type: 'permission_approved',
+        requestId: incomingPermissionRequest.requestId,
+        permissionType: incomingPermissionRequest.permissionType,
+        approvedBy: userId,
+        timestamp: new Date().toISOString(),
+      })
+      log('[MeetingRoom] Approved permission request:', incomingPermissionRequest.requestId)
+    } catch (error) {
+      console.error('Failed to send permission approval:', error)
+    }
+
+    setIncomingPermissionRequest(null)
+  }, [incomingPermissionRequest, currentRoom, userId])
+
+  // Host rejects permission request
+  const handleRejectPermission = useCallback(() => {
+    setIncomingPermissionRequest(null)
+  }, [])
 
   // Independent pin states
   const [localPinnedUserId, setLocalPinnedUserId] = useState<string | null>(null)
@@ -683,6 +834,7 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
           isPinned: false, // Will be calculated in render
           isMicBanned: participant.isMicBanned,
           isCameraBanned: participant.isCameraBanned,
+          isScreenShareBanned: participant.isScreenShareBanned,
         })
       })
 
@@ -738,10 +890,12 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         onUnmuteParticipant={unmuteParticipant}
         onDisableCamera={disableParticipantCamera}
         onEnableCamera={enableParticipantCamera}
+        onDisableScreenShare={disableParticipantScreenShare}
+        onEnableScreenShare={enableParticipantScreenShare}
         onKickParticipant={kickParticipant}
       />
     ),
-    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId, isRoomOwner, muteParticipant, unmuteParticipant, disableParticipantCamera, enableParticipantCamera, kickParticipant]
+    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId, isRoomOwner, muteParticipant, unmuteParticipant, disableParticipantCamera, enableParticipantCamera, disableParticipantScreenShare, enableParticipantScreenShare, kickParticipant]
   )
 
   const renderScreenShare = useCallback(
@@ -915,11 +1069,26 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
           </Button>
 
           <Button
-            variant={isScreenSharing ? "default" : "secondary"}
+            variant={isScreenSharing ? "default" : screenShareApproved ? "default" : pendingScreenShareRequest ? "outline" : "secondary"}
             size="icon"
-            onClick={toggleScreenShare}
-            className="h-10 w-10 sm:h-12 sm:w-12 rounded-full"
-            title={isScreenSharing ? "Stop sharing" : "Share screen"}
+            onClick={handleScreenShareClick}
+            disabled={pendingScreenShareRequest}
+            className={cn(
+              "h-10 w-10 sm:h-12 sm:w-12 rounded-full",
+              screenShareApproved && !isScreenSharing && "bg-green-500 hover:bg-green-600",
+              pendingScreenShareRequest && "opacity-70 animate-pulse"
+            )}
+            title={
+              isScreenSharing
+                ? "Stop sharing"
+                : screenShareApproved
+                  ? "Click to share screen (approved)"
+                  : pendingScreenShareRequest
+                    ? "Waiting for host approval..."
+                    : isRoomOwner
+                      ? "Share screen"
+                      : "Request to share screen"
+            }
           >
             {isScreenSharing ? <IconScreenShareOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconScreenShare className="h-4 w-4 sm:h-5 sm:w-5" />}
           </Button>
@@ -975,6 +1144,41 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
           </DropdownMenu.Root>
         </div>
       </div>
+
+      {/* Permission Request Modal for Host */}
+      {incomingPermissionRequest && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl border border-slate-600">
+            <h3 className="text-lg font-semibold text-white mb-4">
+              📢 Yêu cầu quyền chia sẻ màn hình
+            </h3>
+            <div className="space-y-3 mb-6">
+              <p className="text-slate-300">
+                <span className="font-medium text-white">{incomingPermissionRequest.participantAuthId}</span> yêu cầu quyền chia sẻ màn hình.
+              </p>
+              <p className="text-sm text-slate-400">
+                {incomingPermissionRequest.reason}
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="default"
+                className="flex-1 bg-green-600 hover:bg-green-700"
+                onClick={handleApprovePermission}
+              >
+                ✓ Chấp nhận
+              </Button>
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={handleRejectPermission}
+              >
+                ✗ Từ chối
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -13,6 +13,8 @@ export interface ParticipantData {
   isMicBanned?: boolean;
   /** Camera banned by host */
   isCameraBanned?: boolean;
+  /** Screen share banned by host */
+  isScreenShareBanned?: boolean;
 }
 
 export interface ScreenShareData {
@@ -36,6 +38,8 @@ export interface TileData {
   isMicBanned?: boolean;
   /** Camera banned by host */
   isCameraBanned?: boolean;
+  /** Screen share banned by host */
+  isScreenShareBanned?: boolean;
 }
 
 export interface GridLayoutInfo {

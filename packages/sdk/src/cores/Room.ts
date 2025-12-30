@@ -735,6 +735,33 @@ export class Room extends EventEmitter {
   }
 
   /**
+   * enableParticipantScreenShare
+   */
+  async enableParticipantScreenShare(participantUserId: string): Promise<any> {
+    const participant = this.participants.get(participantUserId);
+    if (!participant) {
+      throw new Error(`Participant ${participantUserId} not found`);
+    }
+
+    return this.updateParticipantPermission(participant.streamId, {
+      can_publish_sources: [["screen_share_720p", true], ["screen_share_1080p", true], ["screen_share_audio", true]],
+    });
+  }
+
+  /**
+   * disableParticipantScreenShare
+   */
+  async disableParticipantScreenShare(participantUserId: string): Promise<any> {
+    const participant = this.participants.get(participantUserId);
+    if (!participant) {
+      throw new Error(`Participant ${participantUserId} not found`);
+    }
+
+    return this.updateParticipantPermission(participant.streamId, {
+      can_publish_sources: [["screen_share_720p", false], ["screen_share_1080p", false], ["screen_share_audio", false]],
+    });
+  }
+  /**
    * Send a chat message
    */
   async sendMessage(

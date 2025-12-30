@@ -205,5 +205,9 @@ export interface ErmisClassroomContextValue {
   kickParticipant: (participantUserId: string) => Promise<void>;
   /** Fetch participants list from server (HOST ONLY) */
   fetchParticipants: () => Promise<any[]>;
+  /** Enable a participant's screen share permission (HOST ONLY) */
+  enableParticipantScreenShare: (participantUserId: string) => Promise<void>;
+  /** Disable a participant's screen share permission (HOST ONLY) */
+  disableParticipantScreenShare: (participantUserId: string) => Promise<void>;
 }
 
