@@ -14,6 +14,8 @@ import type {
   Registrant,
   PaginatedResponse,
   ListRegistrantsParams,
+  BulkCreateRegistrantsParams,
+  BulkCreateRegistrantsResult,
 } from '../types';
 
 export class EventsResource {
@@ -125,5 +127,31 @@ export class RegistrantsResource {
    */
   async delete(eventId: string, registrantId: string): Promise<void> {
     await this.client.delete(`/events/${eventId}/registrants/${registrantId}`);
+  }
+
+  /**
+   * Bulk create registrants for an event
+   * Supports partial success: some registrants may fail while others succeed.
+   * The server enforces max 100 registrants per request.
+   */
+  async bulkCreate(
+    eventId: string,
+    payload: BulkCreateRegistrantsParams,
+  ): Promise<BulkCreateRegistrantsResult> {
+    // Client-side basic validation (SDK recommendation)
+    if (!payload.registrants || payload.registrants.length === 0) {
+      throw new Error('registrants array must not be empty');
+    }
+
+    if (payload.registrants.length > 100) {
+      throw new Error('registrants array must not contain more than 100 items');
+    }
+
+    const response = await this.client.post<ApiResponse<BulkCreateRegistrantsResult>>(
+      `/events/${eventId}/registrants/bulk`,
+      payload,
+    );
+
+    return response.data;
   }
 }

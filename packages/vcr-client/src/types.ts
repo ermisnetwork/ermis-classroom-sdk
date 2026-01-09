@@ -185,6 +185,17 @@ export interface ListRegistrantsParams extends PaginationParams {
   type?: 'user' | 'external';
 }
 
+export interface BulkCreateRegistrantsParams {
+  registrants: CreateRegistrantParams[];
+}
+
+export interface BulkCreateRegistrantsResult {
+  created: number;
+  failed: number;
+  errors: string[];
+  createdRegistrants: Registrant[];
+}
+
 // ============================================================================
 // Reward Types
 // ============================================================================

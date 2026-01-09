@@ -106,7 +106,6 @@ const event = await client.events.create({
   description: 'Introduction to Calculus',
   startTime: '2026-01-15T09:00:00Z',
   endTime: '2026-01-15T11:00:00Z',
-  maxScore: 100,
   isPublic: false,
   location: 'Room A1',
   tags: ['math', 'calculus'],
@@ -216,6 +215,46 @@ const updated = await client.registrants.update('event-id', 'registrant-id', {
 // ⚠️ Only registrants created by your API Key can be deleted
 await client.registrants.delete('event-id', 'registrant-id');
 ```
+
+#### Bulk Create Registrants
+
+Create up to **100 registrants** in a single request. The API supports **partial success**:
+- Some registrants may fail (e.g. duplicate `authId`), others still create successfully.
+
+```typescript
+import type { BulkCreateRegistrantsParams } from '@ermisnetwork/vcr-client';
+
+const payload: BulkCreateRegistrantsParams = {
+  registrants: [
+    {
+      firstName: 'Nguyen',
+      lastName: 'Van A',
+      email: 'studentA@example.com',
+      authId: 'student_001',
+      role: 'student',
+    },
+    {
+      firstName: 'Tran',
+      lastName: 'Thi B',
+      email: 'studentB@example.com',
+      authId: 'student_002',
+      role: 'student',
+    },
+    // ...
+  ],
+};
+
+const result = await client.registrants.bulkCreate('event-id', payload);
+
+console.log('Created:', result.created);
+console.log('Failed:', result.failed);
+console.log('Errors:', result.errors);
+console.log('Created registrants:', result.createdRegistrants);
+```
+
+> **SDK validation:** The SDK will throw an error if:
+> - `registrants` is empty
+> - `registrants` has more than 100 items
 
 ### Rewards
 
@@ -402,7 +441,6 @@ const eventData: CreateEventParams = {
   title: 'My Event',
   startTime: '2026-01-15T09:00:00Z',
   endTime: '2026-01-15T11:00:00Z',
-  maxScore: 100,
   settings: {
     maxParticipants: 50,
     waitingRoomEnabled: true,
@@ -481,9 +519,6 @@ Validate data before sending requests:
 function validateEventData(data: CreateEventParams): void {
   if (new Date(data.startTime) >= new Date(data.endTime)) {
     throw new Error('startTime must be before endTime');
-  }
-  if (data.maxScore < 0) {
-    throw new Error('maxScore must be non-negative');
   }
 }
 
