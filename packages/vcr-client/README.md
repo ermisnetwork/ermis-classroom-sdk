@@ -108,15 +108,21 @@ const event = await client.events.create({
   endTime: '2026-01-15T11:00:00Z',
   maxScore: 100,
   isPublic: false,
+  location: 'Room A1',
   tags: ['math', 'calculus'],
   settings: {
     maxParticipants: 50,
     waitingRoomEnabled: true,
+    examLockEnabled: false,
+    allowBreakoutRooms: true,
     recordingEnabled: true,
     chatEnabled: true,
     screenShareEnabled: false,
+    blockAllStudentMic: false,
+    blockAllStudentCamera: false,
     requirePermissionForMic: true,
     requirePermissionForCamera: true,
+    requirePermissionForScreenShare: true,
   },
   rewardIds: ['507f...'], // Optional: IDs of rewards to apply
 });
@@ -125,6 +131,8 @@ const event = await client.events.create({
 // - _id: Event ID
 // - joinLink: Public join link
 // - ermisRoomCode: Room code for joining
+// - ermisRoomStatus: Current room status
+// - ermisChatChannelId: Chat channel ID
 // - createdByApiKey: ID of the API Key that created this event
 ```
 
@@ -166,12 +174,15 @@ const registrant = await client.registrants.create('event-id', {
   lastName: 'Van A',
   email: 'ana@example.com',
   authId: 'student_internal_id_123', // ID học viên từ hệ thống của bạn
-  role: 'student', // 'student' | 'teacher' | 'admin'
+  role: 'student', // 'student' | 'teacher' | 'admin' | 'staff' | 'parent'
 });
 
 // Response includes:
 // - _id: Registrant ID
+// - joinCode: Unique join code for this registrant
 // - personalJoinLink: Link tham gia riêng với token
+// - status: 'active' | 'cancelled'
+// - type: 'user' | 'external'
 // - authId: Your internal student ID
 ```
 
@@ -183,6 +194,8 @@ const registrants = await client.registrants.list('event-id', {
   limit: 10,
   search: 'nguyen', // Search by name or email
   role: 'student', // Optional filter by role
+  status: 'active', // Optional filter by status
+  type: 'user', // Optional filter by type
 });
 ```
 
@@ -193,6 +206,7 @@ const registrants = await client.registrants.list('event-id', {
 const updated = await client.registrants.update('event-id', 'registrant-id', {
   firstName: 'Updated Name',
   email: 'newemail@example.com',
+  status: 'active',
 });
 ```
 
@@ -260,17 +274,27 @@ View event ratings (đánh giá) - **Read Only**.
 const ratings = await client.ratings.list('event-id');
 
 // Response includes:
-// - averageRating: Average rating (e.g., 4.8)
+// - averageCallQuality: Average network/call quality
+// - averageClassQuality: Average class quality
+// - averageTeacher: Average teacher rating
 // - totalRatings: Total number of ratings
 // - ratings: Array of rating objects with:
-//   - rating: Rating value (1-5)
-//   - comment: Optional comment
+//   - callQuality: Rating for call quality (1-5)
+//   - classQuality: Rating for class quality (1-5)
+//   - teacher: Rating for teacher (1-5)
+//   - otherThoughts: Optional free-text feedback
 //   - createdAt: Timestamp
 
-console.log(`Average rating: ${ratings.averageRating}`);
+console.log(`Average call quality: ${ratings.averageCallQuality}`);
+console.log(`Average class quality: ${ratings.averageClassQuality}`);
+console.log(`Average teacher: ${ratings.averageTeacher}`);
 console.log(`Total ratings: ${ratings.totalRatings}`);
 ratings.ratings.forEach((r) => {
-  console.log(`${r.rating} stars: ${r.comment || 'No comment'}`);
+  console.log(
+    `Call: ${r.callQuality}, Class: ${r.classQuality}, Teacher: ${r.teacher}, Thoughts: ${
+      r.otherThoughts || 'No comment'
+    }`,
+  );
 });
 ```
 
@@ -370,6 +394,7 @@ import type {
   Reward,
   RatingList,
   Rating,
+  CreateRatingParams,
 } from '@ermisnetwork/vcr-client';
 
 // Type-safe event creation
@@ -381,10 +406,19 @@ const eventData: CreateEventParams = {
   settings: {
     maxParticipants: 50,
     waitingRoomEnabled: true,
+    allowBreakoutRooms: true,
   },
 };
 
 const event: Event = await client.events.create(eventData);
+
+// Type-safe rating creation payload
+const ratingData: CreateRatingParams = {
+  callQuality: 5,
+  classQuality: 4,
+  teacher: 5,
+  otherThoughts: 'Great class!',
+};
 ```
 
 ## Best Practices
@@ -540,12 +574,16 @@ async function createClassWithStudents() {
         ...student,
         role: 'student',
       });
-      console.log(`Added ${student.firstName}: ${registrant.personalJoinLink}`);
+      console.log(
+        `Added ${student.firstName}: joinCode=${registrant.joinCode}, link=${registrant.personalJoinLink}`,
+      );
     }
 
     // 3. Get ratings (if any)
     const ratings = await client.ratings.list(event._id);
-    console.log(`Average rating: ${ratings.averageRating}`);
+    console.log(
+      `Ratings - Call: ${ratings.averageCallQuality}, Class: ${ratings.averageClassQuality}, Teacher: ${ratings.averageTeacher}`,
+    );
 
   } catch (error) {
     if (error instanceof PermissionError) {
