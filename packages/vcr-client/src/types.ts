@@ -1,90 +1,15 @@
 /**
  * VCR SDK Types
- * Generated from OpenAPI specification
+ * Based on VCR API Documentation v1.0.1
  */
 
 // ============================================================================
 // Common Types
 // ============================================================================
 
-export type UserRole =
-  | 'super_admin'
-  | 'admin'
-  | 'academic_officer'
-  | 'teacher'
-  | 'teaching_assistant'
-  | 'student'
-  | 'guardian';
+export type RegistrantRole = 'student' | 'teacher' | 'admin';
 
 export type SortOrder = 'asc' | 'desc';
-
-export type EventTemplateType = 'JSU' | 'JRQ' | 'workshop' | 'seminar' | 'exam' | 'conference' | 'defense';
-
-export type TemplateStatus = 'active' | 'inactive';
-
-export type RegistrantRole = 'admin' | 'staff' | 'teacher' | 'student' | 'parent';
-
-export type RegistrantStatus = 'active' | 'cancelled';
-
-export type RegistrantType = 'user' | 'external';
-
-export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
-
-export type ScoreGrade = 'A' | 'B' | 'C' | 'D' | 'F';
-
-export type ScoreStatus = 'draft' | 'published' | 'under_review';
-
-export type ReviewDecision = 'pending' | 'approved' | 'rejected';
-
-export type ExportFormat = 'csv' | 'json' | 'xlsx';
-
-export type EventLogAction =
-  | 'event_created'
-  | 'event_updated'
-  | 'event_started'
-  | 'event_ended'
-  | 'event_cancelled'
-  | 'participant_joined'
-  | 'participant_left'
-  | 'participant_reconnected'
-  | 'registration_created'
-  | 'registration_approved'
-  | 'registration_rejected'
-  | 'breakout_room_created'
-  | 'breakout_room_deleted'
-  | 'participant_moved_to_breakout'
-  | 'participant_returned_from_breakout'
-  | 'attendance_recorded'
-  | 'attendance_updated'
-  | 'violation_detected'
-  | 'violation_reported'
-  | 'violation_updated'
-  | 'exam_lock_activated'
-  | 'exam_lock_violated'
-  | 'score_assigned'
-  | 'score_updated'
-  | 'score_published'
-  | 'score_review_requested'
-  | 'score_review_processed'
-  | 'settings_updated'
-  | 'chat_enabled'
-  | 'chat_disabled'
-  | 'recording_started'
-  | 'recording_stopped';
-
-export type EventLogCategory =
-  | 'event_lifecycle'
-  | 'participant_activity'
-  | 'registration'
-  | 'attendance'
-  | 'scoring'
-  | 'security'
-  | 'system'
-  | 'integration';
-
-export type EventLogLevel = 'info' | 'warn' | 'error' | 'debug';
-
-export type CustomFieldType = 'text' | 'email' | 'select' | 'textarea';
 
 // ============================================================================
 // Pagination & Response Types
@@ -103,13 +28,13 @@ export interface PaginatedResponse<T> {
   data: T[];
   meta: PaginationMeta;
   success: boolean;
-  message: string;
+  message?: string;
 }
 
 export interface ApiResponse<T> {
   data: T;
   success: boolean;
-  message: string;
+  message?: string;
 }
 
 export interface PaginationParams {
@@ -120,439 +45,138 @@ export interface PaginationParams {
   sortOrder?: SortOrder;
 }
 
-// ============================================================================
-// Authentication Types
-// ============================================================================
-
-export interface RegisterDto {
-  email: string;
-  password: string;
-  firstName: string;
-  lastName: string;
-}
-
-export interface LoginDto {
-  email: string;
-  password: string;
-}
-
-export interface RefreshTokenDto {
-  refreshToken: string;
-}
-
-export interface AuthResponseDto {
-  accessToken: string;
-  refreshToken: string;
-  user: object;
-}
-
-// ============================================================================
-// API Key Types
-// ============================================================================
-
-export interface CreateApiKeyDto {
-  name: string;
-  expiresAt?: string;
-}
-
-export interface UpdateApiKeyDto {
-  name?: string;
-  expiresAt?: string;
-  isActive?: boolean;
-}
-
-export interface ApiKeyResponseDto {
-  id: string;
-  name: string;
-  keyId: string;
-  expiresAt?: string;
-  isActive: boolean;
-  lastUsedAt?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CreateApiKeyResponseDto {
-  apiKey: ApiKeyResponseDto;
-  plainSecret: string;
-}
-
-// ============================================================================
-// User Types
-// ============================================================================
-
-export interface UpdateUserDto {
-  firstName?: string;
-  lastName?: string;
-  role?: UserRole;
-  isActive?: boolean;
-}
-
-export interface UpdateUserRoleDto {
-  role: UserRole;
-}
-
-export interface ListUsersParams extends PaginationParams {
-  roles?: UserRole[];
-}
 
 // ============================================================================
 // Event Types
 // ============================================================================
 
-export interface EventSettingsDto {
+export interface EventSettings {
   maxParticipants?: number;
-  password?: string;
   waitingRoomEnabled?: boolean;
-  examLockEnabled?: boolean;
   recordingEnabled?: boolean;
   chatEnabled?: boolean;
   screenShareEnabled?: boolean;
-  allowBreakoutRooms?: boolean;
-  micDefaultState?: boolean;
-  cameraDefaultState?: boolean;
+  requirePermissionForMic?: boolean;
+  requirePermissionForCamera?: boolean;
 }
 
-export interface CustomField {
-  name: string;
-  label: string;
-  required: boolean;
-  type: CustomFieldType;
-  options?: string[];
-}
-
-export interface RegistrationSettingsDto {
-  allowSelfRegistration?: boolean;
-  requireApproval?: boolean;
-  maxParticipants?: number;
-  registrationDeadline?: string;
-  allowExternalRegistrants?: boolean;
-  customFields?: CustomField[];
-}
-
-export interface CreateEventDto {
+export interface CreateEventParams {
   title: string;
   description?: string;
-  templateId?: string;
-  startTime: string;
-  endTime: string;
-  settings: EventSettingsDto;
-  registrationSettings?: RegistrationSettingsDto;
-  isPublic?: boolean;
-  location?: string;
-  tags?: string[];
+  startTime: string; // ISO 8601 format
+  endTime: string; // ISO 8601 format
   maxScore: number;
+  isPublic?: boolean;
+  tags?: string[];
+  settings?: EventSettings;
+  rewardIds?: string[]; // IDs of rewards to apply
 }
 
-export interface UpdateEventDto {
+export interface UpdateEventParams {
   title?: string;
   description?: string;
-  templateId?: string;
   startTime?: string;
   endTime?: string;
-  settings?: EventSettingsDto;
-  registrationSettings?: RegistrationSettingsDto;
-  isPublic?: boolean;
-  location?: string;
-  tags?: string[];
   maxScore?: number;
+  isPublic?: boolean;
+  tags?: string[];
+  settings?: EventSettings;
+  rewardIds?: string[];
 }
 
-export interface EventResponseDto {
+export interface Event {
   _id: string;
   title: string;
   description?: string;
-  templateId?: string;
   startTime: string;
   endTime: string;
-  organizerId: string;
-  settings: EventSettingsDto;
-  invitedEmails?: string[];
-  registrationSettings?: RegistrationSettingsDto;
-  joinLink: string;
-  qrCode?: string;
-  isPublic: boolean;
-  location?: string;
-  tags?: string[];
   maxScore: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ListEventsParams extends PaginationParams {
-  organizerId?: string;
-  templateId?: string;
-  startDateFrom?: string;
-  startDateTo?: string;
+  isPublic: boolean;
   tags?: string[];
+  settings?: EventSettings;
+  joinLink: string;
+  ermisRoomCode: string;
+  createdByApiKey: string; // ID of the API Key that created this event
+  rewardIds?: string[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // ============================================================================
 // Registrant Types
 // ============================================================================
 
-export interface CreateRegistrantDto {
+export interface CreateRegistrantParams {
   firstName: string;
   lastName: string;
-  email?: string;
-  authId: string;
+  email: string;
+  authId: string; // ID học viên từ hệ thống của bạn
   role: RegistrantRole;
 }
 
-export interface UpdateRegistrantDto {
+export interface UpdateRegistrantParams {
   firstName?: string;
   lastName?: string;
   email?: string;
   authId?: string;
   role?: RegistrantRole;
-  status?: RegistrantStatus;
 }
 
-export interface JoinWithCodeDto {
-  joinCode: string;
-}
-
-export interface MockRegistrantsDto {
-  count: number;
-  role?: RegistrantRole;
-}
-
-export interface RegistrantResponseDto {
+export interface Registrant {
   _id: string;
-  eventId: string;
   firstName: string;
   lastName: string;
-  email?: string;
+  email: string;
   authId: string;
   role: RegistrantRole;
-  type: RegistrantType;
-  status: RegistrantStatus;
-  joinCode: string;
-  createdAt: string;
-  updatedAt: string;
+  personalJoinLink: string; // Link tham gia riêng với token
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ListRegistrantsParams extends PaginationParams {
-  status?: RegistrantStatus;
-  type?: RegistrantType;
   role?: RegistrantRole;
 }
 
 // ============================================================================
-// Breakout Room Types
+// Reward Types
 // ============================================================================
 
-export interface CreateAutoBreakoutRoomsDto {
-  numberOfRooms: number;
-}
-
-export interface GetBreakoutRoomTokenDto {
-  roomName: string;
-}
-
-export interface BreakoutRoomTokenResponseDto {
-  livekitToken: string;
-  livekitUrl: string;
-  roomName: string;
-}
-
-// ============================================================================
-// Attendance Types
-// ============================================================================
-
-export interface UpdateAttendanceStatusDto {
-  attendanceStatus: AttendanceStatus;
-}
-
-// ============================================================================
-// Participant Types
-// ============================================================================
-
-export interface UpdateParticipantPermissionsDto {
-  participantAuthId: string;
-  canPublishMic?: boolean;
-  canPublishCamera?: boolean;
-  canPublishScreenShare?: boolean;
-}
-
-export interface PinParticipantDto {
-  participantAuthId: string;
-}
-
-// ============================================================================
-// Event Material Types
-// ============================================================================
-
-export interface EventMaterialResponseDto {
-  id: string;
-  eventId: string;
-  title: string;
-  description?: string;
-  fileName: string;
-  fileSize: number;
-  mimeType: string;
-  uploaderName: string;
-  uploadedAt: string;
-  fileUrl?: string;
-}
-
-// ============================================================================
-// Event Submission Types
-// ============================================================================
-
-export interface EventSubmissionResponseDto {
-  id: string;
-  eventId: string;
-  title: string;
-  description?: string;
-  fileName: string;
-  fileSize: number;
-  mimeType: string;
-  submitterName: string;
-  submitterRole: string;
-  submittedAt: string;
-  fileUrl?: string;
-}
-
-// ============================================================================
-// Event Whiteboard Types
-// ============================================================================
-
-export interface EventWhiteboardResponseDto {
-  id: string;
-  eventId: string;
-  title: string;
-  description?: string;
-  fileName: string;
-  fileSize: number;
-  mimeType: string;
-  submitterName: string;
-  submitterRole: string;
-  submittedAt: string;
-  fileUrl?: string;
-}
-
-// ============================================================================
-// Event Template Types
-// ============================================================================
-
-export interface CreateEventTemplateDto {
+export interface CreateRewardParams {
+  file: File; // Image file (Required)
   name: string;
   description?: string;
-  type: EventTemplateType;
-  settings?: EventSettingsDto;
-  status?: TemplateStatus;
 }
 
-export interface UpdateEventTemplateDto {
+export interface UpdateRewardParams {
   name?: string;
   description?: string;
-  type?: EventTemplateType;
-  settings?: EventSettingsDto;
-  status?: TemplateStatus;
+  file?: File; // Optional: new image file
 }
 
-export interface EventTemplateResponseDto {
+export interface Reward {
   _id: string;
   name: string;
   description?: string;
-  type: EventTemplateType;
-  settings?: EventSettingsDto;
-  status: TemplateStatus;
+  image: string; // URL to the reward image
+  createdByApiKey: string; // ID of the API Key that created this reward
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// ============================================================================
+// Rating Types (Read Only)
+// ============================================================================
+
+export interface Rating {
+  rating: number; // 1-5 stars typically
+  comment?: string;
   createdAt: string;
-  updatedAt: string;
 }
 
-// ============================================================================
-// Score Types
-// ============================================================================
-
-export interface CreateScoreDto {
-  eventId: string;
-  participantId: string;
-  score: number;
-  grade?: ScoreGrade;
-  feedback?: string;
-}
-
-export interface BulkScoreItemDto {
-  participantId: string;
-  score: number;
-  grade?: ScoreGrade;
-  feedback?: string;
-}
-
-export interface BulkCreateScoresDto {
-  eventId: string;
-  scores: BulkScoreItemDto[];
-}
-
-export interface UpdateScoreDto {
-  score?: number;
-  grade?: ScoreGrade;
-  feedback?: string;
-  status?: ScoreStatus;
-}
-
-export interface PublishScoresDto {
-  eventId: string;
-  scoreIds?: string[];
-  sendNotification?: boolean;
-}
-
-export interface ReviewScoreDto {
-  reason: string;
-  details?: string;
-}
-
-export interface ProcessReviewDto {
-  decision: ReviewDecision;
-  newScore?: number;
-  response: string;
-}
-
-export interface ScoreResponseDto {
-  _id: string;
-  eventId: string;
-  participantId: string;
-  score: number;
-  grade?: ScoreGrade;
-  feedback?: string;
-  status: ScoreStatus;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// ============================================================================
-// Event Log Types
-// ============================================================================
-
-export interface ListEventLogsParams extends PaginationParams {
-  eventId?: string;
-  actorId?: string;
-  targetId?: string;
-  action?: EventLogAction;
-  actions?: EventLogAction[];
-  category?: EventLogCategory;
-  level?: EventLogLevel;
-  fromDate?: string;
-  toDate?: string;
-  ipAddress?: string;
-  sessionId?: string;
-  includeMetadata?: boolean;
-}
-
-export interface EventLogStatsParams {
-  periodDays?: number;
-  groupBy?: 'hour' | 'day' | 'week' | 'month';
-}
-
-export interface ExportEventLogsParams {
-  eventId?: string;
-  format?: ExportFormat;
-  fromDate?: string;
-  toDate?: string;
-  includeMetadata?: boolean;
-  actions?: EventLogAction[];
+export interface RatingList {
+  averageRating: number;
+  totalRatings: number;
+  ratings: Rating[];
 }
 

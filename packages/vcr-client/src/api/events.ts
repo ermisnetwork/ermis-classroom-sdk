@@ -1,232 +1,129 @@
 /**
  * Events API
+ * Manages events (lớp học/sự kiện)
  */
 
-import type { VCRClient } from '../client';
+import type { VCRHTTPClient } from '../client';
 import type {
-  CreateEventDto,
-  UpdateEventDto,
-  EventResponseDto,
-  ListEventsParams,
-  PaginatedResponse,
+  CreateEventParams,
+  UpdateEventParams,
+  Event,
   ApiResponse,
-  CreateRegistrantDto,
-  UpdateRegistrantDto,
-  RegistrantResponseDto,
-  JoinWithCodeDto,
-  MockRegistrantsDto,
+  CreateRegistrantParams,
+  UpdateRegistrantParams,
+  Registrant,
+  PaginatedResponse,
   ListRegistrantsParams,
-  CreateAutoBreakoutRoomsDto,
-  GetBreakoutRoomTokenDto,
-  BreakoutRoomTokenResponseDto,
-  UpdateAttendanceStatusDto,
-  UpdateParticipantPermissionsDto,
-  PinParticipantDto,
 } from '../types';
 
-export class EventsAPI {
-  constructor(private client: VCRClient) {}
+export class EventsResource {
+  constructor(private client: VCRHTTPClient) {}
 
   /**
    * Create a new event
+   * @param data Event data
+   * @returns Created event with joinLink and ermisRoomCode
    */
-  async create(data: CreateEventDto): Promise<ApiResponse<EventResponseDto>> {
-    return this.client.post<ApiResponse<EventResponseDto>>('/events', data);
-  }
-
-  /**
-   * Get events with filtering and pagination
-   */
-  async list(params?: ListEventsParams): Promise<PaginatedResponse<EventResponseDto>> {
-    return this.client.get<PaginatedResponse<EventResponseDto>>('/events', params);
+  async create(data: CreateEventParams): Promise<Event> {
+    const response = await this.client.post<ApiResponse<Event>>('/events', data);
+    return response.data;
   }
 
   /**
    * Get event by ID
+   * @param eventId Event ID
    */
-  async get(eventId: string): Promise<ApiResponse<EventResponseDto>> {
-    return this.client.get<ApiResponse<EventResponseDto>>(`/events/${eventId}`);
+  async get(eventId: string): Promise<Event> {
+    const response = await this.client.get<ApiResponse<Event>>(`/events/${eventId}`);
+    return response.data;
   }
 
   /**
    * Update event
+   * @param eventId Event ID
+   * @param data Update data
+   * @note Only events created by this API Key can be updated
    */
-  async update(eventId: string, data: UpdateEventDto): Promise<ApiResponse<EventResponseDto>> {
-    return this.client.patch<ApiResponse<EventResponseDto>>(`/events/${eventId}`, data);
+  async update(eventId: string, data: UpdateEventParams): Promise<Event> {
+    const response = await this.client.patch<ApiResponse<Event>>(
+      `/events/${eventId}`,
+      data
+    );
+    return response.data;
   }
 
   /**
    * Delete event
+   * @param eventId Event ID
+   * @note Only events created by this API Key can be deleted
    */
   async delete(eventId: string): Promise<void> {
     await this.client.delete(`/events/${eventId}`);
   }
+}
+
+/**
+ * Registrants API
+ * Manages event registrants (học viên/người tham dự)
+ */
+export class RegistrantsResource {
+  constructor(private client: VCRHTTPClient) {}
 
   /**
-   * Get participant statistics
+   * Create a new registrant for an event
+   * @param eventId Event ID
+   * @param data Registrant data
+   * @returns Created registrant with personalJoinLink
    */
-  async getParticipantStats(eventId: string): Promise<any> {
-    return this.client.get(`/events/${eventId}/participants/stats`);
+  async create(eventId: string, data: CreateRegistrantParams): Promise<Registrant> {
+    const response = await this.client.post<ApiResponse<Registrant>>(
+      `/events/${eventId}/registrants`,
+      data
+    );
+    return response.data;
   }
 
   /**
-   * Join event with registrant code
+   * Get list of registrants for an event
+   * @param eventId Event ID
+   * @param params Query parameters (page, limit, search, role)
    */
-  async joinWithCode(data: JoinWithCodeDto): Promise<any> {
-    return this.client.post('/events/registrants/join', data);
-  }
-
-  // ============================================================================
-  // Registrants
-  // ============================================================================
-
-  /**
-   * Create event registrant
-   */
-  async createRegistrant(eventId: string, data: CreateRegistrantDto): Promise<ApiResponse<RegistrantResponseDto>> {
-    return this.client.post<ApiResponse<RegistrantResponseDto>>(`/events/${eventId}/registrants`, data);
-  }
-
-  /**
-   * Get list of registrants
-   */
-  async getRegistrants(eventId: string, params?: ListRegistrantsParams): Promise<PaginatedResponse<RegistrantResponseDto>> {
-    return this.client.get<PaginatedResponse<RegistrantResponseDto>>(`/events/${eventId}/registrants`, params);
-  }
-
-  /**
-   * Get registrant by ID
-   */
-  async getRegistrant(eventId: string, registrantId: string): Promise<ApiResponse<RegistrantResponseDto>> {
-    return this.client.get<ApiResponse<RegistrantResponseDto>>(`/events/${eventId}/registrants/${registrantId}`);
+  async list(
+    eventId: string,
+    params?: ListRegistrantsParams
+  ): Promise<PaginatedResponse<Registrant>> {
+    return this.client.get<PaginatedResponse<Registrant>>(
+      `/events/${eventId}/registrants`,
+      params
+    );
   }
 
   /**
    * Update registrant
+   * @param eventId Event ID
+   * @param registrantId Registrant ID
+   * @param data Update data
+   * @note Only registrants created by this API Key can be updated
    */
-  async updateRegistrant(eventId: string, registrantId: string, data: UpdateRegistrantDto): Promise<ApiResponse<RegistrantResponseDto>> {
-    return this.client.patch<ApiResponse<RegistrantResponseDto>>(`/events/${eventId}/registrants/${registrantId}`, data);
+  async update(
+    eventId: string,
+    registrantId: string,
+    data: UpdateRegistrantParams
+  ): Promise<Registrant> {
+    const response = await this.client.patch<ApiResponse<Registrant>>(
+      `/events/${eventId}/registrants/${registrantId}`,
+      data
+    );
+    return response.data;
   }
 
   /**
    * Delete registrant
+   * @param eventId Event ID
+   * @param registrantId Registrant ID
+   * @note Only registrants created by this API Key can be deleted
    */
-  async deleteRegistrant(eventId: string, registrantId: string): Promise<void> {
+  async delete(eventId: string, registrantId: string): Promise<void> {
     await this.client.delete(`/events/${eventId}/registrants/${registrantId}`);
   }
-
-  /**
-   * Create mock registrants for testing
-   */
-  async createMockRegistrants(eventId: string, data: MockRegistrantsDto): Promise<any> {
-    return this.client.post(`/events/${eventId}/registrants/mock`, data);
-  }
-
-  // ============================================================================
-  // Breakout Rooms
-  // ============================================================================
-
-  /**
-   * Create auto breakout rooms
-   */
-  async createAutoBreakoutRooms(eventId: string, data: CreateAutoBreakoutRoomsDto): Promise<any> {
-    return this.client.post(`/events/${eventId}/breakout-rooms/auto`, data);
-  }
-
-  /**
-   * Get breakout rooms
-   */
-  async getBreakoutRooms(eventId: string): Promise<any> {
-    return this.client.get(`/events/${eventId}/breakout-rooms`);
-  }
-
-  /**
-   * Get breakout room token
-   */
-  async getBreakoutRoomToken(eventId: string, data: GetBreakoutRoomTokenDto): Promise<BreakoutRoomTokenResponseDto> {
-    return this.client.post<BreakoutRoomTokenResponseDto>(`/events/${eventId}/breakout-rooms/token`, data);
-  }
-
-  /**
-   * Delete breakout room
-   */
-  async deleteBreakoutRoom(eventId: string, roomId: string): Promise<void> {
-    await this.client.delete(`/events/${eventId}/breakout-rooms/${roomId}`);
-  }
-
-  // ============================================================================
-  // Attendance
-  // ============================================================================
-
-  /**
-   * Get attendance records
-   */
-  async getAttendance(eventId: string, params?: any): Promise<PaginatedResponse<any>> {
-    return this.client.get<PaginatedResponse<any>>(`/events/${eventId}/attendance`, params);
-  }
-
-  /**
-   * Update attendance status
-   */
-  async updateAttendanceStatus(eventId: string, registrantId: string, data: UpdateAttendanceStatusDto): Promise<any> {
-    return this.client.patch(`/events/${eventId}/attendance/${registrantId}`, data);
-  }
-
-  /**
-   * Export attendance
-   */
-  async exportAttendance(eventId: string, format: 'csv' | 'xlsx' = 'csv'): Promise<any> {
-    return this.client.get(`/events/${eventId}/attendance/export`, { format });
-  }
-
-  // ============================================================================
-  // Participants
-  // ============================================================================
-
-  /**
-   * Update participant permissions
-   */
-  async updateParticipantPermissions(eventId: string, data: UpdateParticipantPermissionsDto): Promise<any> {
-    return this.client.patch(`/events/${eventId}/participants/permissions`, data);
-  }
-
-  /**
-   * Pin participant
-   */
-  async pinParticipant(eventId: string, data: PinParticipantDto): Promise<any> {
-    return this.client.post(`/events/${eventId}/participants/pin`, data);
-  }
-
-  /**
-   * Unpin participant
-   */
-  async unpinParticipant(eventId: string): Promise<any> {
-    return this.client.delete(`/events/${eventId}/participants/pin`);
-  }
-
-  /**
-   * Remove participant
-   */
-  async removeParticipant(eventId: string, participantAuthId: string): Promise<any> {
-    return this.client.post(`/events/${eventId}/participants/remove`, { participantAuthId });
-  }
-
-  // ============================================================================
-  // Materials & Submissions
-  // ============================================================================
-
-  /**
-   * Get event materials
-   */
-  async getMaterials(eventId: string, params?: any): Promise<PaginatedResponse<any>> {
-    return this.client.get<PaginatedResponse<any>>(`/events/${eventId}/materials`, params);
-  }
-
-  /**
-   * Get event submissions
-   */
-  async getSubmissions(eventId: string, params?: any): Promise<PaginatedResponse<any>> {
-    return this.client.get<PaginatedResponse<any>>(`/events/${eventId}/submissions`, params);
-  }
 }
-
