@@ -1,6 +1,8 @@
 # VCR SDK - Virtual Classroom SDK
 
-A comprehensive TypeScript SDK for the Virtual Classroom API with full TypeScript support and API key authentication.
+A TypeScript SDK for the Virtual Classroom (VCR) API with full type support and API Key authentication.
+
+> **Note:** This SDK provides access to 4 resources only: Events, Registrants, Rewards, and Ratings (read-only). All operations follow strict ownership rules - you can only modify resources created by your API Key.
 
 ## Installation
 
@@ -14,410 +16,551 @@ yarn add @ermisnetwork/vcr-client
 
 ## Quick Start
 
-### Using API Key Authentication (Server-to-Server)
+### Basic Usage
 
 ```typescript
 import { createVCRClient } from '@ermisnetwork/vcr-client';
 
-const sdk = createVCRClient({
-  baseUrl: 'http://localhost:3000/api',
-  apiKey: 'your-api-key-here',
+const client = createVCRClient({
+  apiKey: 'ak_1234567890abcdef.a1b2c3d4e5f6789...',
+  baseUrl: 'https://api.vcr.example.com', // Optional, defaults to production
 });
 
-// Now you can use the SDK
-const events = await sdk.events.list();
-console.log(events);
+// Create an event
+const event = await client.events.create({
+  title: 'Mathematics 101 - Lecture 5',
+  description: 'Introduction to Calculus',
+  startTime: '2026-01-15T09:00:00Z',
+  endTime: '2026-01-15T11:00:00Z',
+  maxScore: 100,
+  isPublic: false,
+  tags: ['math', 'calculus'],
+  settings: {
+    maxParticipants: 50,
+    waitingRoomEnabled: true,
+    recordingEnabled: true,
+    chatEnabled: true,
+    screenShareEnabled: false,
+    requirePermissionForMic: true,
+    requirePermissionForCamera: true,
+  },
+});
+
+console.log('Event created:', event.joinLink);
+console.log('Room code:', event.ermisRoomCode);
 ```
 
-### Using Bearer Token Authentication (User Authentication)
+## Configuration
+
+### API Key Format
+
+API Keys follow the format: `ak_<keyId>.<secret>`
+
+Example: `ak_1234567890abcdef.a1b2c3d4e5f6789...`
+
+### Authentication Methods
+
+The SDK supports two authentication methods:
+
+**Method 1: Custom Header (Recommended)**
+```typescript
+const client = createVCRClient({
+  apiKey: 'ak_xxx.yyy',
+  baseUrl: 'https://api.vcr.example.com',
+  // Uses x-api-key header by default
+});
+```
+
+**Method 2: Authorization Header**
+```typescript
+const client = createVCRClient({
+  apiKey: 'ak_xxx.yyy',
+  baseUrl: 'https://api.vcr.example.com',
+  useAuthorizationHeader: true, // Uses Authorization: Bearer header
+});
+```
+
+### Configuration Options
 
 ```typescript
-import { createVCRClient } from '@ermisnetwork/vcr-client';
-
-const sdk = createVCRClient({
-  baseUrl: 'http://localhost:3000/api',
-});
-
-// Login to get access token
-const authResponse = await sdk.auth.login({
-  email: 'user@example.com',
-  password: 'password123',
-});
-
-// Set the access token
-sdk.setAccessToken(authResponse.accessToken);
-
-// Now you can make authenticated requests
-const profile = await sdk.users.getProfile();
-console.log(profile);
+interface VCRClientConfig {
+  apiKey: string; // Required: Your API Key
+  baseUrl?: string; // Optional: Defaults to production URL
+  timeout?: number; // Optional: Request timeout in ms (default: 30000)
+  headers?: Record<string, string>; // Optional: Additional headers
+  useAuthorizationHeader?: boolean; // Optional: Use Authorization header instead of x-api-key
+}
 ```
 
 ## API Reference
 
-### Authentication
-
-```typescript
-// Register a new user
-const user = await sdk.auth.register({
-  email: 'user@example.com',
-  password: 'password123',
-  firstName: 'John',
-  lastName: 'Doe',
-});
-
-// Login
-const authResponse = await sdk.auth.login({
-  email: 'user@example.com',
-  password: 'password123',
-});
-
-// Refresh tokens
-const newTokens = await sdk.auth.refreshTokens({
-  refreshToken: authResponse.refreshToken,
-});
-
-// Logout
-await sdk.auth.logout();
-```
-
-### API Keys Management
-
-```typescript
-// Create a new API key
-const apiKey = await sdk.apiKeys.create({
-  name: 'External Integration',
-  permissions: {
-    events: [], // Empty array means all events
-    actions: ['create', 'read', 'update', 'delete'],
-  },
-  allowedOrigins: ['https://example.com'],
-  expiresAt: '2025-12-31T23:59:59Z',
-  rateLimit: {
-    requestsPerMinute: 100,
-    requestsPerHour: 1000,
-  },
-});
-
-// IMPORTANT: Save the plainSecret - it's only shown once!
-console.log('API Key:', apiKey.plainSecret);
-
-// List API keys
-const apiKeys = await sdk.apiKeys.list({
-  page: 1,
-  limit: 10,
-  isActive: true,
-});
-
-// Get API key by ID
-const key = await sdk.apiKeys.get('api-key-id');
-
-// Update API key
-await sdk.apiKeys.update('api-key-id', {
-  name: 'Updated Name',
-  isActive: false,
-});
-
-// Regenerate API key secret
-const newSecret = await sdk.apiKeys.regenerateSecret('api-key-id');
-
-// Get usage statistics
-const stats = await sdk.apiKeys.getUsageStats('api-key-id');
-
-// Deactivate API key
-await sdk.apiKeys.deactivate('api-key-id');
-```
-
-### Users
-
-```typescript
-// Get all users
-const users = await sdk.users.list({
-  page: 1,
-  limit: 10,
-  roles: ['student', 'teacher'],
-  search: 'john',
-});
-
-// Get current user profile
-const profile = await sdk.users.getProfile();
-
-// Update current user profile
-await sdk.users.updateProfile({
-  firstName: 'Jane',
-  lastName: 'Smith',
-});
-
-// Get user by ID
-const user = await sdk.users.get('user-id');
-
-// Update user
-await sdk.users.update('user-id', {
-  firstName: 'Updated',
-  isActive: true,
-});
-
-// Update user role
-await sdk.users.updateRole('user-id', {
-  role: 'teacher',
-});
-
-// Delete user
-await sdk.users.delete('user-id');
-```
-
 ### Events
 
+Manage virtual classroom events (lớp học/sự kiện).
+
+#### Create Event
+
 ```typescript
-// Create an event
-const event = await sdk.events.create({
-  title: 'Final Exam - Mathematics',
-  description: 'Final examination for Mathematics course',
-  templateId: 'template-id',
-  startTime: '2024-12-01T09:00:00Z',
-  endTime: '2024-12-01T11:00:00Z',
+const event = await client.events.create({
+  title: 'Mathematics 101 - Lecture 5',
+  description: 'Introduction to Calculus',
+  startTime: '2026-01-15T09:00:00Z',
+  endTime: '2026-01-15T11:00:00Z',
   maxScore: 100,
+  isPublic: false,
+  tags: ['math', 'calculus'],
   settings: {
-    maxParticipants: 100,
+    maxParticipants: 50,
     waitingRoomEnabled: true,
     recordingEnabled: true,
     chatEnabled: true,
+    screenShareEnabled: false,
+    requirePermissionForMic: true,
+    requirePermissionForCamera: true,
   },
-  registrationSettings: {
-    allowSelfRegistration: true,
-    requireApproval: false,
-    maxParticipants: 100,
-  },
-  tags: ['exam', 'mathematics'],
+  rewardIds: ['507f...'], // Optional: IDs of rewards to apply
 });
 
-// List events
-const events = await sdk.events.list({
-  page: 1,
-  limit: 10,
-  organizerId: 'organizer-id',
-  startDateFrom: '2024-12-01T00:00:00Z',
-  tags: ['exam'],
-});
+// Response includes:
+// - _id: Event ID
+// - joinLink: Public join link
+// - ermisRoomCode: Room code for joining
+// - createdByApiKey: ID of the API Key that created this event
+```
 
-// Get event by ID
-const eventDetails = await sdk.events.get('event-id');
+#### Get Event
 
-// Update event
-await sdk.events.update('event-id', {
+```typescript
+const event = await client.events.get('event-id');
+```
+
+#### Update Event
+
+```typescript
+// ⚠️ Only events created by your API Key can be updated
+const updatedEvent = await client.events.update('event-id', {
   title: 'Updated Title',
-  settings: {
-    maxParticipants: 150,
-  },
-});
-
-// Delete event
-await sdk.events.delete('event-id');
-
-// Get participant statistics
-const stats = await sdk.events.getParticipantStats('event-id');
-```
-
-### Event Registrants
-
-```typescript
-// Create registrant
-const registrant = await sdk.events.createRegistrant('event-id', {
-  firstName: 'John',
-  lastName: 'Doe',
-  email: 'john@example.com',
-  authId: 'student_12345',
-  role: 'student',
-});
-
-// List registrants
-const registrants = await sdk.events.getRegistrants('event-id', {
-  page: 1,
-  limit: 10,
-  status: 'active',
-});
-
-// Update registrant
-await sdk.events.updateRegistrant('event-id', 'registrant-id', {
-  status: 'cancelled',
-});
-
-// Approve registrant
-await sdk.events.approveRegistrant('event-id', 'registrant-id');
-
-// Reject registrant
-await sdk.events.rejectRegistrant('event-id', 'registrant-id');
-
-// Create mock registrants for testing
-await sdk.events.createMockRegistrants('event-id', {
-  count: 50,
-  role: 'student',
-});
-
-// Join event with code
-const joinResponse = await sdk.events.joinWithCode({
-  joinCode: 'ABC123XYZ',
-});
-```
-
-### Event Templates
-
-```typescript
-// Create template
-const template = await sdk.templates.create({
-  name: 'JSU Template for Final Exam',
-  description: 'Template for Judgement Session Unit final examinations',
-  type: 'JSU',
+  startTime: '2026-01-15T10:00:00Z',
   settings: {
     maxParticipants: 100,
-    waitingRoomEnabled: true,
-    examLockEnabled: true,
   },
 });
-
-// List templates
-const templates = await sdk.templates.list({
-  page: 1,
-  limit: 10,
-});
-
-// Get template
-const templateDetails = await sdk.templates.get('template-id');
-
-// Update template
-await sdk.templates.update('template-id', {
-  name: 'Updated Template Name',
-});
-
-// Delete template
-await sdk.templates.delete('template-id');
 ```
 
-### Scores
+#### Delete Event
 
 ```typescript
-// Create score
-const score = await sdk.scores.create({
-  eventId: 'event-id',
-  participantId: 'participant-id',
-  score: 85,
-  grade: 'B',
-  feedback: 'Good work!',
+// ⚠️ Only events created by your API Key can be deleted
+await client.events.delete('event-id');
+```
+
+### Registrants
+
+Manage event participants (học viên/người tham dự).
+
+#### Create Registrant
+
+```typescript
+const registrant = await client.registrants.create('event-id', {
+  firstName: 'Nguyen',
+  lastName: 'Van A',
+  email: 'ana@example.com',
+  authId: 'student_internal_id_123', // ID học viên từ hệ thống của bạn
+  role: 'student', // 'student' | 'teacher' | 'admin'
 });
 
-// Bulk create scores
-await sdk.scores.bulkCreate({
-  eventId: 'event-id',
-  scores: [
-    { participantId: 'p1', score: 90, grade: 'A' },
-    { participantId: 'p2', score: 85, grade: 'B' },
-  ],
-});
+// Response includes:
+// - _id: Registrant ID
+// - personalJoinLink: Link tham gia riêng với token
+// - authId: Your internal student ID
+```
 
-// List scores
-const scores = await sdk.scores.list({
-  eventId: 'event-id',
+#### List Registrants
+
+```typescript
+const registrants = await client.registrants.list('event-id', {
   page: 1,
   limit: 10,
-});
-
-// Update score
-await sdk.scores.update('score-id', {
-  score: 90,
-  grade: 'A',
-  feedback: 'Excellent!',
-});
-
-// Publish scores
-await sdk.scores.publish({
-  eventId: 'event-id',
-  sendNotification: true,
-});
-
-// Request score review
-await sdk.scores.requestReview('score-id', {
-  reason: 'I believe there was an error in grading',
-  details: 'Question 3 should be correct',
-});
-
-// Process review (admin/teacher)
-await sdk.scores.processReview('score-id', {
-  decision: 'approved',
-  newScore: 95,
-  response: 'After reviewing, score has been updated',
+  search: 'nguyen', // Search by name or email
+  role: 'student', // Optional filter by role
 });
 ```
 
-### Event Logs
+#### Update Registrant
 
 ```typescript
-// Get event logs
-const logs = await sdk.eventLogs.getEventLogs('event-id', {
-  page: 1,
-  limit: 10,
-  actions: ['participant_joined', 'participant_left'],
-  level: 'info',
-});
-
-// Get event log statistics
-const stats = await sdk.eventLogs.getEventLogStats('event-id', {
-  periodDays: 30,
-  groupBy: 'day',
-});
-
-// Get user logs
-const userLogs = await sdk.eventLogs.getUserLogs('user-id', {
-  page: 1,
-  limit: 10,
-});
-
-// Export event logs
-const exportData = await sdk.eventLogs.exportEventLogs({
-  eventId: 'event-id',
-  format: 'csv',
-  fromDate: '2024-01-01T00:00:00Z',
-  toDate: '2024-12-31T23:59:59Z',
+// ⚠️ Only registrants created by your API Key can be updated
+const updated = await client.registrants.update('event-id', 'registrant-id', {
+  firstName: 'Updated Name',
+  email: 'newemail@example.com',
 });
 ```
 
-## TypeScript Support
-
-The SDK is written in TypeScript and provides full type definitions for all API methods and responses.
+#### Delete Registrant
 
 ```typescript
-import type {
-  CreateEventDto,
-  EventResponseDto,
-  UserRole,
-  ScoreGrade,
-} from '@ermisnetwork/vcr-client';
+// ⚠️ Only registrants created by your API Key can be deleted
+await client.registrants.delete('event-id', 'registrant-id');
+```
 
-// All types are exported and can be used in your application
-const eventData: CreateEventDto = {
-  title: 'My Event',
-  templateId: 'template-id',
-  startTime: '2024-12-01T09:00:00Z',
-  endTime: '2024-12-01T11:00:00Z',
-  maxScore: 100,
-};
+### Rewards
+
+Manage event rewards (phần thưởng).
+
+#### Create Reward
+
+```typescript
+// Create a File object from your file input or file system
+const file = new File([fileData], 'reward.png', { type: 'image/png' });
+
+const reward = await client.rewards.create({
+  file: file, // Required: Image file
+  name: 'Gold Star',
+  description: 'Awarded for excellent performance',
+});
+
+// Response includes:
+// - _id: Reward ID
+// - image: URL to the reward image
+// - createdByApiKey: ID of the API Key that created this reward
+```
+
+#### Get Reward
+
+```typescript
+const reward = await client.rewards.get('reward-id');
+```
+
+#### Update Reward
+
+```typescript
+// ⚠️ Only rewards created by your API Key can be updated
+const file = new File([fileData], 'new-reward.png', { type: 'image/png' });
+
+const updated = await client.rewards.update('reward-id', {
+  name: 'Updated Reward Name',
+  description: 'New description',
+  file: file, // Optional: new image file
+});
+```
+
+#### Delete Reward
+
+```typescript
+// ⚠️ Only rewards created by your API Key can be deleted
+await client.rewards.delete('reward-id');
+```
+
+### Ratings
+
+View event ratings (đánh giá) - **Read Only**.
+
+```typescript
+// Get event ratings
+const ratings = await client.ratings.list('event-id');
+
+// Response includes:
+// - averageRating: Average rating (e.g., 4.8)
+// - totalRatings: Total number of ratings
+// - ratings: Array of rating objects with:
+//   - rating: Rating value (1-5)
+//   - comment: Optional comment
+//   - createdAt: Timestamp
+
+console.log(`Average rating: ${ratings.averageRating}`);
+console.log(`Total ratings: ${ratings.totalRatings}`);
+ratings.ratings.forEach((r) => {
+  console.log(`${r.rating} stars: ${r.comment || 'No comment'}`);
+});
+```
+
+> **Note:** API Key chỉ có quyền xem ratings, không có quyền tạo hay sửa đánh giá.
+
+## Ownership & Permissions
+
+### Ownership Rules
+
+The API follows **Strict Ownership** rules:
+
+- ✅ **CREATE**: You can create new Events, Registrants, and Rewards
+- ✅ **READ**: You can view all Events, Registrants, Rewards, and Ratings (even those created by others)
+- ✅ **UPDATE/DELETE**: You can only modify resources created by your API Key
+- ❌ **FORBIDDEN**: Attempting to modify resources created by others will result in a `403 Forbidden` error
+
+### Example: Ownership Violation
+
+```typescript
+try {
+  // Trying to update an event created by another API Key
+  await client.events.update('other-api-key-event-id', {
+    title: 'Hacked Title',
+  });
+} catch (error) {
+  if (error instanceof PermissionError) {
+    console.error('Cannot modify resources created by other API Keys');
+    // Error message: "API Key can only modify events it created"
+  }
+}
 ```
 
 ## Error Handling
 
+The SDK provides specific error classes for different HTTP status codes:
+
 ```typescript
-import { VCRError } from '@ermisnetwork/vcr-client';
+import {
+  VCRError,
+  AuthenticationError,
+  PermissionError,
+  NotFoundError,
+  RateLimitError,
+  ServerError,
+} from '@ermisnetwork/vcr-client';
 
 try {
-  const event = await sdk.events.get('invalid-id');
+  const event = await client.events.get('invalid-id');
 } catch (error) {
-  if (error instanceof VCRError) {
-    console.error('Status:', error.statusCode);
-    console.error('Message:', error.message);
+  if (error instanceof AuthenticationError) {
+    // 401: API Key không hợp lệ hoặc thiếu
+    console.error('Authentication failed:', error.message);
+  } else if (error instanceof PermissionError) {
+    // 403: Thao tác resource không phải của mình hoặc truy cập resource bị cấm
+    console.error('Permission denied:', error.message);
+  } else if (error instanceof NotFoundError) {
+    // 404: Resource không tồn tại
+    console.error('Not found:', error.message);
+  } else if (error instanceof RateLimitError) {
+    // 429: Vượt quá rate limit
+    console.error('Rate limit exceeded:', error.message);
+    // Consider implementing retry with exponential backoff
+  } else if (error instanceof ServerError) {
+    // 5xx: Lỗi server VCR
+    console.error('Server error:', error.message);
+  } else if (error instanceof VCRError) {
+    // Other errors
+    console.error('Error:', error.statusCode, error.message);
     console.error('Data:', error.data);
   }
 }
 ```
 
+### Error Response Format
+
+```typescript
+{
+  statusCode: 403,
+  message: "API Key can only modify events it created",
+  error: "Forbidden",
+  data: { /* Additional error details */ }
+}
+```
+
+## TypeScript Support
+
+The SDK is written in TypeScript and provides full type definitions:
+
+```typescript
+import type {
+  CreateEventParams,
+  UpdateEventParams,
+  Event,
+  CreateRegistrantParams,
+  Registrant,
+  CreateRewardParams,
+  Reward,
+  RatingList,
+  Rating,
+} from '@ermisnetwork/vcr-client';
+
+// Type-safe event creation
+const eventData: CreateEventParams = {
+  title: 'My Event',
+  startTime: '2026-01-15T09:00:00Z',
+  endTime: '2026-01-15T11:00:00Z',
+  maxScore: 100,
+  settings: {
+    maxParticipants: 50,
+    waitingRoomEnabled: true,
+  },
+};
+
+const event: Event = await client.events.create(eventData);
+```
+
+## Best Practices
+
+### 1. Ownership Caching
+
+Consider caching IDs of resources you create to track what you can modify:
+
+```typescript
+const createdEvents: string[] = [];
+
+const event = await client.events.create({ /* ... */ });
+createdEvents.push(event._id);
+
+// Later, check before updating
+if (createdEvents.includes(eventId)) {
+  await client.events.update(eventId, { /* ... */ });
+} else {
+  console.warn('Cannot update: event not created by this API Key');
+}
+```
+
+### 2. Error Handling with Retries
+
+Implement retry logic for rate limits and server errors:
+
+```typescript
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3
+): Promise<T> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof RateLimitError || error instanceof ServerError) {
+        if (i === maxRetries - 1) throw error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.pow(2, i) * 1000)
+        ); // Exponential backoff
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error('Max retries exceeded');
+}
+
+// Usage
+const event = await withRetry(() =>
+  client.events.get('event-id')
+);
+```
+
+### 3. Input Validation
+
+Validate data before sending requests:
+
+```typescript
+function validateEventData(data: CreateEventParams): void {
+  if (new Date(data.startTime) >= new Date(data.endTime)) {
+    throw new Error('startTime must be before endTime');
+  }
+  if (data.maxScore < 0) {
+    throw new Error('maxScore must be non-negative');
+  }
+}
+
+const eventData: CreateEventParams = { /* ... */ };
+validateEventData(eventData);
+const event = await client.events.create(eventData);
+```
+
+### 4. Secure API Key Storage
+
+Never log or expose your API Key:
+
+```typescript
+// ❌ BAD: Logging API Key
+console.log('API Key:', client.getConfig().apiKey);
+
+// ✅ GOOD: Check if API Key is set
+const config = client.getConfig();
+console.log('Has API Key:', config.hasApiKey);
+```
+
+## Resources & Scope
+
+### ✅ Allowed Resources
+
+The SDK provides access to these 4 resources only:
+
+1. **Events** - Create, read, update, delete events
+2. **Registrants** - Manage event participants
+3. **Rewards** - Manage event rewards
+4. **Ratings** - Read-only access to event ratings
+
+### ⛔ Restricted Resources
+
+API Key **does not** have access to:
+
+- Users & Accounts
+- System Settings
+- Submissions
+- Whiteboard Data
+- Uploads (outside of Rewards)
+- Templates
+- Scores
+- Event Logs
+
+Attempting to access these resources will result in a `403 Forbidden` error.
+
+## Examples
+
+### Complete Example: Create Event with Registrants
+
+```typescript
+import { createVCRClient } from '@ermisnetwork/vcr-client';
+
+const client = createVCRClient({
+  apiKey: process.env.VCR_API_KEY!,
+  baseUrl: 'https://api.vcr.example.com',
+});
+
+async function createClassWithStudents() {
+  try {
+    // 1. Create event
+    const event = await client.events.create({
+      title: 'Mathematics 101 - Lecture 5',
+      description: 'Introduction to Calculus',
+      startTime: '2026-01-15T09:00:00Z',
+      endTime: '2026-01-15T11:00:00Z',
+      maxScore: 100,
+      settings: {
+        maxParticipants: 50,
+        waitingRoomEnabled: true,
+        recordingEnabled: true,
+        chatEnabled: true,
+      },
+    });
+
+    console.log('Event created:', event._id);
+    console.log('Join link:', event.joinLink);
+
+    // 2. Add registrants
+    const students = [
+      { firstName: 'Nguyen', lastName: 'Van A', email: 'a@example.com', authId: 'student_001' },
+      { firstName: 'Tran', lastName: 'Thi B', email: 'b@example.com', authId: 'student_002' },
+    ];
+
+    for (const student of students) {
+      const registrant = await client.registrants.create(event._id, {
+        ...student,
+        role: 'student',
+      });
+      console.log(`Added ${student.firstName}: ${registrant.personalJoinLink}`);
+    }
+
+    // 3. Get ratings (if any)
+    const ratings = await client.ratings.list(event._id);
+    console.log(`Average rating: ${ratings.averageRating}`);
+
+  } catch (error) {
+    if (error instanceof PermissionError) {
+      console.error('Permission denied:', error.message);
+    } else if (error instanceof NotFoundError) {
+      console.error('Resource not found:', error.message);
+    } else {
+      console.error('Error:', error);
+    }
+  }
+}
+
+createClassWithStudents();
+```
+
 ## License
 
 MIT
-

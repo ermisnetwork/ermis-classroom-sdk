@@ -1,127 +1,109 @@
 /**
  * VCR SDK - Virtual Classroom SDK
- * A comprehensive TypeScript SDK for Virtual Classroom API
+ * A TypeScript SDK for Virtual Classroom API
+ * 
+ * This SDK provides access to 4 resources:
+ * - Events: Create, read, update, delete events
+ * - Registrants: Manage event participants
+ * - Rewards: Manage event rewards
+ * - Ratings: Read-only access to event ratings
  */
 
-import { VCRClient } from './client';
-import { AuthAPI } from './api/auth';
-import { ApiKeysAPI } from './api/api-keys';
-import { UsersAPI } from './api/users';
-import { EventsAPI } from './api/events';
-import { TemplatesAPI } from './api/templates';
-import { ScoresAPI } from './api/scores';
-import { EventLogsAPI } from './api/event-logs';
+import { VCRHTTPClient } from './client';
+import { EventsResource, RegistrantsResource } from './api/events';
+import { RewardsResource } from './api/rewards';
+import { RatingsResource } from './api/ratings';
 
 export interface VCRClientConfig {
   /**
+   * API Key for authentication
+   * Format: ak_<keyId>.<secret>
+   * @example "ak_1234567890abcdef.a1b2c3d4e5f6789..."
+   */
+  apiKey: string;
+  /**
    * Base URL of the VCR API
-   * @example "http://localhost:3000/api"
+   * @default "https://api.vcr.example.com"
    */
-  baseUrl: string;
-
-  /**
-   * API key for authentication
-   * Use this for server-to-server communication
-   */
-  apiKey?: string;
-
-  /**
-   * Access token for bearer authentication
-   * Use this for user-authenticated requests
-   */
-  accessToken?: string;
-
+  baseUrl?: string;
   /**
    * Request timeout in milliseconds
    * @default 30000
    */
   timeout?: number;
-
   /**
    * Additional headers to include in all requests
    */
   headers?: Record<string, string>;
-
   /**
-   * Enable debug mode
-   * @default false
+   * Use Authorization header instead of x-api-key header
+   * @default false (uses x-api-key header - recommended)
    */
-  debug?: boolean;
+  useAuthorizationHeader?: boolean;
 }
 
-export class VCRSDKClient {
-  private client: VCRClient;
+export class VCRClient {
+  private httpClient: VCRHTTPClient;
 
-  // API modules
-  public readonly auth: AuthAPI;
-  public readonly apiKeys: ApiKeysAPI;
-  public readonly users: UsersAPI;
-  public readonly events: EventsAPI;
-  public readonly templates: TemplatesAPI;
-  public readonly scores: ScoresAPI;
-  public readonly eventLogs: EventLogsAPI;
+  // API resources - only 4 resources as per API documentation
+  public readonly events: EventsResource;
+  public readonly registrants: RegistrantsResource;
+  public readonly rewards: RewardsResource;
+  public readonly ratings: RatingsResource;
 
   constructor(config: VCRClientConfig) {
     // Initialize HTTP client
-    this.client = new VCRClient({
-      baseUrl: config.baseUrl,
+    this.httpClient = new VCRHTTPClient({
       apiKey: config.apiKey,
-      accessToken: config.accessToken,
+      baseUrl: config.baseUrl,
       timeout: config.timeout,
       headers: config.headers,
+      useAuthorizationHeader: config.useAuthorizationHeader,
     });
 
-    // Initialize API modules
-    this.auth = new AuthAPI(this.client);
-    this.apiKeys = new ApiKeysAPI(this.client);
-    this.users = new UsersAPI(this.client);
-    this.events = new EventsAPI(this.client);
-    this.templates = new TemplatesAPI(this.client);
-    this.scores = new ScoresAPI(this.client);
-    this.eventLogs = new EventLogsAPI(this.client);
-
-    if (config.debug) {
-      console.log('VCR SDK initialized with config:', {
-        baseUrl: config.baseUrl,
-        hasApiKey: !!config.apiKey,
-        hasAccessToken: !!config.accessToken,
-      });
-    }
+    // Initialize API resources
+    this.events = new EventsResource(this.httpClient);
+    this.registrants = new RegistrantsResource(this.httpClient);
+    this.rewards = new RewardsResource(this.httpClient);
+    this.ratings = new RatingsResource(this.httpClient);
   }
 
   /**
-   * Set access token for bearer authentication
-   * Useful after login to update the token
-   */
-  setAccessToken(token: string): void {
-    this.client.setAccessToken(token);
-  }
-
-  /**
-   * Set API key for API key authentication
+   * Update API key
    */
   setApiKey(apiKey: string): void {
-    this.client.setApiKey(apiKey);
+    this.httpClient.setApiKey(apiKey);
   }
 
   /**
    * Get the underlying HTTP client
-   * Use this for custom requests
+   * Use this for custom requests if needed
    */
-  getClient(): VCRClient {
-    return this.client;
+  getClient(): VCRHTTPClient {
+    return this.httpClient;
   }
 }
 
 /**
  * Factory function to create a new VCR SDK instance
  */
-export const createVCRClient = (config: VCRClientConfig): VCRSDKClient => {
-  return new VCRSDKClient(config);
+export const createVCRClient = (config: VCRClientConfig): VCRClient => {
+  return new VCRClient(config);
 };
 
 // Export all types
 export * from './types';
-export * from './client';
-export * from './utils';
 
+// Export HTTP client and error classes
+export {
+  VCRHTTPClient,
+  VCRError,
+  AuthenticationError,
+  PermissionError,
+  NotFoundError,
+  RateLimitError,
+  ServerError,
+} from './client';
+
+// Export utility functions
+export * from './utils';
