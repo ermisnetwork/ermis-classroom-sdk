@@ -39,7 +39,7 @@ export interface RequestOptions {
   formData?: FormData; // For multipart/form-data requests
 }
 
-export class VCRClient {
+export class VCRHTTPClient {
   private config: Required<Omit<VCRClientConfig, 'headers'>> & Pick<VCRClientConfig, 'headers'>;
 
   constructor(config: VCRClientConfig) {
@@ -195,6 +195,13 @@ export class VCRClient {
    */
   async patch<T>(endpoint: string, body?: any, params?: Record<string, any>): Promise<T> {
     return this.request<T>(endpoint, { method: 'PATCH', body, params });
+  }
+
+  /**
+   * PATCH request with FormData (for file uploads)
+   */
+  async patchFormData<T>(endpoint: string, formData: FormData, params?: Record<string, any>): Promise<T> {
+    return this.request<T>(endpoint, { method: 'PATCH', formData, params });
   }
 
   /**

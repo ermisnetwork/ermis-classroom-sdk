@@ -9,7 +9,7 @@
  * - Ratings: Read-only access to event ratings
  */
 
-import { VCRClient as VCRHTTPClient } from './client';
+import { VCRHTTPClient } from './client';
 import { EventsResource, RegistrantsResource } from './api/events';
 import { RewardsResource } from './api/rewards';
 import { RatingsResource } from './api/ratings';

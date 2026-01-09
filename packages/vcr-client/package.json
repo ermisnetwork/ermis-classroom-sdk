@@ -1,6 +1,6 @@
 {
   "name": "@ermisnetwork/vcr-client",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "TypeScript Client for Virtual Classroom API with full type support and API key authentication",
   "license": "MIT",
   "type": "module",
