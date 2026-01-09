@@ -1,13 +1,14 @@
 /**
  * VCR SDK Types
  * Based on VCR API Documentation v1.0.1
+ * Updated to match VCR API Backend Schemas
  */
 
 // ============================================================================
 // Common Types
 // ============================================================================
 
-export type RegistrantRole = 'student' | 'teacher' | 'admin';
+export type RegistrantRole = 'admin' | 'staff' | 'teacher' | 'student' | 'parent';
 
 export type SortOrder = 'asc' | 'desc';
 
@@ -45,7 +46,6 @@ export interface PaginationParams {
   sortOrder?: SortOrder;
 }
 
-
 // ============================================================================
 // Event Types
 // ============================================================================
@@ -53,11 +53,21 @@ export interface PaginationParams {
 export interface EventSettings {
   maxParticipants?: number;
   waitingRoomEnabled?: boolean;
+  examLockEnabled?: boolean;
   recordingEnabled?: boolean;
   chatEnabled?: boolean;
   screenShareEnabled?: boolean;
-  requirePermissionForMic?: boolean;
+  allowBreakoutRooms?: boolean;
+  micDefaultState?: boolean;
+  cameraDefaultState?: boolean;
+  // Permission defaults
+  blockAllStudentCamera?: boolean;
+  blockAllStudentMic?: boolean;
+  blockAllStudentScreenShare?: boolean;
+  blockAllStudentChat?: boolean;
   requirePermissionForCamera?: boolean;
+  requirePermissionForMic?: boolean;
+  requirePermissionForScreenShare?: boolean;
 }
 
 export interface CreateEventParams {
@@ -67,6 +77,7 @@ export interface CreateEventParams {
   endTime: string; // ISO 8601 format
   maxScore: number;
   isPublic?: boolean;
+  location?: string;
   tags?: string[];
   settings?: EventSettings;
   rewardIds?: string[]; // IDs of rewards to apply
@@ -79,6 +90,7 @@ export interface UpdateEventParams {
   endTime?: string;
   maxScore?: number;
   isPublic?: boolean;
+  location?: string;
   tags?: string[];
   settings?: EventSettings;
   rewardIds?: string[];
@@ -88,16 +100,23 @@ export interface Event {
   _id: string;
   title: string;
   description?: string;
-  startTime: string;
-  endTime: string;
+  startTime: string; // ISO 8601 (Date)
+  endTime: string; // ISO 8601 (Date)
   maxScore: number;
   isPublic: boolean;
+  location?: string;
   tags?: string[];
   settings?: EventSettings;
-  joinLink: string;
-  ermisRoomCode: string;
-  createdByApiKey: string; // ID of the API Key that created this event
-  rewardIds?: string[];
+  joinLink?: string;
+  qrCode?: string;
+  ermisRoomId?: string;
+  ermisRoomCode?: string;
+  ermisRoomName?: string;
+  ermisRoomStatus?: string;
+  ermisChatChannelId?: string;
+  organizerId: string;
+  createdByApiKey?: string;
+  rewards?: string[] | any[]; // Depends on population
   createdAt?: string;
   updatedAt?: string;
 }
@@ -109,7 +128,7 @@ export interface Event {
 export interface CreateRegistrantParams {
   firstName: string;
   lastName: string;
-  email: string;
+  email?: string;
   authId: string; // ID học viên từ hệ thống của bạn
   role: RegistrantRole;
 }
@@ -120,22 +139,50 @@ export interface UpdateRegistrantParams {
   email?: string;
   authId?: string;
   role?: RegistrantRole;
+  status?: 'active' | 'cancelled';
 }
 
 export interface Registrant {
   _id: string;
+  eventId: string;
   firstName: string;
   lastName: string;
-  email: string;
+  email?: string;
   authId: string;
   role: RegistrantRole;
-  personalJoinLink: string; // Link tham gia riêng với token
+  joinCode: string;
+  status: 'active' | 'cancelled';
+  type: 'user' | 'external';
+
+  personalJoinLink?: string;
+  personalQRCode?: string;
+
+  registrationNote?: string;
+  approvalNote?: string;
+  linkedUserId?: string;
+  externalAppId?: string;
+  externalRegistrantId?: string;
+
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectedAt?: string;
+
+  attendanceStatus?: 'present' | 'absent' | 'late' | 'excused';
+
+  chatBlocked?: boolean;
+  chatBlockedBy?: string;
+  chatBlockedAt?: string;
+  chatBlockReason?: string;
+  feedback?: string;
+
   createdAt?: string;
   updatedAt?: string;
 }
 
 export interface ListRegistrantsParams extends PaginationParams {
   role?: RegistrantRole;
+  status?: 'active' | 'cancelled';
+  type?: 'user' | 'external';
 }
 
 // ============================================================================
@@ -152,6 +199,7 @@ export interface UpdateRewardParams {
   name?: string;
   description?: string;
   file?: File; // Optional: new image file
+  isActive?: boolean;
 }
 
 export interface Reward {
@@ -159,23 +207,42 @@ export interface Reward {
   name: string;
   description?: string;
   image: string; // URL to the reward image
-  createdByApiKey: string; // ID of the API Key that created this reward
+  isActive: boolean;
+  createdBy: string;
+  createdByApiKey?: string;
   createdAt?: string;
   updatedAt?: string;
 }
 
 // ============================================================================
-// Rating Types (Read Only)
+// Rating Types
 // ============================================================================
 
+export interface CreateRatingParams {
+  callQuality: number;
+  classQuality: number;
+  teacher: number;
+  otherThoughts?: string;
+}
+
 export interface Rating {
-  rating: number; // 1-5 stars typically
-  comment?: string;
+  _id: string;
+  eventId: string;
+  registrantId: string;
+  registrantAuthId: string;
+  callQuality: number;
+  classQuality: number;
+  classQualityRating?: number; // legacy/alias if needed
+  teacher: number;
+  otherThoughts?: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface RatingList {
-  averageRating: number;
+  averageCallQuality: number;
+  averageClassQuality: number;
+  averageTeacher: number;
   totalRatings: number;
   ratings: Rating[];
 }
