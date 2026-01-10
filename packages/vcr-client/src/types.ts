@@ -52,8 +52,6 @@ export interface PaginationParams {
 
 export interface EventSettings {
   maxParticipants?: number;
-  waitingRoomEnabled?: boolean;
-  examLockEnabled?: boolean;
   recordingEnabled?: boolean;
   chatEnabled?: boolean;
   screenShareEnabled?: boolean;

@@ -37,7 +37,6 @@ const event = await client.events.create({
   tags: ['math', 'calculus'],
   settings: {
     maxParticipants: 50,
-    waitingRoomEnabled: true,
     recordingEnabled: true,
     chatEnabled: true,
     screenShareEnabled: false,
@@ -111,8 +110,6 @@ const event = await client.events.create({
   tags: ['math', 'calculus'],
   settings: {
     maxParticipants: 50,
-    waitingRoomEnabled: true,
-    examLockEnabled: false,
     allowBreakoutRooms: true,
     recordingEnabled: true,
     chatEnabled: true,
@@ -443,7 +440,6 @@ const eventData: CreateEventParams = {
   endTime: '2026-01-15T11:00:00Z',
   settings: {
     maxParticipants: 50,
-    waitingRoomEnabled: true,
     allowBreakoutRooms: true,
   },
 };
@@ -589,7 +585,6 @@ async function createClassWithStudents() {
       maxScore: 100,
       settings: {
         maxParticipants: 50,
-        waitingRoomEnabled: true,
         recordingEnabled: true,
         chatEnabled: true,
       },

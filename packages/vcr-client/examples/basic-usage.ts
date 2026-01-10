@@ -11,30 +11,18 @@ async function main() {
   const sdk = createVCRClient({
     baseUrl: 'http://localhost:3000/api',
     apiKey: 'your-api-key-here', // Replace with your actual API key
-    debug: true,
   });
 
   try {
-    // Example 1: List all events
-    console.log('\n=== Listing Events ===');
-    const events = await sdk.events.list({
-      page: 1,
-      limit: 10,
-    });
-    console.log('Events:', events);
-
-    // Example 2: Create a new event
+    // Example 1: Create a new event
     console.log('\n=== Creating Event ===');
     const newEvent = await sdk.events.create({
       title: 'Sample Event',
       description: 'This is a sample event created via SDK',
-      templateId: 'your-template-id', // Replace with actual template ID
       startTime: new Date(Date.now() + 86400000).toISOString(), // Tomorrow
       endTime: new Date(Date.now() + 90000000).toISOString(), // Tomorrow + 1 hour
-      maxScore: 100,
       settings: {
         maxParticipants: 50,
-        waitingRoomEnabled: true,
         recordingEnabled: true,
         chatEnabled: true,
       },
@@ -42,49 +30,59 @@ async function main() {
     });
     console.log('Created Event:', newEvent);
 
-    // Example 3: Get event details
-    if (newEvent.data._id) {
-      console.log('\n=== Getting Event Details ===');
-      const eventDetails = await sdk.events.get(newEvent.data._id);
-      console.log('Event Details:', eventDetails);
+    // Example 2: Get event details
+    console.log('\n=== Getting Event Details ===');
+    const eventDetails = await sdk.events.get(newEvent._id);
+    console.log('Event Details:', eventDetails);
 
-      // Example 4: Create registrants
-      console.log('\n=== Creating Registrant ===');
-      const registrant = await sdk.events.createRegistrant(newEvent.data._id, {
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john.doe@example.com',
-        authId: 'student_001',
-        role: 'student',
-      });
-      console.log('Created Registrant:', registrant);
+    // Example 3: Create a registrant
+    console.log('\n=== Creating Registrant ===');
+    const registrant = await sdk.registrants.create(newEvent._id, {
+      firstName: 'John',
+      lastName: 'Doe',
+      email: 'john.doe@example.com',
+      authId: 'student_001',
+      role: 'student',
+    });
+    console.log('Created Registrant:', registrant);
 
-      // Example 5: List registrants
-      console.log('\n=== Listing Registrants ===');
-      const registrants = await sdk.events.getRegistrants(newEvent.data._id, {
-        page: 1,
-        limit: 10,
-      });
-      console.log('Registrants:', registrants);
-    }
-
-    // Example 6: List templates
-    console.log('\n=== Listing Templates ===');
-    const templates = await sdk.templates.list({
+    // Example 4: List registrants
+    console.log('\n=== Listing Registrants ===');
+    const registrants = await sdk.registrants.list(newEvent._id, {
       page: 1,
       limit: 10,
     });
-    console.log('Templates:', templates);
+    console.log('Registrants:', registrants);
 
-    // Example 7: Get current user profile (requires bearer token)
-    // This will fail with API key auth, but shows how to use it
-    try {
-      console.log('\n=== Getting User Profile ===');
-      const profile = await sdk.users.getProfile();
-      console.log('Profile:', profile);
-    } catch (error) {
-      console.log('Note: User profile requires bearer token authentication');
+    // Example 5: Bulk create registrants
+    console.log('\n=== Bulk Creating Registrants ===');
+    const bulkResult = await sdk.registrants.bulkCreate(newEvent._id, {
+      registrants: [
+        {
+          firstName: 'Jane',
+          lastName: 'Smith',
+          email: 'jane.smith@example.com',
+          authId: 'student_002',
+          role: 'student',
+        },
+        {
+          firstName: 'Bob',
+          lastName: 'Johnson',
+          email: 'bob.johnson@example.com',
+          authId: 'student_003',
+          role: 'student',
+        },
+      ],
+    });
+    console.log(`Bulk create result: ${bulkResult.created} created, ${bulkResult.failed} failed`);
+    if (bulkResult.errors.length > 0) {
+      console.log('Errors:', bulkResult.errors);
     }
+
+    // Example 6: Get event ratings (read-only)
+    console.log('\n=== Getting Event Ratings ===');
+    const ratings = await sdk.ratings.list(newEvent._id);
+    console.log(`Average ratings - Call: ${ratings.averageCallQuality}, Class: ${ratings.averageClassQuality}, Teacher: ${ratings.averageTeacher}`);
 
   } catch (error) {
     console.error('Error:', error);
