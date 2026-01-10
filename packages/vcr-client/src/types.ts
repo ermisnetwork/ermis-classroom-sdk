@@ -75,7 +75,6 @@ export interface CreateEventParams {
   description?: string;
   startTime: string; // ISO 8601 format
   endTime: string; // ISO 8601 format
-  maxScore: number;
   isPublic?: boolean;
   location?: string;
   tags?: string[];
@@ -88,7 +87,6 @@ export interface UpdateEventParams {
   description?: string;
   startTime?: string;
   endTime?: string;
-  maxScore?: number;
   isPublic?: boolean;
   location?: string;
   tags?: string[];
