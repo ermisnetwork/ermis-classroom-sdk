@@ -48,10 +48,8 @@ async function main() {
       templateId: 'your-template-id', // Replace with actual template ID
       startTime: new Date(Date.now() + 86400000).toISOString(),
       endTime: new Date(Date.now() + 90000000).toISOString(),
-      maxScore: 100,
       settings: {
         maxParticipants: 30,
-        waitingRoomEnabled: true,
       },
     });
     console.log('Created Event:', event);
