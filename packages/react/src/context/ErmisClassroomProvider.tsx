@@ -63,6 +63,9 @@ export function ErmisClassroomProvider({
   const [handRaised, setHandRaised] = useState(false);
   const [pinType, setPinType] = useState<'local' | 'everyone' | null>(null);
 
+  // Livestream state
+  const [isLivestreamActive, setIsLivestreamActive] = useState(false);
+
   // Device state
   const [devices, setDevices] = useState<MediaDevices | null>(null);
   const [selectedDevices, setSelectedDevices] = useState<SelectedDevices | null>(null);
@@ -863,6 +866,36 @@ export function ErmisClassroomProvider({
     return await currentRoom.fetchParticipants();
   }, [currentRoom]);
 
+  // Livestream methods
+  const startLivestream = useCallback(async () => {
+    if (!currentRoom) throw new Error('Not in a room');
+    const local = currentRoom.localParticipant as any;
+    if (!local?.publisher) {
+      throw new Error('Publisher not initialized');
+    }
+    try {
+      await local.publisher.startLivestream();
+      setIsLivestreamActive(true);
+    } catch (error) {
+      console.error('Failed to start livestream:', error);
+      setIsLivestreamActive(false);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  const stopLivestream = useCallback(async () => {
+    if (!currentRoom) return;
+    const local = currentRoom.localParticipant as any;
+    if (!local?.publisher) return;
+    try {
+      await local.publisher.stopLivestream();
+      setIsLivestreamActive(false);
+    } catch (error) {
+      console.error('Failed to stop livestream:', error);
+      throw error;
+    }
+  }, [currentRoom]);
+
   const value: ErmisClassroomContextValue = useMemo(
     () => ({
       client: clientRef.current,
@@ -911,6 +944,10 @@ export function ErmisClassroomProvider({
       fetchParticipants,
       enableParticipantScreenShare,
       disableParticipantScreenShare,
+      // Livestream
+      startLivestream,
+      stopLivestream,
+      isLivestreamActive,
     }),
     [
       participants,
@@ -957,6 +994,9 @@ export function ErmisClassroomProvider({
       fetchParticipants,
       enableParticipantScreenShare,
       disableParticipantScreenShare,
+      startLivestream,
+      stopLivestream,
+      isLivestreamActive,
     ]
   );
 

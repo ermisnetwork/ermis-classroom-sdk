@@ -15,9 +15,12 @@ import { WebRTCManager } from "./transports/WebRTCManager";
 import { StreamManager } from "./transports/StreamManager";
 import { VideoEncoderManager } from "./managers/VideoEncoderManager";
 import { AudioEncoderManager } from "./managers/AudioEncoderManager";
+import { AACEncoderManager } from "./managers/AACEncoderManager";
 import { VideoProcessor } from "./processors/VideoProcessor";
 import { AudioProcessor } from "./processors/AudioProcessor";
+import { LivestreamAudioMixer } from "../audioMixer/LivestreamAudioMixer";
 import { log } from "../../utils";
+import { SUB_STREAMS } from "../../constants/publisherConstants";
 
 interface PublisherEvents extends Record<string, unknown> {
   statusUpdate: { message: string; isError: boolean };
@@ -68,6 +71,9 @@ interface PublisherEvents extends Record<string, unknown> {
     hasVideo: boolean;
     hasAudio: boolean;
   };
+  livestreamStarted: { tabStream: MediaStream; mixedAudioStream: MediaStream };
+  livestreamStopped: undefined;
+  tabCaptureError: unknown;
 }
 
 export class Publisher extends EventEmitter<PublisherEvents> {
@@ -89,6 +95,16 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private audioProcessor: AudioProcessor | null = null;
   private InitAudioRecorder: any = null;
   private permissions: ParticipantPermissions;
+
+  // Livestream state
+  private isLivestreaming = false;
+  private livestreamVideoProcessor: VideoProcessor | null = null;
+  private livestreamAudioProcessor: AudioProcessor | null = null;
+  private livestreamVideoEncoderManager: VideoEncoderManager | null = null;
+  private livestreamAudioEncoderManager: AACEncoderManager | null = null;
+  private livestreamAudioMixer: LivestreamAudioMixer | null = null;
+  private tabStream: MediaStream | null = null;
+  private mixedAudioStream: MediaStream | null = null;
 
   constructor(config: PublisherConfig) {
     super();
@@ -728,6 +744,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     try {
       this.updateStatus("Stopping publisher...");
 
+      // Stop livestream first if active
+      if (this.isLivestreaming) {
+        await this.stopLivestream();
+      }
+
       // Stop heartbeat first to prevent errors during cleanup
       if (this.streamManager) {
         this.streamManager.stopHeartbeat();
@@ -1022,6 +1043,14 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       await this.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE, {
         has_audio: hasAudio,
       });
+
+      // If livestreaming and screen share has audio, add it to the livestream mix
+      if (this.isLivestreaming && hasAudio && this.livestreamAudioMixer && this.screenStream) {
+        log("[Publisher] Adding screen share audio to active livestream mix");
+        const screenAudioStream = new MediaStream(this.screenStream.getAudioTracks());
+        this.livestreamAudioMixer.addScreenShareAudio(screenAudioStream);
+      }
+
       this.updateStatus(`Screen sharing started (Video: ${hasVideo}, Audio: ${hasAudio})`);
 
     } catch (error) {
@@ -1150,6 +1179,12 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Send STOP_SCREEN_SHARE event
       await this.sendMeetingEvent(MEETING_EVENTS.STOP_SCREEN_SHARE);
 
+      // If livestreaming, remove screen share audio from the mix
+      if (this.isLivestreaming && this.livestreamAudioMixer) {
+        log("[Publisher] Removing screen share audio from livestream mix");
+        this.livestreamAudioMixer.removeScreenShareAudio();
+      }
+
       this.updateStatus("Screen sharing stopped");
 
       // Emit to global event bus so Room can update state
@@ -1276,5 +1311,348 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
   get mediaStream(): MediaStream | null {
     return this.currentStream;
+  }
+
+  // ==========================================
+  // LIVESTREAM METHODS
+  // ==========================================
+
+  /**
+   * Start livestreaming - captures current tab and mixes audio
+   * Uses the existing connection to publish on LIVESTREAM_VIDEO and LIVESTREAM_AUDIO channels
+   */
+  async startLivestream(): Promise<void> {
+    if (this.isLivestreaming) {
+      console.warn("[Publisher] Already livestreaming");
+      return;
+    }
+
+    if (!this.isPublishing) {
+      throw new Error("Publisher must be publishing before starting livestream");
+    }
+
+    if (!this.streamManager) {
+      throw new Error("StreamManager not initialized");
+    }
+
+    try {
+      this.updateStatus("Starting livestream...");
+
+      // Capture current tab
+      await this.captureCurrentTab();
+
+      if (!this.tabStream) {
+        throw new Error("Failed to capture tab stream");
+      }
+
+      // Mix audio streams
+      await this.setupLivestreamAudioMixing();
+
+      // Add livestream channels using StreamManager (works for both WebRTC and WebTransport)
+      log("[Publisher] Adding livestream channels...");
+      await this.streamManager.addStream(ChannelName.LIVESTREAM_720P);
+      await this.streamManager.addStream(ChannelName.LIVESTREAM_AUDIO);
+      
+      // Wait for channels to be ready
+      await this.streamManager.waitForStreamReady(ChannelName.LIVESTREAM_720P);
+      await this.streamManager.waitForStreamReady(ChannelName.LIVESTREAM_AUDIO);
+      log("[Publisher] Livestream channels ready");
+
+      // Initialize processors for livestream
+      await this.initializeLivestreamProcessors();
+
+      // Start media processing
+      await this.startLivestreamProcessing();
+
+      this.isLivestreaming = true;
+      this.updateStatus("Livestream started");
+
+      this.emit("livestreamStarted", {
+        tabStream: this.tabStream,
+        mixedAudioStream: this.mixedAudioStream!,
+      });
+
+      log("[Publisher] Livestream started successfully");
+    } catch (error) {
+      console.error("[Publisher] Failed to start livestream:", error);
+      this.updateStatus("Failed to start livestream", true);
+      await this.stopLivestream();
+      throw error;
+    }
+  }
+
+  /**
+   * Stop livestreaming
+   */
+  async stopLivestream(): Promise<void> {
+    if (!this.isLivestreaming) return;
+
+    try {
+      this.updateStatus("Stopping livestream...");
+
+      // Stop livestream processors
+      if (this.livestreamVideoProcessor) {
+        await this.livestreamVideoProcessor.stop();
+        this.livestreamVideoProcessor = null;
+      }
+
+      if (this.livestreamAudioProcessor) {
+        await this.livestreamAudioProcessor.stop();
+        this.livestreamAudioProcessor = null;
+      }
+
+      // Stop encoder managers
+      if (this.livestreamVideoEncoderManager) {
+        await this.livestreamVideoEncoderManager.closeAll();
+        this.livestreamVideoEncoderManager = null;
+      }
+
+      if (this.livestreamAudioEncoderManager) {
+        await this.livestreamAudioEncoderManager.stop();
+        this.livestreamAudioEncoderManager = null;
+      }
+
+      // Cleanup audio mixer
+      if (this.livestreamAudioMixer) {
+        await this.livestreamAudioMixer.cleanup();
+        this.livestreamAudioMixer = null;
+      }
+
+      // Stop tab stream
+      if (this.tabStream) {
+        this.tabStream.getTracks().forEach((track) => track.stop());
+        this.tabStream = null;
+      }
+
+      this.mixedAudioStream = null;
+      this.isLivestreaming = false;
+
+      this.updateStatus("Livestream stopped");
+      this.emit("livestreamStopped", undefined);
+
+      log("[Publisher] Livestream stopped successfully");
+    } catch (error) {
+      console.error("[Publisher] Error stopping livestream:", error);
+      this.updateStatus("Error stopping livestream", true);
+    }
+  }
+
+  /**
+   * Capture current browser tab
+   */
+  private async captureCurrentTab(): Promise<void> {
+    this.updateStatus("Capturing current tab...");
+
+    try {
+      const displayMediaOptions: DisplayMediaStreamOptions & {
+        preferCurrentTab?: boolean;
+        selfBrowserSurface?: string;
+      } = {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 15 },
+        },
+        audio: true,
+      };
+
+      // Chrome-specific options for preferring current tab
+      displayMediaOptions.preferCurrentTab = true;
+      displayMediaOptions.selfBrowserSurface = "include";
+
+      this.tabStream = await navigator.mediaDevices.getDisplayMedia(
+        displayMediaOptions as DisplayMediaStreamOptions
+      );
+
+      const hasVideo = this.tabStream.getVideoTracks().length > 0;
+      const hasAudio = this.tabStream.getAudioTracks().length > 0;
+
+      log(`[Publisher] Tab captured - Video: ${hasVideo}, Audio: ${hasAudio}`);
+
+      if (!hasVideo) {
+        throw new Error("Tab capture must have video");
+      }
+
+      // Handle tab capture stop (user stops from browser UI)
+      const videoTrack = this.tabStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          log("[Publisher] Tab capture stopped by user");
+          this.stopLivestream();
+        };
+      }
+
+      this.updateStatus("Tab captured successfully");
+    } catch (error) {
+      console.error("[Publisher] Tab capture failed:", error);
+      this.emit("tabCaptureError", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Setup audio mixing (tab audio + mic)
+   */
+  private async setupLivestreamAudioMixing(): Promise<void> {
+    this.updateStatus("Setting up audio mixing...");
+
+    // Initialize audio mixer
+    this.livestreamAudioMixer = new LivestreamAudioMixer({
+      micVolume: 1.0,
+      tabAudioVolume: 1.0,
+      screenShareVolume: 1.0,
+      debug: false,
+    });
+    await this.livestreamAudioMixer.initialize();
+
+    // Get tab audio stream (if available)
+    let tabAudioStream: MediaStream | null = null;
+    if (this.tabStream && this.tabStream.getAudioTracks().length > 0) {
+      tabAudioStream = new MediaStream(this.tabStream.getAudioTracks());
+    }
+
+    // Mix the audio streams (mic from current stream + tab audio)
+    this.mixedAudioStream = await this.livestreamAudioMixer.mixAudioStreams(
+      this.currentStream,
+      tabAudioStream
+    );
+
+    // If currently screen sharing with audio, add it to the mix
+    if (this.isScreenSharing && this.screenStream) {
+      const screenAudioTracks = this.screenStream.getAudioTracks();
+      if (screenAudioTracks.length > 0) {
+        log("[Publisher] Adding screen share audio to livestream mix");
+        const screenAudioStream = new MediaStream(screenAudioTracks);
+        this.livestreamAudioMixer.addScreenShareAudio(screenAudioStream);
+      }
+    }
+
+    log("[Publisher] Audio mixing setup complete");
+  }
+
+  /**
+   * Initialize processors for livestream channels
+   */
+  private async initializeLivestreamProcessors(): Promise<void> {
+    if (!this.tabStream || !this.streamManager) {
+      throw new Error("Tab stream or StreamManager not initialized");
+    }
+
+    // Video processor for livestream
+    this.livestreamVideoEncoderManager = new VideoEncoderManager();
+    this.livestreamVideoProcessor = new VideoProcessor(
+      this.livestreamVideoEncoderManager,
+      this.streamManager,
+      [SUB_STREAMS.LIVESTREAM_720P] as SubStream[]
+    );
+
+    this.livestreamVideoProcessor.on("encoderError", (error) => {
+      console.error("[Publisher] Livestream video encoder error:", error);
+      this.updateStatus("Livestream video encoder error", true);
+    });
+
+    // Audio processor for livestream - use AAC encoder for HLS compatibility
+    if (this.mixedAudioStream) {
+      const audioConfig = {
+        sampleRate: 48000,
+        numberOfChannels: 2, // Stereo for better HLS compatibility
+      };
+
+      this.livestreamAudioEncoderManager = new AACEncoderManager(
+        ChannelName.LIVESTREAM_AUDIO,
+        audioConfig
+      );
+
+      this.livestreamAudioProcessor = new AudioProcessor(
+        this.livestreamAudioEncoderManager as any, // AACEncoderManager has compatible interface
+        this.streamManager,
+        ChannelName.LIVESTREAM_AUDIO
+      );
+
+      this.livestreamAudioProcessor.on("encoderError", (error) => {
+        console.error("[Publisher] Livestream audio encoder error:", error);
+        this.updateStatus("Livestream audio encoder error", true);
+      });
+    }
+
+    log("[Publisher] Livestream processors initialized");
+  }
+
+  /**
+   * Start livestream media processing
+   */
+  private async startLivestreamProcessing(): Promise<void> {
+    if (!this.tabStream) {
+      throw new Error("Tab stream not available");
+    }
+
+    // Start video processing
+    if (this.livestreamVideoProcessor) {
+      const videoTrack = this.tabStream.getVideoTracks()[0];
+      if (videoTrack) {
+        const baseConfig = {
+          codec: "avc1.640c34",
+          width: 1280,
+          height: 720,
+          framerate: 15,
+          bitrate: 1_500_000,
+        };
+
+        await this.livestreamVideoProcessor.initialize(videoTrack, baseConfig);
+        await this.livestreamVideoProcessor.start();
+        log("[Publisher] Livestream video processing started");
+      }
+    }
+
+    // Start audio processing
+    if (this.livestreamAudioProcessor && this.mixedAudioStream) {
+      await this.livestreamAudioProcessor.initialize(this.mixedAudioStream);
+      await this.livestreamAudioProcessor.start();
+      log("[Publisher] Livestream audio processing started");
+    }
+  }
+
+  /**
+   * Set microphone volume in the livestream mix
+   * @param volume - Volume level (0-1)
+   */
+  setLivestreamMicVolume(volume: number): void {
+    if (this.livestreamAudioMixer) {
+      this.livestreamAudioMixer.setMicVolume(volume);
+    }
+  }
+
+  /**
+   * Set tab audio volume in the livestream mix
+   * @param volume - Volume level (0-1)
+   */
+  setLivestreamTabAudioVolume(volume: number): void {
+    if (this.livestreamAudioMixer) {
+      this.livestreamAudioMixer.setTabAudioVolume(volume);
+    }
+  }
+
+  /**
+   * Set screen share audio volume in the livestream mix
+   * @param volume - Volume level (0-1)
+   */
+  setLivestreamScreenShareVolume(volume: number): void {
+    if (this.livestreamAudioMixer) {
+      this.livestreamAudioMixer.setScreenShareVolume(volume);
+    }
+  }
+
+  /**
+   * Check if currently livestreaming
+   */
+  get isLivestreamActive(): boolean {
+    return this.isLivestreaming;
+  }
+
+  /**
+   * Get the tab video stream (for preview)
+   */
+  get livestreamTabStream(): MediaStream | null {
+    return this.tabStream;
   }
 }

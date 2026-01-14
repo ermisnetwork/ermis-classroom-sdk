@@ -231,3 +231,72 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
 }
 
 registerProcessor("jitter-resistant-processor", JitterResistantProcessor);
+
+/**
+ * AudioCaptureProcessor - Captures audio chunks and sends them to main thread
+ * Used for AAC encoding where we need raw PCM data
+ */
+class AudioCaptureProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.bufferSize = 4096; // Consistent with previous ScriptProcessor usage
+    this.bufferCount = 0;
+    // We'll capture planar data for stereo (2 channels)
+    this.buffers = [[], []]; 
+  }
+
+  process(inputs, outputs, parameters) {
+    const input = inputs[0];
+    if (!input || input.length === 0) return true;
+
+    const numberOfChannels = input.length;
+
+    // Process each channel
+    for (let channel = 0; channel < numberOfChannels; channel++) {
+      const inputChannel = input[channel];
+      
+      // Ensure we have a buffer for this channel
+      if (!this.buffers[channel]) {
+        this.buffers[channel] = [];
+      }
+
+      // Add new samples to buffer - iterate manually for performance in worklet
+      for (let i = 0; i < inputChannel.length; i++) {
+        this.buffers[channel].push(inputChannel[i]);
+      }
+    }
+
+    // Check if we have enough data to send a chunk (using channel 0 as reference)
+    if (this.buffers[0].length >= this.bufferSize) {
+      this.flush();
+    }
+
+    return true; // Keep processor alive
+  }
+
+  flush() {
+    const channelCount = this.buffers.length;
+    const planarData = [];
+    const bufferLength = this.buffers[0].length;
+
+    // Convert accumulated samples to Float32Arrays for transport
+    for (let channel = 0; channel < channelCount; channel++) {
+      // If a channel is missing data (e.g. mono source going to stereo), pad with silent
+      if (!this.buffers[channel] || this.buffers[channel].length < bufferLength) {
+         planarData.push(new Float32Array(bufferLength));
+      } else {
+         planarData.push(new Float32Array(this.buffers[channel]));
+      }
+      // Reset buffer
+      this.buffers[channel] = [];
+    }
+
+    // Send to main thread
+    this.port.postMessage({
+      type: 'audioData',
+      planarData: planarData
+    }, planarData.map(buffer => buffer.buffer)); // Transfer buffers for performance
+  }
+}
+
+registerProcessor("audio-capture-processor", AudioCaptureProcessor);

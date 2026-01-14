@@ -46,6 +46,11 @@ export class FrameTypeHelper {
           ? FrameType.SCREEN_SHARE_KEY
           : FrameType.SCREEN_SHARE_DELTA;
 
+      case ChannelName.LIVESTREAM_720P:
+        return isKeyFrame
+          ? FrameType.LIVESTREAM_KEY
+          : FrameType.LIVESTREAM_DELTA;
+
       default:
         // Fallback to 720p key frame
         console.warn(`Unknown channel name: ${channelName}, using default`);
@@ -110,7 +115,8 @@ export class FrameTypeHelper {
     return (
       frameType === FrameType.CAM_360P_KEY ||
       frameType === FrameType.CAM_720P_KEY ||
-      frameType === FrameType.SCREEN_SHARE_KEY
+      frameType === FrameType.SCREEN_SHARE_KEY ||
+      frameType === FrameType.LIVESTREAM_KEY
     );
   }
 
@@ -121,8 +127,10 @@ export class FrameTypeHelper {
    */
   static isVideoFrame(frameType: FrameType): boolean {
     return (
-      frameType >= FrameType.CAM_360P_KEY &&
-      frameType <= FrameType.SCREEN_SHARE_DELTA
+      (frameType >= FrameType.CAM_360P_KEY &&
+        frameType <= FrameType.SCREEN_SHARE_DELTA) ||
+      frameType === FrameType.LIVESTREAM_KEY ||
+      frameType === FrameType.LIVESTREAM_DELTA
     );
   }
 
@@ -167,6 +175,10 @@ export class FrameTypeHelper {
         return "Screen Share Keyframe";
       case FrameType.SCREEN_SHARE_DELTA:
         return "Screen Share Delta frame";
+      case FrameType.LIVESTREAM_KEY:
+        return "Livestream Video Keyframe";
+      case FrameType.LIVESTREAM_DELTA:
+        return "Livestream Video Delta frame";
       case FrameType.AUDIO:
         return "Audio frame";
       case FrameType.CONFIG:
