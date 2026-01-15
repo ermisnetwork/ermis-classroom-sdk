@@ -209,5 +209,13 @@ export interface ErmisClassroomContextValue {
   enableParticipantScreenShare: (participantUserId: string) => Promise<void>;
   /** Disable a participant's screen share permission (HOST ONLY) */
   disableParticipantScreenShare: (participantUserId: string) => Promise<void>;
+
+  // Livestream actions
+  /** Start livestreaming - captures current tab and mixes audio */
+  startLivestream: () => Promise<void>;
+  /** Stop livestreaming */
+  stopLivestream: () => Promise<void>;
+  /** Whether currently livestreaming */
+  isLivestreamActive: boolean;
 }
 

@@ -10,7 +10,7 @@ import {
 } from "@ermisnetwork/ermis-classroom-react"
 import { Button } from "@/components/ui/button"
 import {
-  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers, IconDoorExit, IconPlayerStop, IconUserMinus, IconBan
+  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers, IconDoorExit, IconPlayerStop, IconUserMinus, IconBan, IconBroadcast, IconBroadcastOff
 } from "@tabler/icons-react"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { cn } from "@/lib/utils"
@@ -529,6 +529,10 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     disableParticipantScreenShare,
     enableParticipantScreenShare,
     kickParticipant,
+    // Livestream
+    startLivestream,
+    stopLivestream,
+    isLivestreamActive,
   } = useErmisClassroom()
 
   const {
@@ -676,6 +680,27 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
   const handleRejectPermission = useCallback(() => {
     setIncomingPermissionRequest(null)
   }, [])
+
+  // Livestream toggle handler
+  const handleLivestreamToggle = useCallback(async () => {
+    if (isLivestreamActive) {
+      try {
+        await stopLivestream()
+        log("[MeetingRoom] Livestream stopped")
+      } catch (error) {
+        console.error("[MeetingRoom] Failed to stop livestream:", error)
+      }
+    } else {
+      try {
+        await startLivestream()
+        log("[MeetingRoom] Livestream started successfully")
+      } catch (error) {
+        console.error("[MeetingRoom] Failed to start livestream:", error)
+      }
+    }
+  }, [isLivestreamActive, startLivestream, stopLivestream])
+
+
 
   // Independent pin states
   const [localPinnedUserId, setLocalPinnedUserId] = useState<string | null>(null)
@@ -1091,6 +1116,20 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
             }
           >
             {isScreenSharing ? <IconScreenShareOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconScreenShare className="h-4 w-4 sm:h-5 sm:w-5" />}
+          </Button>
+
+          {/* Livestream Button */}
+          <Button
+            variant={isLivestreamActive ? "default" : "secondary"}
+            size="icon"
+            onClick={handleLivestreamToggle}
+            className={cn(
+              "h-10 w-10 sm:h-12 sm:w-12 rounded-full",
+              isLivestreamActive && "bg-red-500 hover:bg-red-600 animate-pulse"
+            )}
+            title={isLivestreamActive ? "Stop Livestream" : "Start Livestream"}
+          >
+            {isLivestreamActive ? <IconBroadcastOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconBroadcast className="h-4 w-4 sm:h-5 sm:w-5" />}
           </Button>
 
           <DropdownMenu.Root>

@@ -97,6 +97,8 @@ export class ApiClient {
             ["screen_share_720p", true],
             ["screen_share_1080p", true],
             ["screen_share_audio", true],
+            ["livestream_720p", true],
+            ["livestream_audio", true]
           ],
           hidden: false,
           can_update_metadata: false

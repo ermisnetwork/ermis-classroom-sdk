@@ -51,6 +51,9 @@ const FRAME_TYPE = {
   SS_1080P_KEY: 7,
   SS_1080P_DELTA: 8,
   SS_AUDIO: 9,
+  LIVESTREAM_720P_KEY: 10,
+  LIVESTREAM_720P_DELTA: 11,
+  LIVESTREAM_AUDIO: 12,
   CONFIG: 0xfd,
   EVENT: 0xfe,
   PING: 0xff,
@@ -68,6 +71,8 @@ function getFrameType(channelName, chunkType) {
       return chunkType === "key" ? FRAME_TYPE.SS_720P_KEY : FRAME_TYPE.SS_720P_DELTA;
     case CHANNEL_NAME.SCREEN_SHARE_1080P:
       return chunkType === "key" ? FRAME_TYPE.SS_1080P_KEY : FRAME_TYPE.SS_1080P_DELTA;
+    case CHANNEL_NAME.LIVESTREAM_720P:
+      return chunkType === "key" ? FRAME_TYPE.LIVESTREAM_720P_KEY : FRAME_TYPE.LIVESTREAM_720P_DELTA;
     default:
       return FRAME_TYPE.CAM_720P_KEY;
   }
@@ -100,6 +105,8 @@ const CHANNEL_NAME = {
   SCREEN_SHARE_720P: "screen_share_720p",
   SCREEN_SHARE_1080P: "screen_share_1080p",
   SCREEN_SHARE_AUDIO: "screen_share_audio",
+  LIVESTREAM_720P: "livestream_720p",
+  LIVESTREAM_AUDIO: "livestream_audio",
 };
 
 /**

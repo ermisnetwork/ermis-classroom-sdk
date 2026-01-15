@@ -9,6 +9,9 @@ export { WebTransportManager } from "./transports/WebTransportManager";
 export { WebRTCManager } from "./transports/WebRTCManager";
 export { VideoEncoderManager } from "./managers/VideoEncoderManager";
 export { AudioEncoderManager } from "./managers/AudioEncoderManager";
+export { AACEncoderManager } from "./managers/AACEncoderManager";
+export { LivestreamAudioMixer } from "../audioMixer/LivestreamAudioMixer";
+export type { LivestreamAudioMixerConfig } from "../audioMixer/LivestreamAudioMixer";
 export { VideoProcessor } from "./processors/VideoProcessor";
 export { AudioProcessor } from "./processors/AudioProcessor";
 

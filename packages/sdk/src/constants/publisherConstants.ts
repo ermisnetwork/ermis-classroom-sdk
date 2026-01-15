@@ -28,6 +28,8 @@ export function getFrameType(channelName: string, chunkType: 'key' | 'delta'): n
       return chunkType === 'key' ? FrameType.SCREEN_SHARE_KEY : FrameType.SCREEN_SHARE_DELTA;
     case ChannelName.SCREEN_SHARE_1080P:
       return chunkType === 'key' ? FrameType.SCREEN_SHARE_KEY : FrameType.SCREEN_SHARE_DELTA;
+    case ChannelName.LIVESTREAM_720P:
+      return chunkType === 'key' ? FrameType.LIVESTREAM_KEY : FrameType.LIVESTREAM_DELTA;
     default:
       return FrameType.CAM_720P_KEY;
   }
@@ -38,7 +40,7 @@ export function getFrameType(channelName: string, chunkType: 'key' | 'delta'): n
  */
 export function getDataChannelId(
   channelName: string,
-  type: 'camera' | 'screenShare' = 'camera',
+  type: 'camera' | 'screenShare' | 'livestream' = 'camera',
 ): number {
   const mapping: Record<string, Record<string, number>> = {
     camera: {
@@ -50,6 +52,10 @@ export function getDataChannelId(
     screenShare: {
       [ChannelName.SCREEN_SHARE_720P]: 5,
       [ChannelName.SCREEN_SHARE_AUDIO]: 6,
+    },
+    livestream: {
+      [ChannelName.LIVESTREAM_720P]: 7,
+      [ChannelName.LIVESTREAM_AUDIO]: 8,
     },
   };
 
@@ -100,6 +106,18 @@ export const SUB_STREAMS: Record<string, SubStream> = {
     bitrate: 1_500_000,
     framerate: 15,
     channelName: ChannelName.SCREEN_SHARE_1080P,
+  },
+  LIVESTREAM_720P: {
+    name: 'livestream_720p',
+    width: 1280,
+    height: 720,
+    bitrate: 1_500_000,
+    framerate: 15,
+    channelName: ChannelName.LIVESTREAM_720P,
+  },
+  LIVESTREAM_AUDIO: {
+    name: 'livestream_audio',
+    channelName: ChannelName.LIVESTREAM_AUDIO,
   },
 };
 
