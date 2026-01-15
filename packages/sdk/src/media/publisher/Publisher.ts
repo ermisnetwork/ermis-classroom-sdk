@@ -1773,6 +1773,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         tabStream: this.tabStream,
         mixedAudioStream: this.mixedAudioStream!,
       });
+      globalEventBus.emit(GlobalEvents.LIVESTREAM_STARTED, undefined);
 
       log("[Publisher] Livestream started successfully");
     } catch (error) {
@@ -1831,6 +1832,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       this.updateStatus("Livestream stopped");
       this.emit("livestreamStopped", undefined);
+      globalEventBus.emit(GlobalEvents.LIVESTREAM_STOPPED, undefined);
 
       log("[Publisher] Livestream stopped successfully");
     } catch (error) {

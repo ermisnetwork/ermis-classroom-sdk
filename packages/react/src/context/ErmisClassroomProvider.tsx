@@ -12,6 +12,8 @@ import ErmisClassroom, {
   ROOM_EVENTS,
   type SelectedDevices,
   PinType,
+  globalEventBus,
+  GlobalEvents,
 } from '@ermisnetwork/ermis-classroom-sdk';
 import { ErmisClassroomContext } from './ErmisClassroomContext';
 import type { ErmisClassroomContextValue, ErmisClassroomProviderProps, ScreenShareData, } from '../types';
@@ -448,6 +450,24 @@ export function ErmisClassroomProvider({
         console.error('[Provider] Unmount cleanup failed:', e);
       }
       clientRef.current = null;
+    };
+  }, []);
+
+  // Effect: Listen for livestream stopped from browser UI
+  useEffect(() => {
+    const handleLivestreamStarted = () => {
+      log('[Provider] Livestream started');
+      setIsLivestreamActive(true);
+    };
+    const handleLivestreamStopped = () => {
+      log('[Provider] Livestream stopped from browser UI');
+      setIsLivestreamActive(false);
+    };
+    globalEventBus.on(GlobalEvents.LIVESTREAM_STARTED, handleLivestreamStarted);
+    globalEventBus.on(GlobalEvents.LIVESTREAM_STOPPED, handleLivestreamStopped);
+    return () => {
+      globalEventBus.off(GlobalEvents.LIVESTREAM_STARTED, handleLivestreamStarted);
+      globalEventBus.off(GlobalEvents.LIVESTREAM_STOPPED, handleLivestreamStopped);
     };
   }, []);
 
