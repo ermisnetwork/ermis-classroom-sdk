@@ -711,6 +711,44 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     await this.streamManager.sendEvent(event);
   }
 
+  /**
+   * Wait for config to be sent for a specific channel
+   * @param channelName - Channel to wait for config
+   * @param timeout - Timeout in milliseconds (default 10000ms)
+   */
+  private async waitForConfigSent(channelName: ChannelName, timeout = 2000): Promise<void> {
+    if (!this.streamManager) {
+      throw new Error("StreamManager not initialized");
+    }
+
+    // Check if already sent
+    if (this.streamManager.isConfigSent(channelName)) {
+      log(`[Publisher] Config already sent for ${channelName}`);
+      return;
+    }
+
+    log(`[Publisher] Waiting for config to be sent for ${channelName}...`);
+
+    return new Promise((resolve, reject) => {
+      const startTime = Date.now();
+      const checkInterval = 100; // Check every 100ms
+
+      const intervalId = setInterval(() => {
+        if (this.streamManager?.isConfigSent(channelName)) {
+          clearInterval(intervalId);
+          log(`[Publisher] Config sent for ${channelName} after ${Date.now() - startTime}ms`);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - startTime > timeout) {
+          clearInterval(intervalId);
+          reject(new Error(`Timeout waiting for config to be sent for ${channelName}`));
+        }
+      }, checkInterval);
+    });
+  }
+
   /// send custom event to specific targets
   /// targets = [] => send to whole room
   /// targets = ['streamId1', 'streamId2'] => send to specific stream ids
@@ -982,6 +1020,18 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Start audio if available
       if (hasAudio) {
         await this.startScreenAudioStreaming();
+      }
+
+      // Wait for video config to be sent before announcing screen share
+      log(`[Publisher] Waiting for screen share video config to be sent...`);
+      await this.waitForConfigSent(ChannelName.SCREEN_SHARE_720P, 2000);
+      log(`[Publisher] Screen share video config sent successfully`);
+
+      // Also wait for audio config if we have audio
+      if (hasAudio) {
+        log(`[Publisher] Waiting for screen share audio config to be sent...`);
+        await this.waitForConfigSent(ChannelName.SCREEN_SHARE_AUDIO, 2000);
+        log(`[Publisher] Screen share audio config sent successfully`);
       }
 
       // Send event with has_audio so subscribers know whether to subscribe to audio
