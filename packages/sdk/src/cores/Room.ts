@@ -1234,6 +1234,104 @@ export class Room extends EventEmitter {
     }
   }
 
+  // ========== Stream Reconnection Methods ==========
+
+  /**
+   * Reconnect local participant's stream (Publisher)
+   * Call this when you want to manually trigger a reconnection for the local user's audio/video
+   * 
+   * @example
+   * ```typescript
+   * try {
+   *   await room.reconnectLocalStream();
+   *   console.log("Reconnected successfully");
+   * } catch (error) {
+   *   console.error("Reconnection failed:", error);
+   * }
+   * ```
+   */
+  async reconnectLocalStream(): Promise<void> {
+    if (!this.localParticipant) {
+      throw new Error("Local participant not available");
+    }
+
+    if (!this.localParticipant.publisher) {
+      throw new Error("Publisher not initialized");
+    }
+
+    log("[Room] Manual reconnection requested for local stream");
+    await this.localParticipant.publisher.reconnect();
+  }
+
+  /**
+   * Reconnect a remote participant's stream (Subscriber)
+   * Call this when you want to manually trigger a reconnection for receiving a specific participant's audio/video
+   * 
+   * @param participantUserId - The user ID of the remote participant
+   * 
+   * @example
+   * ```typescript
+   * try {
+   *   await room.reconnectRemoteStream("user-123");
+   *   console.log("Reconnected to remote participant");
+   * } catch (error) {
+   *   console.error("Reconnection failed:", error);
+   * }
+   * ```
+   */
+  async reconnectRemoteStream(participantUserId: string): Promise<void> {
+    const participant = this.participants.get(participantUserId);
+
+    if (!participant) {
+      throw new Error(`Participant not found: ${participantUserId}`);
+    }
+
+    if (!participant.subscriber) {
+      throw new Error(`Subscriber not initialized for participant: ${participantUserId}`);
+    }
+
+    log("[Room] Manual reconnection requested for remote stream:", participantUserId);
+    await participant.subscriber.reconnect();
+  }
+
+  /**
+   * Reconnect all streams (local publisher + all remote subscribers)
+   * Use with caution - this will reconnect everything
+   * 
+   * @example
+   * ```typescript
+   * await room.reconnectAllStreams();
+   * ```
+   */
+  async reconnectAllStreams(): Promise<void> {
+    log("[Room] Manual reconnection requested for ALL streams");
+
+    const reconnectPromises: Promise<void>[] = [];
+
+    // Reconnect local publisher
+    if (this.localParticipant?.publisher) {
+      reconnectPromises.push(
+        this.localParticipant.publisher.reconnect().catch(err => {
+          console.error("[Room] Failed to reconnect local stream:", err);
+        })
+      );
+    }
+
+    // Reconnect all remote subscribers
+    for (const [userId, participant] of this.participants) {
+      if (!participant.isLocal && participant.subscriber) {
+        reconnectPromises.push(
+          participant.subscriber.reconnect().catch(err => {
+            console.error(`[Room] Failed to reconnect remote stream for ${userId}:`, err);
+          })
+        );
+      }
+    }
+
+    await Promise.all(reconnectPromises);
+    log("[Room] All stream reconnections completed");
+  }
+
   /**
    * Handle remote screen share
    * @param participantId - The participant's user ID
@@ -1393,8 +1491,35 @@ export class Room extends EventEmitter {
       },
     });
 
-    // No need to listen to publisher events - Room subscribes directly from globalEventBus
-    // This eliminates event re-emission chain: StreamManager -> Publisher -> Room
+    // Listen to publisher reconnection events and forward to Room level
+    publisher.on("streamReconnecting", (data) => {
+      log("[Room] Publisher reconnecting:", data);
+      this.emit("localStreamReconnecting", {
+        room: this,
+        ...data,
+      });
+    });
+
+    publisher.on("streamReconnected", () => {
+      log("[Room] Publisher reconnected");
+      this.emit("localStreamReconnected", { room: this });
+    });
+
+    publisher.on("streamReconnectionFailed", (data) => {
+      log("[Room] Publisher reconnection failed:", data);
+      this.emit("localStreamReconnectionFailed", {
+        room: this,
+        ...data,
+      });
+    });
+
+    publisher.on("connectionHealthChanged", (data) => {
+      log("[Room] Publisher connection health changed:", data);
+      this.emit("localConnectionHealthChanged", {
+        room: this,
+        ...data,
+      });
+    });
 
     await publisher.startPublishing();
     this.localParticipant.setPublisher(publisher);
@@ -1442,8 +1567,34 @@ export class Room extends EventEmitter {
       subscriber.setAudioMixer(this.audioMixer);
     }
 
-    // No need to listen to subscriber events - Room subscribes directly from globalEventBus
-    // This eliminates event re-emission: Subscriber -> Room
+    // Listen to subscriber reconnection events and forward to Room level
+    subscriber.on("reconnecting", (data) => {
+      log("[Room] Subscriber reconnecting for:", participant.userId, data);
+      this.emit("remoteStreamReconnecting", {
+        room: this,
+        participant,
+        attempt: data.attempt,
+        maxAttempts: data.maxAttempts,
+        delay: data.delay,
+      });
+    });
+
+    subscriber.on("reconnected", () => {
+      log("[Room] Subscriber reconnected for:", participant.userId);
+      this.emit("remoteStreamReconnected", {
+        room: this,
+        participant,
+      });
+    });
+
+    subscriber.on("reconnectionFailed", (data) => {
+      log("[Room] Subscriber reconnection failed for:", participant.userId, data);
+      this.emit("remoteStreamReconnectionFailed", {
+        room: this,
+        participant,
+        reason: data.reason,
+      });
+    });
 
     await subscriber.start();
     participant.setSubscriber(subscriber);

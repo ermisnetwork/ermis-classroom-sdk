@@ -68,6 +68,11 @@ interface PublisherEvents extends Record<string, unknown> {
     hasVideo: boolean;
     hasAudio: boolean;
   };
+  // Reconnection events
+  streamReconnecting: { attempt: number; maxAttempts: number; delay: number };
+  streamReconnected: undefined;
+  streamReconnectionFailed: { reason: string };
+  connectionHealthChanged: { isHealthy: boolean };
 }
 
 export class Publisher extends EventEmitter<PublisherEvents> {
@@ -89,6 +94,14 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private audioProcessor: AudioProcessor | null = null;
   private InitAudioRecorder: any = null;
   private permissions: ParticipantPermissions;
+
+  // Reconnection state
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 3;
+  private baseReconnectDelay = 1000; // 1 second
+  private maxReconnectDelay = 10000; // 10 seconds
+  private isReconnecting = false;
+  private connectionHealthChecker: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: PublisherConfig) {
     super();
@@ -192,9 +205,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       }
 
       if (this.options.useWebRTC) {
-        await this.setupWebRTCConnection();
+        await this.setupWebRTCConnectionWithRetry();
       } else {
-        await this.setupWebTransportConnection();
+        await this.setupWebTransportConnectionWithRetry();
       }
 
       await this.initializeProcessors();
@@ -207,6 +220,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Send initial state to server so other clients know the mic/camera status
       // This is important when user joins with mic/camera already disabled
       await this.sendInitialState();
+
+      // Start connection health monitoring
+      this.startConnectionHealthMonitoring();
 
       if (this.options.onStreamStart) {
         this.options.onStreamStart();
@@ -727,6 +743,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     try {
       this.updateStatus("Stopping publisher...");
+
+      // Stop connection health monitoring
+      this.stopConnectionHealthMonitoring();
 
       // Stop heartbeat first to prevent errors during cleanup
       if (this.streamManager) {
@@ -1276,5 +1295,310 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
   get mediaStream(): MediaStream | null {
     return this.currentStream;
+  }
+
+  // ========== Reconnection Methods ==========
+
+  /**
+   * Calculate exponential backoff delay for reconnection
+   */
+  private calculateBackoffDelay(): number {
+    const delay = Math.min(
+      this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      this.maxReconnectDelay
+    );
+    // Add jitter (±20%) to prevent thundering herd
+    const jitter = delay * 0.2 * (Math.random() * 2 - 1);
+    return Math.floor(delay + jitter);
+  }
+
+  /**
+   * Delay helper for async/await
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Setup WebTransport connection with retry logic
+   */
+  private async setupWebTransportConnectionWithRetry(): Promise<void> {
+    let lastError: Error | null = null;
+    this.reconnectAttempts = 0;
+
+    while (this.reconnectAttempts < this.maxReconnectAttempts) {
+      try {
+        await this.setupWebTransportConnection();
+        this.reconnectAttempts = 0;
+        if (this.isReconnecting) {
+          this.emit("streamReconnected");
+          log("[Publisher] ✅ WebTransport reconnection successful");
+        }
+        return;
+      } catch (error) {
+        lastError = error as Error;
+        this.reconnectAttempts++;
+
+        log(`[Publisher] ❌ WebTransport connection failed (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}):`, error);
+
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          break;
+        }
+
+        const delay = this.calculateBackoffDelay();
+        this.emit("streamReconnecting", {
+          attempt: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          delay,
+        });
+        this.updateStatus(`Reconnecting WebTransport (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+
+        await this.delay(delay);
+      }
+    }
+
+    this.emit("streamReconnectionFailed", { reason: lastError?.message || "Unknown error" });
+    this.updateStatus("WebTransport reconnection failed", true);
+    throw lastError;
+  }
+
+  /**
+   * Setup WebRTC connection with retry logic
+   */
+  private async setupWebRTCConnectionWithRetry(): Promise<void> {
+    let lastError: Error | null = null;
+    this.reconnectAttempts = 0;
+
+    while (this.reconnectAttempts < this.maxReconnectAttempts) {
+      try {
+        await this.setupWebRTCConnection();
+        this.reconnectAttempts = 0;
+        if (this.isReconnecting) {
+          this.emit("streamReconnected");
+          log("[Publisher] ✅ WebRTC reconnection successful");
+        }
+        return;
+      } catch (error) {
+        lastError = error as Error;
+        this.reconnectAttempts++;
+
+        log(`[Publisher] ❌ WebRTC connection failed (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}):`, error);
+
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          break;
+        }
+
+        const delay = this.calculateBackoffDelay();
+        this.emit("streamReconnecting", {
+          attempt: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          delay,
+        });
+        this.updateStatus(`Reconnecting WebRTC (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+
+        await this.delay(delay);
+      }
+    }
+
+    this.emit("streamReconnectionFailed", { reason: lastError?.message || "Unknown error" });
+    this.updateStatus("WebRTC reconnection failed", true);
+    throw lastError;
+  }
+
+  /**
+   * Start monitoring connection health
+   * Checks every 5 seconds and attempts reconnection if connection is lost
+   */
+  startConnectionHealthMonitoring(): void {
+    if (this.connectionHealthChecker) {
+      return; // Already monitoring
+    }
+
+    log("[Publisher] Starting connection health monitoring");
+    let wasHealthy = true;
+
+    this.connectionHealthChecker = setInterval(async () => {
+      if (!this.isPublishing || this.isReconnecting) {
+        return;
+      }
+
+      const isHealthy = this.checkConnectionHealth();
+
+      // Emit health change event if status changed
+      if (isHealthy !== wasHealthy) {
+        this.emit("connectionHealthChanged", { isHealthy });
+        wasHealthy = isHealthy;
+      }
+
+      if (!isHealthy) {
+        log("[Publisher] ⚠️ Connection health check failed, attempting reconnection...");
+        await this.handleConnectionFailure();
+      }
+    }, 5000);
+  }
+
+  /**
+   * Stop connection health monitoring
+   */
+  stopConnectionHealthMonitoring(): void {
+    if (this.connectionHealthChecker) {
+      clearInterval(this.connectionHealthChecker);
+      this.connectionHealthChecker = null;
+      log("[Publisher] Connection health monitoring stopped");
+    }
+  }
+
+  /**
+   * Check if the current connection is healthy
+   */
+  private checkConnectionHealth(): boolean {
+    if (this.options.useWebRTC) {
+      // Check if WebRTC manager exists and has connected peer connections
+      if (!this.webRtcManager) return false;
+      return this.webRtcManager.isRTCConnected();
+    } else {
+      // Check if WebTransport is connected
+      if (!this.webTransportManager) return false;
+      return this.webTransportManager.isTransportConnected();
+    }
+  }
+
+  /**
+   * Handle connection failure - attempt to reconnect
+   */
+  private async handleConnectionFailure(): Promise<void> {
+    if (this.isReconnecting) {
+      log("[Publisher] Already reconnecting, skipping...");
+      return;
+    }
+
+    this.isReconnecting = true;
+    this.updateStatus("Connection lost, reconnecting...");
+
+    try {
+      await this.reconnect();
+      this.updateStatus("Reconnected successfully");
+    } catch (error) {
+      console.error("[Publisher] Reconnection failed:", error);
+      this.updateStatus("Reconnection failed", true);
+    } finally {
+      this.isReconnecting = false;
+    }
+  }
+
+  /**
+   * Stop media processing (for reconnection)
+   */
+  private async stopProcessing(): Promise<void> {
+    // Stop heartbeat first to prevent errors during cleanup
+    if (this.streamManager) {
+      this.streamManager.stopHeartbeat();
+    }
+
+    if (this.videoProcessor) {
+      await this.videoProcessor.stop();
+    }
+
+    if (this.audioProcessor) {
+      await this.audioProcessor.stop();
+    }
+  }
+
+  /**
+   * Reconnect publisher - full connection re-establishment
+   * Can be called manually or automatically by health monitor
+   */
+  async reconnect(): Promise<void> {
+    if (!this.isPublishing) {
+      throw new Error("Cannot reconnect - not currently publishing");
+    }
+
+    log("[Publisher] 🔄 Starting reconnection process...");
+    this.isReconnecting = true;
+    this.reconnectAttempts = 0;
+
+    try {
+      // Stop current processing
+      await this.stopProcessing();
+
+      // Close current transport connections
+      if (this.webTransportManager) {
+        await this.webTransportManager.close();
+        this.webTransportManager = null;
+      }
+
+      if (this.webRtcManager) {
+        await this.webRtcManager.close();
+        this.webRtcManager = null;
+      }
+
+      this.streamManager = null;
+
+      // Small delay before reconnecting
+      await this.delay(500);
+
+      // Reconnect transport with retry
+      if (this.options.useWebRTC) {
+        await this.setupWebRTCConnectionWithRetry();
+      } else {
+        await this.setupWebTransportConnectionWithRetry();
+      }
+
+      // Re-initialize processors
+      await this.initializeProcessors();
+
+      // Restart media processing
+      await this.startMediaProcessing();
+
+      // Send initial state to sync with server
+      await this.sendInitialState();
+
+      log("[Publisher] ✅ Reconnection completed successfully");
+      this.emit("connected");
+    } catch (error) {
+      console.error("[Publisher] ❌ Reconnection failed:", error);
+      throw error;
+    } finally {
+      this.isReconnecting = false;
+    }
+  }
+
+  /**
+   * Get current reconnection state
+   */
+  getReconnectionState(): {
+    isReconnecting: boolean;
+    attempts: number;
+    maxAttempts: number;
+  } {
+    return {
+      isReconnecting: this.isReconnecting,
+      attempts: this.reconnectAttempts,
+      maxAttempts: this.maxReconnectAttempts,
+    };
+  }
+
+  /**
+   * Configure reconnection parameters
+   */
+  setReconnectionConfig(config: {
+    maxAttempts?: number;
+    baseDelay?: number;
+    maxDelay?: number;
+  }): void {
+    if (config.maxAttempts !== undefined) {
+      this.maxReconnectAttempts = config.maxAttempts;
+    }
+    if (config.baseDelay !== undefined) {
+      this.baseReconnectDelay = config.baseDelay;
+    }
+    if (config.maxDelay !== undefined) {
+      this.maxReconnectDelay = config.maxDelay;
+    }
+    log("[Publisher] Reconnection config updated:", {
+      maxAttempts: this.maxReconnectAttempts,
+      baseDelay: this.baseReconnectDelay,
+      maxDelay: this.maxReconnectDelay,
+    });
   }
 }
