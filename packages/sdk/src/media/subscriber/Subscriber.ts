@@ -756,6 +756,12 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
           maxAttempts: this.maxReconnectAttempts,
           delay,
         });
+        globalEventBus.emit(GlobalEvents.SUBSCRIBER_RECONNECTING, {
+          streamId: this.config.streamId,
+          attempt: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          delay,
+        });
         this.emit("status", {
           subscriber: this,
           message: `Reconnecting (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`,
@@ -768,6 +774,10 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
     this.emit("reconnectionFailed", {
       subscriber: this,
+      reason: lastError?.message || "Unknown error",
+    });
+    globalEventBus.emit(GlobalEvents.SUBSCRIBER_RECONNECTION_FAILED, {
+      streamId: this.config.streamId,
       reason: lastError?.message || "Unknown error",
     });
     throw lastError;
@@ -828,12 +838,17 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       this.updateConnectionStatus("connected");
 
       this.emit("reconnected", { subscriber: this });
+      globalEventBus.emit(GlobalEvents.SUBSCRIBER_RECONNECTED, { streamId: this.config.streamId });
       log("[Subscriber] ✅ Reconnection completed successfully");
     } catch (error) {
       console.error("[Subscriber] ❌ Reconnection failed:", error);
       this.updateConnectionStatus("failed");
       this.emit("reconnectionFailed", {
         subscriber: this,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      globalEventBus.emit(GlobalEvents.SUBSCRIBER_RECONNECTION_FAILED, {
+        streamId: this.config.streamId,
         reason: error instanceof Error ? error.message : "Unknown error",
       });
       throw error;

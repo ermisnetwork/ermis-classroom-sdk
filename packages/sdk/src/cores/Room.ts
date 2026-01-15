@@ -1491,35 +1491,7 @@ export class Room extends EventEmitter {
       },
     });
 
-    // Listen to publisher reconnection events and forward to Room level
-    publisher.on("streamReconnecting", (data) => {
-      log("[Room] Publisher reconnecting:", data);
-      this.emit("localStreamReconnecting", {
-        room: this,
-        ...data,
-      });
-    });
-
-    publisher.on("streamReconnected", () => {
-      log("[Room] Publisher reconnected");
-      this.emit("localStreamReconnected", { room: this });
-    });
-
-    publisher.on("streamReconnectionFailed", (data) => {
-      log("[Room] Publisher reconnection failed:", data);
-      this.emit("localStreamReconnectionFailed", {
-        room: this,
-        ...data,
-      });
-    });
-
-    publisher.on("connectionHealthChanged", (data) => {
-      log("[Room] Publisher connection health changed:", data);
-      this.emit("localConnectionHealthChanged", {
-        room: this,
-        ...data,
-      });
-    });
+    // Reconnection events are now handled via GlobalEventBus in _setupGlobalEventListeners()
 
     await publisher.startPublishing();
     this.localParticipant.setPublisher(publisher);
@@ -1567,34 +1539,7 @@ export class Room extends EventEmitter {
       subscriber.setAudioMixer(this.audioMixer);
     }
 
-    // Listen to subscriber reconnection events and forward to Room level
-    subscriber.on("reconnecting", (data) => {
-      log("[Room] Subscriber reconnecting for:", participant.userId, data);
-      this.emit("remoteStreamReconnecting", {
-        room: this,
-        participant,
-        attempt: data.attempt,
-        maxAttempts: data.maxAttempts,
-        delay: data.delay,
-      });
-    });
-
-    subscriber.on("reconnected", () => {
-      log("[Room] Subscriber reconnected for:", participant.userId);
-      this.emit("remoteStreamReconnected", {
-        room: this,
-        participant,
-      });
-    });
-
-    subscriber.on("reconnectionFailed", (data) => {
-      log("[Room] Subscriber reconnection failed for:", participant.userId, data);
-      this.emit("remoteStreamReconnectionFailed", {
-        room: this,
-        participant,
-        reason: data.reason,
-      });
-    });
+    // Reconnection events are now handled via GlobalEventBus in _setupGlobalEventListeners()
 
     await subscriber.start();
     participant.setSubscriber(subscriber);
@@ -2122,12 +2067,97 @@ export class Room extends EventEmitter {
       }
     };
 
+    // Publisher reconnection handlers
+    const handlePublisherReconnecting = (data: any) => {
+      log("[Room] Publisher reconnecting:", data);
+      this.emit("localStreamReconnecting", {
+        room: this,
+        ...data,
+      });
+    };
+
+    const handlePublisherReconnected = (data: any) => {
+      log("[Room] Publisher reconnected:", data);
+      this.emit("localStreamReconnected", { room: this });
+    };
+
+    const handlePublisherReconnectionFailed = (data: any) => {
+      log("[Room] Publisher reconnection failed:", data);
+      this.emit("localStreamReconnectionFailed", {
+        room: this,
+        ...data,
+      });
+    };
+
+    const handlePublisherConnectionHealthChanged = (data: any) => {
+      log("[Room] Publisher connection health changed:", data);
+      this.emit("localConnectionHealthChanged", {
+        room: this,
+        ...data,
+      });
+    };
+
+    // Subscriber reconnection handlers
+    const handleSubscriberReconnecting = (data: any) => {
+      const participant = Array.from(this.participants.values()).find(
+        p => p.streamId === data.streamId
+      );
+      if (participant) {
+        log("[Room] Subscriber reconnecting for:", participant.userId, data);
+        this.emit("remoteStreamReconnecting", {
+          room: this,
+          participant,
+          attempt: data.attempt,
+          maxAttempts: data.maxAttempts,
+          delay: data.delay,
+        });
+      }
+    };
+
+    const handleSubscriberReconnected = (data: any) => {
+      const participant = Array.from(this.participants.values()).find(
+        p => p.streamId === data.streamId
+      );
+      if (participant) {
+        log("[Room] Subscriber reconnected for:", participant.userId);
+        this.emit("remoteStreamReconnected", {
+          room: this,
+          participant,
+        });
+      }
+    };
+
+    const handleSubscriberReconnectionFailed = (data: any) => {
+      const participant = Array.from(this.participants.values()).find(
+        p => p.streamId === data.streamId
+      );
+      if (participant) {
+        log("[Room] Subscriber reconnection failed for:", participant.userId, data);
+        this.emit("remoteStreamReconnectionFailed", {
+          room: this,
+          participant,
+          reason: data.reason,
+        });
+      }
+    };
+
     // Subscribe to global events
     globalEventBus.on(GlobalEvents.SERVER_EVENT, handleServerEvent);
     globalEventBus.on(GlobalEvents.LOCAL_STREAM_READY, handleLocalStreamReady);
     globalEventBus.on(GlobalEvents.LOCAL_SCREEN_SHARE_READY, handleLocalScreenShareReady);
     globalEventBus.on(GlobalEvents.SCREEN_SHARE_STOPPED, handleScreenShareStopped);
     globalEventBus.on(GlobalEvents.REMOTE_STREAM_READY, handleRemoteStreamReady);
+
+    // Subscribe to Publisher reconnection events
+    globalEventBus.on(GlobalEvents.PUBLISHER_RECONNECTING, handlePublisherReconnecting);
+    globalEventBus.on(GlobalEvents.PUBLISHER_RECONNECTED, handlePublisherReconnected);
+    globalEventBus.on(GlobalEvents.PUBLISHER_RECONNECTION_FAILED, handlePublisherReconnectionFailed);
+    globalEventBus.on(GlobalEvents.PUBLISHER_CONNECTION_HEALTH_CHANGED, handlePublisherConnectionHealthChanged);
+
+    // Subscribe to Subscriber reconnection events
+    globalEventBus.on(GlobalEvents.SUBSCRIBER_RECONNECTING, handleSubscriberReconnecting);
+    globalEventBus.on(GlobalEvents.SUBSCRIBER_RECONNECTED, handleSubscriberReconnected);
+    globalEventBus.on(GlobalEvents.SUBSCRIBER_RECONNECTION_FAILED, handleSubscriberReconnectionFailed);
 
     // Store cleanup functions
     this.globalEventCleanups.push(
@@ -2136,6 +2166,15 @@ export class Room extends EventEmitter {
       () => globalEventBus.off(GlobalEvents.LOCAL_SCREEN_SHARE_READY, handleLocalScreenShareReady),
       () => globalEventBus.off(GlobalEvents.SCREEN_SHARE_STOPPED, handleScreenShareStopped),
       () => globalEventBus.off(GlobalEvents.REMOTE_STREAM_READY, handleRemoteStreamReady),
+      // Publisher reconnection cleanups
+      () => globalEventBus.off(GlobalEvents.PUBLISHER_RECONNECTING, handlePublisherReconnecting),
+      () => globalEventBus.off(GlobalEvents.PUBLISHER_RECONNECTED, handlePublisherReconnected),
+      () => globalEventBus.off(GlobalEvents.PUBLISHER_RECONNECTION_FAILED, handlePublisherReconnectionFailed),
+      () => globalEventBus.off(GlobalEvents.PUBLISHER_CONNECTION_HEALTH_CHANGED, handlePublisherConnectionHealthChanged),
+      // Subscriber reconnection cleanups
+      () => globalEventBus.off(GlobalEvents.SUBSCRIBER_RECONNECTING, handleSubscriberReconnecting),
+      () => globalEventBus.off(GlobalEvents.SUBSCRIBER_RECONNECTED, handleSubscriberReconnected),
+      () => globalEventBus.off(GlobalEvents.SUBSCRIBER_RECONNECTION_FAILED, handleSubscriberReconnectionFailed),
     );
 
     log("[Room] ✅ Global event listeners setup complete");

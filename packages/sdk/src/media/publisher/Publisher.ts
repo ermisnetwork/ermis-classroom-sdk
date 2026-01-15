@@ -390,6 +390,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     this.updateStatus("WebTransport connected");
     this.emit("connected");
+    globalEventBus.emit(GlobalEvents.PUBLISHER_CONNECTED, { streamId: this.options.streamId });
   }
 
   private async setupWebRTCConnection(): Promise<void> {
@@ -449,6 +450,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     this.updateStatus("WebRTC connected");
     this.emit("connected");
+    globalEventBus.emit(GlobalEvents.PUBLISHER_CONNECTED, { streamId: this.options.streamId });
   }
 
   private async initializeProcessors(): Promise<void> {
@@ -1332,6 +1334,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         this.reconnectAttempts = 0;
         if (this.isReconnecting) {
           this.emit("streamReconnected");
+          globalEventBus.emit(GlobalEvents.PUBLISHER_RECONNECTED, { streamId: this.options.streamId });
           log("[Publisher] ✅ WebTransport reconnection successful");
         }
         return;
@@ -1351,6 +1354,12 @@ export class Publisher extends EventEmitter<PublisherEvents> {
           maxAttempts: this.maxReconnectAttempts,
           delay,
         });
+        globalEventBus.emit(GlobalEvents.PUBLISHER_RECONNECTING, {
+          streamId: this.options.streamId,
+          attempt: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          delay,
+        });
         this.updateStatus(`Reconnecting WebTransport (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
 
         await this.delay(delay);
@@ -1358,6 +1367,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     }
 
     this.emit("streamReconnectionFailed", { reason: lastError?.message || "Unknown error" });
+    globalEventBus.emit(GlobalEvents.PUBLISHER_RECONNECTION_FAILED, {
+      streamId: this.options.streamId,
+      reason: lastError?.message || "Unknown error",
+    });
     this.updateStatus("WebTransport reconnection failed", true);
     throw lastError;
   }
@@ -1375,6 +1388,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         this.reconnectAttempts = 0;
         if (this.isReconnecting) {
           this.emit("streamReconnected");
+          globalEventBus.emit(GlobalEvents.PUBLISHER_RECONNECTED, { streamId: this.options.streamId });
           log("[Publisher] ✅ WebRTC reconnection successful");
         }
         return;
@@ -1394,6 +1408,12 @@ export class Publisher extends EventEmitter<PublisherEvents> {
           maxAttempts: this.maxReconnectAttempts,
           delay,
         });
+        globalEventBus.emit(GlobalEvents.PUBLISHER_RECONNECTING, {
+          streamId: this.options.streamId,
+          attempt: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          delay,
+        });
         this.updateStatus(`Reconnecting WebRTC (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
 
         await this.delay(delay);
@@ -1401,6 +1421,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     }
 
     this.emit("streamReconnectionFailed", { reason: lastError?.message || "Unknown error" });
+    globalEventBus.emit(GlobalEvents.PUBLISHER_RECONNECTION_FAILED, {
+      streamId: this.options.streamId,
+      reason: lastError?.message || "Unknown error",
+    });
     this.updateStatus("WebRTC reconnection failed", true);
     throw lastError;
   }
@@ -1427,6 +1451,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Emit health change event if status changed
       if (isHealthy !== wasHealthy) {
         this.emit("connectionHealthChanged", { isHealthy });
+        globalEventBus.emit(GlobalEvents.PUBLISHER_CONNECTION_HEALTH_CHANGED, {
+          streamId: this.options.streamId,
+          isHealthy,
+        });
         wasHealthy = isHealthy;
       }
 
