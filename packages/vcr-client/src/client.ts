@@ -3,6 +3,8 @@
  * Handles API requests with API Key authentication
  */
 
+export type Language = 'vi' | 'en';
+
 export interface VCRClientConfig {
   /**
    * API Key for authentication
@@ -29,6 +31,11 @@ export interface VCRClientConfig {
    * @default false (uses x-api-key header)
    */
   useAuthorizationHeader?: boolean;
+  /**
+   * Language for API responses (messages will be translated)
+   * @default "vi" (Vietnamese)
+   */
+  language?: Language;
 }
 
 export interface RequestOptions {
@@ -52,6 +59,7 @@ export class VCRHTTPClient {
       baseUrl: config.baseUrl || 'https://api.vcr.example.com',
       timeout: config.timeout || 30000,
       useAuthorizationHeader: config.useAuthorizationHeader || false,
+      language: config.language || 'vi',
       headers: config.headers,
     };
   }
@@ -64,6 +72,10 @@ export class VCRHTTPClient {
 
     // Build URL with query parameters
     const url = new URL(endpoint, this.config.baseUrl);
+    
+    // Add language parameter (always add, even if params exist)
+    url.searchParams.set('lang', this.config.language);
+    
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
@@ -219,6 +231,21 @@ export class VCRHTTPClient {
   }
 
   /**
+   * Set language for all subsequent requests
+   * @param language Language code ('vi' for Vietnamese, 'en' for English)
+   */
+  setLanguage(language: Language): void {
+    this.config.language = language;
+  }
+
+  /**
+   * Get current language
+   */
+  getLanguage(): Language {
+    return this.config.language;
+  }
+
+  /**
    * Get current configuration (without sensitive data)
    */
   getConfig(): Omit<Readonly<VCRClientConfig>, 'apiKey'> & { hasApiKey: boolean } {
@@ -226,6 +253,7 @@ export class VCRHTTPClient {
       baseUrl: this.config.baseUrl,
       timeout: this.config.timeout,
       useAuthorizationHeader: this.config.useAuthorizationHeader,
+      language: this.config.language,
       headers: this.config.headers,
       hasApiKey: !!this.config.apiKey,
     };

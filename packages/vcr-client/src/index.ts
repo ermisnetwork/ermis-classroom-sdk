@@ -2,19 +2,17 @@
  * VCR SDK - Virtual Classroom SDK
  * A TypeScript SDK for Virtual Classroom API
  * 
- * This SDK provides access to 5 resources:
+ * This SDK provides access to 4 resources:
  * - Events: Create, read, update, delete events
  * - Registrants: Manage event participants
  * - Rewards: Manage event rewards
  * - Ratings: Read-only access to event ratings
- * - Permissions: Manage student permissions in the classroom
  */
 
 import { VCRHTTPClient } from './client';
 import { EventsResource, RegistrantsResource } from './api/events';
 import { RewardsResource } from './api/rewards';
 import { RatingsResource } from './api/ratings';
-import { PermissionsResource } from './api/permissions';
 
 export interface VCRClientConfig {
   /**
@@ -42,17 +40,21 @@ export interface VCRClientConfig {
    * @default false (uses x-api-key header - recommended)
    */
   useAuthorizationHeader?: boolean;
+  /**
+   * Language for API responses (messages will be translated)
+   * @default "vi" (Vietnamese)
+   */
+  language?: 'vi' | 'en';
 }
 
 export class VCRClient {
   private httpClient: VCRHTTPClient;
 
-  // API resources
+  // API resources - only 4 resources as per API documentation
   public readonly events: EventsResource;
   public readonly registrants: RegistrantsResource;
   public readonly rewards: RewardsResource;
   public readonly ratings: RatingsResource;
-  public readonly permissions: PermissionsResource;
 
   constructor(config: VCRClientConfig) {
     // Initialize HTTP client
@@ -62,6 +64,7 @@ export class VCRClient {
       timeout: config.timeout,
       headers: config.headers,
       useAuthorizationHeader: config.useAuthorizationHeader,
+      language: config.language,
     });
 
     // Initialize API resources
@@ -69,7 +72,6 @@ export class VCRClient {
     this.registrants = new RegistrantsResource(this.httpClient);
     this.rewards = new RewardsResource(this.httpClient);
     this.ratings = new RatingsResource(this.httpClient);
-    this.permissions = new PermissionsResource(this.httpClient);
   }
 
   /**
@@ -77,6 +79,21 @@ export class VCRClient {
    */
   setApiKey(apiKey: string): void {
     this.httpClient.setApiKey(apiKey);
+  }
+
+  /**
+   * Set language for all subsequent requests
+   * @param language Language code ('vi' for Vietnamese, 'en' for English)
+   */
+  setLanguage(language: 'vi' | 'en'): void {
+    this.httpClient.setLanguage(language);
+  }
+
+  /**
+   * Get current language
+   */
+  getLanguage(): 'vi' | 'en' {
+    return this.httpClient.getLanguage();
   }
 
   /**
@@ -107,6 +124,7 @@ export {
   NotFoundError,
   RateLimitError,
   ServerError,
+  type Language,
 } from './client';
 
 // Export utility functions

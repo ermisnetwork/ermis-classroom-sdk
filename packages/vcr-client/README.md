@@ -2,7 +2,7 @@
 
 A TypeScript SDK for the Virtual Classroom (VCR) API with full type support and API Key authentication.
 
-> **Note:** This SDK provides access to 5 resources: Events, Registrants, Rewards, Ratings (read-only), and Permissions. All operations follow strict ownership rules - you can only modify resources created by your API Key.
+> **Note:** This SDK provides access to 4 resources only: Events, Registrants, Rewards, and Ratings (read-only). All operations follow strict ownership rules - you can only modify resources created by your API Key.
 
 ## Installation
 
@@ -88,8 +88,67 @@ interface VCRClientConfig {
   timeout?: number; // Optional: Request timeout in ms (default: 30000)
   headers?: Record<string, string>; // Optional: Additional headers
   useAuthorizationHeader?: boolean; // Optional: Use Authorization header instead of x-api-key
+  language?: 'vi' | 'en'; // Optional: Language for API responses (default: 'vi')
 }
 ```
+
+### Multi-Language Support
+
+The SDK supports **2 languages**: Vietnamese (`vi`) and English (`en`). The default language is **Vietnamese**.
+
+All API responses include a `message` field that is automatically translated based on the selected language.
+
+#### Setting Language on Initialization
+
+```typescript
+// Vietnamese (default)
+const client = createVCRClient({
+  apiKey: 'ak_xxx.yyy',
+  language: 'vi', // or omit for default
+});
+
+// English
+const client = createVCRClient({
+  apiKey: 'ak_xxx.yyy',
+  language: 'en',
+});
+```
+
+#### Changing Language Dynamically
+
+```typescript
+const client = createVCRClient({
+  apiKey: 'ak_xxx.yyy',
+  language: 'vi',
+});
+
+// Get events in Vietnamese
+const events = await client.events.list();
+console.log(events.message); // "Lấy danh sách sự kiện thành công"
+
+// Switch to English
+client.setLanguage('en');
+
+// Get events in English
+const eventsEn = await client.events.list();
+console.log(eventsEn.message); // "Events retrieved successfully"
+```
+
+#### Language Examples
+
+```typescript
+// Ban registrant - Vietnamese message
+client.setLanguage('vi');
+const banned = await client.registrants.ban('event-id', 'registrant-id', 'Lý do');
+console.log(banned.message); // "Đã cấm người tham gia khỏi sự kiện"
+
+// Ban registrant - English message
+client.setLanguage('en');
+const bannedEn = await client.registrants.ban('event-id', 'registrant-id', 'Reason');
+console.log(bannedEn.message); // "Registrant banned from event"
+```
+
+> **Note:** The `lang` parameter is automatically added to all API requests. You don't need to manually add it to URLs.
 
 ## API Reference
 
@@ -212,6 +271,42 @@ const updated = await client.registrants.update('event-id', 'registrant-id', {
 // ⚠️ Only registrants created by your API Key can be deleted
 await client.registrants.delete('event-id', 'registrant-id');
 ```
+
+#### Ban Registrant
+
+Ban a registrant from an event. This prevents them from joining the event, even with a valid join code. API keys can bypass this restriction when joining.
+
+```typescript
+// Ban a registrant with optional reason
+const bannedRegistrant = await client.registrants.ban(
+  'event-id',
+  'registrant-id',
+  'Disruptive behavior in previous session'
+);
+
+// Response includes ban information:
+// - isBanned: true
+// - bannedAt: "2026-01-19T04:00:00.000Z"
+// - bannedBy: "teacher-user-id"
+// - banReason: "Disruptive behavior in previous session"
+```
+
+> **Note:** Only Admin and Teacher can ban registrants. Banned registrants cannot join the event unless the join request uses an API key.
+
+#### Unban Registrant
+
+Unban a registrant from an event, allowing them to join again.
+
+```typescript
+const unbannedRegistrant = await client.registrants.unban(
+  'event-id',
+  'registrant-id'
+);
+
+// Response: ban fields are removed (isBanned: false, bannedAt, bannedBy, banReason removed)
+```
+
+> **Note:** Only Admin and Teacher can unban registrants.
 
 #### Bulk Create Registrants
 
@@ -336,182 +431,6 @@ ratings.ratings.forEach((r) => {
 
 > **Note:** API Key chỉ có quyền xem ratings, không có quyền tạo hay sửa đánh giá.
 
-### Permissions
-
-Manage student permissions in the classroom (quản lý quyền học sinh).
-
-#### Block Permission
-
-Block a student's permission (camera, mic, screen share, chat, drawing).
-
-```typescript
-const result = await client.permissions.blockPermission('event-id', {
-  participantAuthId: 'student_123',
-  permissionType: 'camera',
-  reason: 'Vi phạm quy định', // Optional
-});
-
-// Response includes:
-// - participantAuthId: Student ID
-// - permissionType: Type of permission blocked
-// - blockedBy: ID of the user who blocked
-// - blockedAt: Timestamp when blocked
-// - reason: Reason for blocking (optional)
-```
-
-#### Unblock Permission
-
-Unblock a previously blocked permission.
-
-```typescript
-const result = await client.permissions.unblockPermission('event-id', {
-  participantAuthId: 'student_123',
-  permissionType: 'camera',
-  reason: 'Đã cảnh cáo', // Optional
-});
-
-// Response includes:
-// - participantAuthId: Student ID
-// - permissionType: Type of permission unblocked
-// - unblockedBy: ID of the user who unblocked
-// - unblockedAt: Timestamp when unblocked
-// - reason: Reason for unblocking (optional)
-```
-
-#### Update Room Settings
-
-Update permission settings for the entire class.
-
-```typescript
-// Tắt chat cho toàn lớp
-await client.permissions.updateRoomSettings('event-id', {
-  blockAllChat: true,
-});
-
-// Bật lại chat cho toàn lớp
-await client.permissions.updateRoomSettings('event-id', {
-  blockAllChat: false,
-});
-
-// Cập nhật nhiều cài đặt cùng lúc
-await client.permissions.updateRoomSettings('event-id', {
-  blockAllCameras: true,
-  blockAllMics: false,
-  blockAllScreenShares: true,
-  blockAllChat: false,
-  requirePermissionForCamera: true,
-  requirePermissionForMic: true,
-  requirePermissionForScreenShare: true,
-});
-```
-
-#### Get Permission History
-
-Get permission history for an event.
-
-```typescript
-const history = await client.permissions.getHistory('event-id');
-
-// Response includes:
-// - data: Array of permission history items
-// - success: Boolean indicating success
-// - message: Optional message
-
-// Each history item includes:
-// - _id: History item ID
-// - eventId: Event ID
-// - participantAuthId: Student ID
-// - permissionType: Type of permission
-// - action: 'block' | 'unblock'
-// - blockedBy/unblockedBy: User ID who performed the action
-// - blockedAt/unblockedAt: Timestamp
-// - reason: Reason for the action (optional)
-// - createdAt: Creation timestamp
-// - updatedAt: Update timestamp
-
-// Filter permissions for a specific student
-const studentPermissions = history.data.filter(
-  (item) => item.participantAuthId === 'student_123'
-);
-```
-
-#### Permission Types
-
-| Type | Mô Tả | Ví Dụ |
-|------|-------|-------|
-| `camera` | Quyền bật camera | Block camera học sinh |
-| `mic` | Quyền bật microphone | Block mic học sinh |
-| `screenShare` | Quyền chia sẻ màn hình | Block screen share |
-| `chat` | Quyền chat trong lớp | **Tắt/bật chat** |
-| `draw` | Quyền vẽ trên whiteboard | Block vẽ |
-
-#### Use Cases
-
-**Case 1: Tắt Chat Cho 1 Học Sinh Cụ Thể**
-
-```typescript
-// Tắt chat
-await client.permissions.blockPermission('event-id', {
-  participantAuthId: 'student_123',
-  permissionType: 'chat',
-  reason: 'Spam',
-});
-
-// Sau 5 phút, bật lại
-setTimeout(async () => {
-  await client.permissions.unblockPermission('event-id', {
-    participantAuthId: 'student_123',
-    permissionType: 'chat',
-  });
-}, 5 * 60 * 1000);
-```
-
-**Case 2: Tắt Chat Cho Toàn Lớp**
-
-```typescript
-// Tắt chat toàn lớp
-await client.permissions.updateRoomSettings('event-id', {
-  blockAllChat: true,
-});
-```
-
-**Case 3: Ban Tất Cả Quyền Của 1 Học Sinh**
-
-```typescript
-const permissions: PermissionType[] = ['camera', 'mic', 'screenShare', 'chat', 'draw'];
-
-for (const permission of permissions) {
-  await client.permissions.blockPermission('event-id', {
-    participantAuthId: 'student_123',
-    permissionType: permission,
-    reason: 'Vi phạm nghiêm trọng',
-  });
-}
-```
-
-**Case 4: Kiểm Tra Trạng Thái Quyền**
-
-```typescript
-// Lấy lịch sử quyền
-const history = await client.permissions.getHistory('event-id');
-
-// Lọc quyền của học sinh cụ thể
-const studentPermissions = history.data.filter(
-  (item) => item.participantAuthId === 'student_123'
-);
-
-// Kiểm tra quyền nào đang bị block
-const blockedPermissions = studentPermissions
-  .filter((item) => item.action === 'block')
-  .map((item) => item.permissionType);
-```
-
-> **Note:** 
-> - Tất cả API permissions yêu cầu API Key với quyền Admin/Teacher
-> - Khi block/unblock, frontend sẽ nhận WebSocket event để cập nhật UI
-> - Trạng thái block/unblock được lưu vào database
-> - Tham số `reason` là optional nhưng nên cung cấp để audit log
-
 ## Ownership & Permissions
 
 ### Ownership Rules
@@ -607,10 +526,6 @@ import type {
   RatingList,
   Rating,
   CreateRatingParams,
-  PermissionType,
-  BlockPermissionParams,
-  UnblockPermissionParams,
-  UpdateRoomSettingsParams,
 } from '@ermisnetwork/vcr-client';
 
 // Type-safe event creation
@@ -720,13 +635,12 @@ console.log('Has API Key:', config.hasApiKey);
 
 ### ✅ Allowed Resources
 
-The SDK provides access to these 5 resources:
+The SDK provides access to these 4 resources only:
 
 1. **Events** - Create, read, update, delete events
 2. **Registrants** - Manage event participants
 3. **Rewards** - Manage event rewards
 4. **Ratings** - Read-only access to event ratings
-5. **Permissions** - Manage student permissions in the classroom
 
 ### ⛔ Restricted Resources
 
@@ -808,77 +722,6 @@ async function createClassWithStudents() {
 }
 
 createClassWithStudents();
-```
-
-### Example: Managing Student Permissions
-
-```typescript
-import { createVCRClient } from '@ermisnetwork/vcr-client';
-
-const client = createVCRClient({
-  apiKey: process.env.VCR_API_KEY!,
-  baseUrl: 'https://api.vcr.example.com',
-});
-
-async function managePermissions() {
-  try {
-    const eventId = 'event_123';
-    const studentAuthId = 'student_123';
-
-    // 1. Block chat for a specific student
-    await client.permissions.blockPermission(eventId, {
-      participantAuthId: studentAuthId,
-      permissionType: 'chat',
-      reason: 'Spam messages',
-    });
-    console.log('Chat blocked for student');
-
-    // 2. After 5 minutes, unblock chat
-    setTimeout(async () => {
-      await client.permissions.unblockPermission(eventId, {
-        participantAuthId: studentAuthId,
-        permissionType: 'chat',
-        reason: 'Đã cảnh cáo',
-      });
-      console.log('Chat unblocked for student');
-    }, 5 * 60 * 1000);
-
-    // 3. Block all chat for entire class
-    await client.permissions.updateRoomSettings(eventId, {
-      blockAllChat: true,
-    });
-    console.log('Chat blocked for entire class');
-
-    // 4. Get permission history
-    const history = await client.permissions.getHistory(eventId);
-    const studentHistory = history.data.filter(
-      (item) => item.participantAuthId === studentAuthId
-    );
-    console.log('Student permission history:', studentHistory);
-
-    // 5. Block all permissions for a student
-    const permissions: PermissionType[] = ['camera', 'mic', 'screenShare', 'chat', 'draw'];
-    for (const permission of permissions) {
-      await client.permissions.blockPermission(eventId, {
-        participantAuthId: studentAuthId,
-        permissionType: permission,
-        reason: 'Vi phạm nghiêm trọng',
-      });
-    }
-    console.log('All permissions blocked for student');
-
-  } catch (error) {
-    if (error instanceof PermissionError) {
-      console.error('Permission denied:', error.message);
-    } else if (error instanceof NotFoundError) {
-      console.error('Resource not found:', error.message);
-    } else {
-      console.error('Error:', error);
-    }
-  }
-}
-
-managePermissions();
 ```
 
 ## License
