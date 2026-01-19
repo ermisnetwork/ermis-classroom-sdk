@@ -283,6 +283,8 @@ export type ServerEventType =
   | 'request_share_screen'
   | 'start_share_screen'
   | 'stop_share_screen'
+  | 'start_livestream'
+  | 'stop_livestream'
   | 'break_out_room'
   | 'close_breakout_room'
   | 'join_sub_room'
