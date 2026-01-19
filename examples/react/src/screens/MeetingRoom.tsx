@@ -38,7 +38,7 @@ function CustomParticipantTile({
   onEnableCamera,
   onDisableScreenShare,
   onEnableScreenShare,
-  onKickParticipant,
+  onRemoveParticipant,
 }: {
   participant: ParticipantData
   size: { width: number; height: number }
@@ -57,7 +57,7 @@ function CustomParticipantTile({
   onEnableCamera?: (id: string) => void
   onDisableScreenShare?: (id: string) => void
   onEnableScreenShare?: (id: string) => void
-  onKickParticipant?: (id: string) => void
+  onRemoveParticipant?: (id: string, reason?: string) => void
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
 
@@ -263,13 +263,14 @@ function CustomParticipantTile({
                     className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-red-600 focus:bg-red-600 flex items-center gap-2"
                     onSelect={(e) => {
                       e.preventDefault()
-                      if (confirm(`Kick ${participant.name} from the meeting?`)) {
-                        onKickParticipant?.(participant.id)
+                      const reason = prompt(`Enter reason to remove ${participant.name} (optional):`)
+                      if (reason !== null) {
+                        onRemoveParticipant?.(participant.id, reason)
                       }
                     }}
                   >
                     <IconUserMinus className="h-4 w-4 text-red-400" />
-                    Kick from meeting
+                    Remove from meeting
                   </DropdownMenu.Item>
                 </>
               )}
@@ -528,7 +529,7 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     enableParticipantCamera,
     disableParticipantScreenShare,
     enableParticipantScreenShare,
-    kickParticipant,
+    removeParticipant,
     // Livestream
     startLivestream,
     stopLivestream,
@@ -569,6 +570,11 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     requestId: string
     participantAuthId: string
     permissionType: string
+    reason: string
+  } | null>(null)
+
+  // Kick notification state
+  const [kickedState, setKickedState] = useState<{
     reason: string
   } | null>(null)
 
@@ -644,7 +650,7 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
           requestId,
           participantAuthId: userId,
           permissionType: 'screenShare',
-          reason: 'Yêu cầu bật Chia sẻ màn hình',
+          reason: 'Requesting screen share permission',
           timestamp: new Date().toISOString(),
         })
         log('[MeetingRoom] Sent screen share permission request:', requestId)
@@ -680,6 +686,36 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
   const handleRejectPermission = useCallback(() => {
     setIncomingPermissionRequest(null)
   }, [])
+
+  // Listen for participant removed (kick) event
+  useEffect(() => {
+    if (!currentRoom) return
+
+    const handleParticipantRemoved = (event: any) => {
+      // Check if we are the one being removed
+      if (event.isLocal) {
+        setKickedState({
+          reason: event.reason || 'Host removed you from the meeting'
+        })
+
+        // Auto leave after 3s
+        setTimeout(async () => {
+          try {
+            await leaveRoom()
+          } catch (e) {
+            console.error('[MeetingRoom] Error leaving after kick:', e)
+          } finally {
+            onLeft()
+          }
+        }, 3000)
+      }
+    }
+
+    currentRoom.on('participantRemovedByHost', handleParticipantRemoved)
+    return () => {
+      currentRoom.off('participantRemovedByHost', handleParticipantRemoved)
+    }
+  }, [currentRoom, leaveRoom, onLeft])
 
   // Livestream toggle handler
   const handleLivestreamToggle = useCallback(async () => {
@@ -749,18 +785,20 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
   const handleLeave = async () => {
     try {
       await leaveRoom()
-      onLeft()
     } catch (err) {
       console.error("Failed to leave room:", err)
+    } finally {
+      onLeft()
     }
   }
 
   const handleEndMeeting = async () => {
     try {
-      endRoom()
-      onLeft()
+      await endRoom()
     } catch (err) {
       console.error("Failed to end meeting:", err)
+    } finally {
+      onLeft()
     }
   }
 
@@ -917,10 +955,10 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         onEnableCamera={enableParticipantCamera}
         onDisableScreenShare={disableParticipantScreenShare}
         onEnableScreenShare={enableParticipantScreenShare}
-        onKickParticipant={kickParticipant}
+        onRemoveParticipant={removeParticipant}
       />
     ),
-    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId, isRoomOwner, muteParticipant, unmuteParticipant, disableParticipantCamera, enableParticipantCamera, disableParticipantScreenShare, enableParticipantScreenShare, kickParticipant]
+    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId, isRoomOwner, muteParticipant, unmuteParticipant, disableParticipantCamera, enableParticipantCamera, disableParticipantScreenShare, enableParticipantScreenShare, removeParticipant]
   )
 
   const renderScreenShare = useCallback(
@@ -1189,11 +1227,11 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl border border-slate-600">
             <h3 className="text-lg font-semibold text-white mb-4">
-              📢 Yêu cầu quyền chia sẻ màn hình
+              📢 Screen Share Permission Request
             </h3>
             <div className="space-y-3 mb-6">
               <p className="text-slate-300">
-                <span className="font-medium text-white">{incomingPermissionRequest.participantAuthId}</span> yêu cầu quyền chia sẻ màn hình.
+                <span className="font-medium text-white">{incomingPermissionRequest.participantAuthId}</span> is requesting screen share permission.
               </p>
               <p className="text-sm text-slate-400">
                 {incomingPermissionRequest.reason}
@@ -1205,14 +1243,43 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
                 className="flex-1 bg-green-600 hover:bg-green-700"
                 onClick={handleApprovePermission}
               >
-                ✓ Chấp nhận
+                ✓ Approve
               </Button>
               <Button
                 variant="secondary"
                 className="flex-1"
                 onClick={handleRejectPermission}
               >
-                ✗ Từ chối
+                ✗ Reject
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Kick Notification Modal */}
+      {kickedState && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-in fade-in duration-200">
+          <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl border border-red-500/50">
+            <div className="flex flex-col items-center text-center">
+              <div className="h-12 w-12 rounded-full bg-red-900/50 flex items-center justify-center mb-4">
+                <IconUserMinus className="h-6 w-6 text-red-500" />
+              </div>
+              <h3 className="text-xl font-semibold text-white mb-2">
+                You have been removed from the meeting
+              </h3>
+              <p className="text-slate-300 mb-6">
+                {kickedState.reason}
+              </p>
+              <p className="text-sm text-slate-500 mb-6">
+                Leaving automatically in a few seconds...
+              </p>
+              <Button
+                variant="destructive"
+                className="w-full"
+                onClick={handleLeave}
+              >
+                Leave Now
               </Button>
             </div>
           </div>

@@ -201,8 +201,8 @@ export interface ErmisClassroomContextValue {
   disableParticipantCamera: (participantUserId: string) => Promise<void>;
   /** Enable a participant's camera (HOST ONLY) */
   enableParticipantCamera: (participantUserId: string) => Promise<void>;
-  /** Kick a participant from the room (HOST ONLY) */
-  kickParticipant: (participantUserId: string) => Promise<void>;
+  /** Remove a participant from the room (HOST ONLY) */
+  removeParticipant: (participantUserId: string, reason?: string) => Promise<void>;
   /** Fetch participants list from server (HOST ONLY) */
   fetchParticipants: () => Promise<any[]>;
   /** Enable a participant's screen share permission (HOST ONLY) */
@@ -217,5 +217,8 @@ export interface ErmisClassroomContextValue {
   stopLivestream: () => Promise<void>;
   /** Whether currently livestreaming */
   isLivestreamActive: boolean;
+
+  /** Register callback for when a participant is removed by host (including self) */
+  onParticipantRemoved: (callback: (data: { participant: Participant; reason: string; isLocal: boolean }) => void) => () => void;
 }
 

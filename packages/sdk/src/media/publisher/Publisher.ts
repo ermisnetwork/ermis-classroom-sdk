@@ -795,7 +795,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   }
 
   async stop(): Promise<void> {
-    if (!this.isPublishing) return;
+    // Always attempt cleanup regardless of isPublishing state to ensure no resources leak (like heartbeat)
 
     try {
       this.updateStatus("Stopping publisher...");
@@ -803,15 +803,17 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Stop connection health monitoring
       this.stopConnectionHealthMonitoring();
 
+      // Stop heartbeat immediately to prevent errors during cleanup
+      if (this.streamManager) {
+        this.streamManager.stopHeartbeat();
+      }
+
       // Stop livestream first if active
       if (this.isLivestreaming) {
         await this.stopLivestream();
       }
 
-      // Stop heartbeat first to prevent errors during cleanup
-      if (this.streamManager) {
-        this.streamManager.stopHeartbeat();
-      }
+
 
       if (this.videoProcessor) {
         await this.videoProcessor.stop();
@@ -848,7 +850,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         this.currentStream = null;
       }
 
-      this.isPublishing = false;
       this.updateStatus("Publisher stopped");
       this.emit("streamStop");
 
@@ -860,6 +861,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     } catch (error: any) {
       console.error("[Publisher] Error during stop:", error);
       this.updateStatus("Error stopping publisher", true);
+    } finally {
+      this.isPublishing = false;
     }
   }
 
@@ -1565,6 +1568,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
    * Check if the current connection is healthy
    */
   private checkConnectionHealth(): boolean {
+    // If we're not publishing (e.g. stopped), we don't consider connection unhealthy
+    if (!this.isPublishing) return true;
+
     if (this.options.useWebRTC) {
       // Check if WebRTC manager exists and has connected peer connections
       if (!this.webRtcManager) return false;
@@ -1582,6 +1588,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private async handleConnectionFailure(): Promise<void> {
     if (this.isReconnecting) {
       log("[Publisher] Already reconnecting, skipping...");
+      return;
+    }
+
+    if (!this.isPublishing) {
+      log("[Publisher] Publisher stopped, skipping reconnection");
       return;
     }
 
