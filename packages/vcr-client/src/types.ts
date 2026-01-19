@@ -171,6 +171,12 @@ export interface Registrant {
   chatBlockReason?: string;
   feedback?: string;
 
+  // Ban fields
+  isBanned?: boolean;
+  bannedAt?: string; // ISO 8601 (Date)
+  bannedBy?: string; // User ID who banned
+  banReason?: string;
+
   createdAt?: string;
   updatedAt?: string;
 }

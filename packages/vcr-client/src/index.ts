@@ -40,6 +40,11 @@ export interface VCRClientConfig {
    * @default false (uses x-api-key header - recommended)
    */
   useAuthorizationHeader?: boolean;
+  /**
+   * Language for API responses (messages will be translated)
+   * @default "vi" (Vietnamese)
+   */
+  language?: 'vi' | 'en';
 }
 
 export class VCRClient {
@@ -59,6 +64,7 @@ export class VCRClient {
       timeout: config.timeout,
       headers: config.headers,
       useAuthorizationHeader: config.useAuthorizationHeader,
+      language: config.language,
     });
 
     // Initialize API resources
@@ -73,6 +79,21 @@ export class VCRClient {
    */
   setApiKey(apiKey: string): void {
     this.httpClient.setApiKey(apiKey);
+  }
+
+  /**
+   * Set language for all subsequent requests
+   * @param language Language code ('vi' for Vietnamese, 'en' for English)
+   */
+  setLanguage(language: 'vi' | 'en'): void {
+    this.httpClient.setLanguage(language);
+  }
+
+  /**
+   * Get current language
+   */
+  getLanguage(): 'vi' | 'en' {
+    return this.httpClient.getLanguage();
   }
 
   /**
@@ -103,6 +124,7 @@ export {
   NotFoundError,
   RateLimitError,
   ServerError,
+  type Language,
 } from './client';
 
 // Export utility functions

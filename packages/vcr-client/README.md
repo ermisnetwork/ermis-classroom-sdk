@@ -88,8 +88,67 @@ interface VCRClientConfig {
   timeout?: number; // Optional: Request timeout in ms (default: 30000)
   headers?: Record<string, string>; // Optional: Additional headers
   useAuthorizationHeader?: boolean; // Optional: Use Authorization header instead of x-api-key
+  language?: 'vi' | 'en'; // Optional: Language for API responses (default: 'vi')
 }
 ```
+
+### Multi-Language Support
+
+The SDK supports **2 languages**: Vietnamese (`vi`) and English (`en`). The default language is **Vietnamese**.
+
+All API responses include a `message` field that is automatically translated based on the selected language.
+
+#### Setting Language on Initialization
+
+```typescript
+// Vietnamese (default)
+const client = createVCRClient({
+  apiKey: 'ak_xxx.yyy',
+  language: 'vi', // or omit for default
+});
+
+// English
+const client = createVCRClient({
+  apiKey: 'ak_xxx.yyy',
+  language: 'en',
+});
+```
+
+#### Changing Language Dynamically
+
+```typescript
+const client = createVCRClient({
+  apiKey: 'ak_xxx.yyy',
+  language: 'vi',
+});
+
+// Get events in Vietnamese
+const events = await client.events.list();
+console.log(events.message); // "Lấy danh sách sự kiện thành công"
+
+// Switch to English
+client.setLanguage('en');
+
+// Get events in English
+const eventsEn = await client.events.list();
+console.log(eventsEn.message); // "Events retrieved successfully"
+```
+
+#### Language Examples
+
+```typescript
+// Ban registrant - Vietnamese message
+client.setLanguage('vi');
+const banned = await client.registrants.ban('event-id', 'registrant-id', 'Lý do');
+console.log(banned.message); // "Đã cấm người tham gia khỏi sự kiện"
+
+// Ban registrant - English message
+client.setLanguage('en');
+const bannedEn = await client.registrants.ban('event-id', 'registrant-id', 'Reason');
+console.log(bannedEn.message); // "Registrant banned from event"
+```
+
+> **Note:** The `lang` parameter is automatically added to all API requests. You don't need to manually add it to URLs.
 
 ## API Reference
 
@@ -212,6 +271,42 @@ const updated = await client.registrants.update('event-id', 'registrant-id', {
 // ⚠️ Only registrants created by your API Key can be deleted
 await client.registrants.delete('event-id', 'registrant-id');
 ```
+
+#### Ban Registrant
+
+Ban a registrant from an event. This prevents them from joining the event, even with a valid join code. API keys can bypass this restriction when joining.
+
+```typescript
+// Ban a registrant with optional reason
+const bannedRegistrant = await client.registrants.ban(
+  'event-id',
+  'registrant-id',
+  'Disruptive behavior in previous session'
+);
+
+// Response includes ban information:
+// - isBanned: true
+// - bannedAt: "2026-01-19T04:00:00.000Z"
+// - bannedBy: "teacher-user-id"
+// - banReason: "Disruptive behavior in previous session"
+```
+
+> **Note:** Only Admin and Teacher can ban registrants. Banned registrants cannot join the event unless the join request uses an API key.
+
+#### Unban Registrant
+
+Unban a registrant from an event, allowing them to join again.
+
+```typescript
+const unbannedRegistrant = await client.registrants.unban(
+  'event-id',
+  'registrant-id'
+);
+
+// Response: ban fields are removed (isBanned: false, bannedAt, bannedBy, banReason removed)
+```
+
+> **Note:** Only Admin and Teacher can unban registrants.
 
 #### Bulk Create Registrants
 

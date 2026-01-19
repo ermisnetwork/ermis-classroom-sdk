@@ -130,6 +130,43 @@ export class RegistrantsResource {
   }
 
   /**
+   * Ban a registrant from an event
+   * Prevents the registrant from joining the event, even with a valid join code.
+   * API keys can bypass this restriction when joining.
+   * @param eventId Event ID
+   * @param registrantId Registrant ID
+   * @param reason Optional reason for banning
+   * @returns Updated registrant with ban information
+   * @note Only Admin and Teacher can ban registrants
+   */
+  async ban(
+    eventId: string,
+    registrantId: string,
+    reason?: string
+  ): Promise<Registrant> {
+    const response = await this.client.post<ApiResponse<Registrant>>(
+      `/events/${eventId}/registrants/${registrantId}/ban`,
+      reason ? { reason } : undefined
+    );
+    return response.data;
+  }
+
+  /**
+   * Unban a registrant from an event
+   * Allows the registrant to join the event again.
+   * @param eventId Event ID
+   * @param registrantId Registrant ID
+   * @returns Updated registrant without ban information
+   * @note Only Admin and Teacher can unban registrants
+   */
+  async unban(eventId: string, registrantId: string): Promise<Registrant> {
+    const response = await this.client.post<ApiResponse<Registrant>>(
+      `/events/${eventId}/registrants/${registrantId}/unban`
+    );
+    return response.data;
+  }
+
+  /**
    * Bulk create registrants for an event
    * Supports partial success: some registrants may fail while others succeed.
    * The server enforces max 100 registrants per request.
