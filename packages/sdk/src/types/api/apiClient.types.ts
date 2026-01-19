@@ -293,14 +293,22 @@ export interface ListParticipantsResponse {
 }
 
 /**
- * Remove participant response
+ * Remove participant request
  */
-export interface RemoveParticipantResponse {
-  /** Success status */
-  success: boolean;
-  /** Message */
-  message?: string;
+export interface RemoveParticipantRequest {
+  /** Room ID */
+  room_id: string;
+  /** Stream ID of the participant to remove */
+  stream_id: string;
+  /** Optional reason for removal */
+  reason?: string;
 }
+
+/**
+ * Remove participant response
+ * API returns 200 OK with no body
+ */
+export type RemoveParticipantResponse = void;
 
 /**
  * Custom event response

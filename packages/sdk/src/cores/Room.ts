@@ -630,13 +630,14 @@ export class Room extends EventEmitter {
   }
 
   /**
-   * Remove/Kick a participant from the room (HOST ONLY)
+   * Remove a participant from the room (HOST ONLY)
    * 
-   * @param participantUserId - User ID of the participant to kick
+   * @param participantUserId - User ID of the participant to remove
+   * @param reason - Optional reason for removing the participant
    */
-  async kickParticipant(participantUserId: string): Promise<any> {
+  async removeParticipantByHost(participantUserId: string, reason?: string): Promise<void> {
     if (!this.isHost()) {
-      throw new Error("Only the room host can kick participants");
+      throw new Error("Only the room host can remove participants");
     }
 
     if (!this.isActive) {
@@ -650,25 +651,39 @@ export class Room extends EventEmitter {
     }
 
     if (participant.userId === this.ownerId) {
-      throw new Error("Cannot kick the room owner");
+      throw new Error("Cannot remove the room owner");
     }
 
     try {
-      log("[Room] Kicking participant:", participantUserId, "stream:", participant.streamId);
+      log("[Room] Removing participant:", participantUserId, "stream:", participant.streamId);
 
-      const response = await this.apiClient.removeParticipant(participant.streamId);
+      const request: { room_id: string; stream_id: string; reason?: string } = {
+        room_id: this.id,
+        stream_id: participant.streamId,
+      };
 
-      log("[Room] Participant kicked successfully");
+      if (reason) {
+        request.reason = reason;
+      }
 
-      // The participant will be removed when we receive the 'leave' event from server
+      await this.apiClient.removeParticipant(request);
+
+      log("[Room] Participant removed successfully");
+
+      // Emit participantRemovedByHost event immediately for host UI
+      this.emit("participantRemovedByHost", {
+        room: this,
+        participant,
+        reason: reason || "Removed by host",
+      });
+
+      // The participant will be removed when we receive the 'removed' event from server
       // No need to manually remove here
-
-      return response;
     } catch (error) {
       this.emit("error", {
         room: this,
         error: error instanceof Error ? error : new Error(String(error)),
-        action: "kickParticipant",
+        action: "removeParticipantByHost",
       });
       throw error;
     }
@@ -1609,6 +1624,48 @@ export class Room extends EventEmitter {
       }
     }
 
+    // Handle participant removed/kicked event
+    if (event.type === "removed") {
+      const removedEvent = event as any;
+      const removedUserId = removedEvent.participant?.user_id;
+      const reason = removedEvent.reason || "Removed by host";
+      const timestamp = removedEvent.timestamp;
+
+      log("[Room] Received 'removed' event:", { removedUserId, reason, timestamp });
+
+      // Check if this is the local participant being removed
+      if (removedUserId === this.localParticipant?.userId) {
+        log("[Room] Local participant was removed from the room");
+
+        // Emit event before cleanup so UI can show appropriate message
+        this.emit("participantRemovedByHost", {
+          room: this,
+          participant: this.localParticipant,
+          reason,
+          isLocal: true,
+        });
+
+        // Auto leave the room
+        // Don't auto leave yet - let UI handle the notification and cleanup
+        // We keep isActive = true so that leave() can properly run cleanup later
+      } else {
+        // Remote participant was removed
+        const participant = this.participants.get(removedUserId);
+        if (participant) {
+          log("[Room] Remote participant was removed:", removedUserId);
+
+          this.emit("participantRemovedByHost", {
+            room: this,
+            participant,
+            reason,
+            isLocal: false,
+          });
+
+          this.removeParticipant(removedUserId);
+        }
+      }
+    }
+
     if (event.type === "join_sub_room") {
       const subRoomEvent = event as any;
       const { room, participants } = subRoomEvent;
@@ -2197,6 +2254,11 @@ export class Room extends EventEmitter {
     if (this.audioMixer) {
       await this.audioMixer.cleanup();
       this.audioMixer = null;
+    }
+
+    // Explicitly cleanup local publisher
+    if (this.localParticipant?.publisher) {
+      await this.localParticipant.publisher.stop();
     }
 
     // Cleanup all participants' media
