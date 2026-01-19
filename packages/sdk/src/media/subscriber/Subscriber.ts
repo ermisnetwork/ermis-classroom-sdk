@@ -75,6 +75,10 @@ interface SubscriberEvents extends Record<string, unknown> {
     | "videoWrite"
     | "workerMessage";
   };
+  // Reconnection events
+  reconnecting: { subscriber: Subscriber; attempt: number; maxAttempts: number; delay: number };
+  reconnected: { subscriber: Subscriber };
+  reconnectionFailed: { subscriber: Subscriber; reason: string };
 }
 
 /**
@@ -121,6 +125,13 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   private isAudioEnabled = true; // MATCH SubscriberDev.js
   private connectionStatus: ConnectionStatus = "disconnected";
   private mediaStream: MediaStream | null = null;
+
+  // Reconnection state
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 3;
+  private baseReconnectDelay = 1000; // 1 second
+  private maxReconnectDelay = 10000; // 10 seconds
+  private isReconnecting = false;
 
   constructor(config: SubscriberConfig) {
     super();
@@ -368,8 +379,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         log("[Subscriber] Video processor init() called");
       }
 
-      // Attach streams to worker (WebTransport, WebRTC, or WebSocket)
-      await this.attachStreams();
+      // Attach streams to worker (WebTransport, WebRTC, or WebSocket) with retry
+      await this.attachStreamsWithRetry();
 
       this.isStarted = true;
       this.updateConnectionStatus("connected");
@@ -688,6 +699,200 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       subscriber: this,
       status,
       previousStatus,
+    });
+  }
+
+  // ========== Reconnection Methods ==========
+
+  /**
+   * Calculate exponential backoff delay for reconnection
+   */
+  private calculateBackoffDelay(): number {
+    const delay = Math.min(
+      this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      this.maxReconnectDelay
+    );
+    // Add jitter (±20%) to prevent thundering herd
+    const jitter = delay * 0.2 * (Math.random() * 2 - 1);
+    return Math.floor(delay + jitter);
+  }
+
+  /**
+   * Delay helper for async/await
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Attach streams with retry logic
+   */
+  private async attachStreamsWithRetry(): Promise<void> {
+    let lastError: Error | null = null;
+    this.reconnectAttempts = 0;
+
+    while (this.reconnectAttempts < this.maxReconnectAttempts) {
+      try {
+        await this.attachStreams();
+        this.reconnectAttempts = 0;
+        if (this.isReconnecting) {
+          log("[Subscriber] ✅ Stream attachment successful after retry");
+        }
+        return;
+      } catch (error) {
+        lastError = error as Error;
+        this.reconnectAttempts++;
+
+        log(`[Subscriber] ❌ Stream attachment failed (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}):`, error);
+
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          break;
+        }
+
+        const delay = this.calculateBackoffDelay();
+        this.emit("reconnecting", {
+          subscriber: this,
+          attempt: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          delay,
+        });
+        globalEventBus.emit(GlobalEvents.SUBSCRIBER_RECONNECTING, {
+          streamId: this.config.streamId,
+          attempt: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          delay,
+        });
+        this.emit("status", {
+          subscriber: this,
+          message: `Reconnecting (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`,
+          isError: false,
+        });
+
+        await this.delay(delay);
+      }
+    }
+
+    this.emit("reconnectionFailed", {
+      subscriber: this,
+      reason: lastError?.message || "Unknown error",
+    });
+    globalEventBus.emit(GlobalEvents.SUBSCRIBER_RECONNECTION_FAILED, {
+      streamId: this.config.streamId,
+      reason: lastError?.message || "Unknown error",
+    });
+    throw lastError;
+  }
+
+  /**
+   * Reconnect subscriber - full connection re-establishment
+   * Can be called manually or automatically
+   */
+  async reconnect(): Promise<void> {
+    if (this.isReconnecting) {
+      log("[Subscriber] Already reconnecting, skipping...");
+      return;
+    }
+
+    log("[Subscriber] 🔄 Starting reconnection process...");
+    this.isReconnecting = true;
+    this.reconnectAttempts = 0;
+
+    try {
+      // Cleanup existing connections but preserve config
+      this.cleanup();
+
+      // Re-initialize managers
+      this.initializeManagers();
+
+      // Create a new message channel for worker communication
+      const channel = new MessageChannel();
+
+      // Load polyfill if needed
+      if (this.polyfillManager) {
+        await this.polyfillManager.load();
+      }
+
+      // Initialize worker
+      if (!this.workerManager) {
+        throw new Error("Worker manager not initialized");
+      }
+      await this.workerManager.init(channel.port2, this.subscribeType, this.config.audioEnabled);
+
+      // Initialize audio system if enabled
+      if (this.audioProcessor && this.config.audioEnabled) {
+        await this.audioProcessor.init(
+          this.config.audioWorkletUrl,
+          channel.port1
+        );
+      }
+
+      // Initialize video system
+      if (this.videoProcessor) {
+        this.videoProcessor.init();
+      }
+
+      // Attach streams with retry
+      await this.attachStreamsWithRetry();
+
+      this.isStarted = true;
+      this.updateConnectionStatus("connected");
+
+      this.emit("reconnected", { subscriber: this });
+      globalEventBus.emit(GlobalEvents.SUBSCRIBER_RECONNECTED, { streamId: this.config.streamId });
+      log("[Subscriber] ✅ Reconnection completed successfully");
+    } catch (error) {
+      console.error("[Subscriber] ❌ Reconnection failed:", error);
+      this.updateConnectionStatus("failed");
+      this.emit("reconnectionFailed", {
+        subscriber: this,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      globalEventBus.emit(GlobalEvents.SUBSCRIBER_RECONNECTION_FAILED, {
+        streamId: this.config.streamId,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      throw error;
+    } finally {
+      this.isReconnecting = false;
+    }
+  }
+
+  /**
+   * Get current reconnection state
+   */
+  getReconnectionState(): {
+    isReconnecting: boolean;
+    attempts: number;
+    maxAttempts: number;
+  } {
+    return {
+      isReconnecting: this.isReconnecting,
+      attempts: this.reconnectAttempts,
+      maxAttempts: this.maxReconnectAttempts,
+    };
+  }
+
+  /**
+   * Configure reconnection parameters
+   */
+  setReconnectionConfig(config: {
+    maxAttempts?: number;
+    baseDelay?: number;
+    maxDelay?: number;
+  }): void {
+    if (config.maxAttempts !== undefined) {
+      this.maxReconnectAttempts = config.maxAttempts;
+    }
+    if (config.baseDelay !== undefined) {
+      this.baseReconnectDelay = config.baseDelay;
+    }
+    if (config.maxDelay !== undefined) {
+      this.maxReconnectDelay = config.maxDelay;
+    }
+    log("[Subscriber] Reconnection config updated:", {
+      maxAttempts: this.maxReconnectAttempts,
+      baseDelay: this.baseReconnectDelay,
+      maxDelay: this.maxReconnectDelay,
     });
   }
 }

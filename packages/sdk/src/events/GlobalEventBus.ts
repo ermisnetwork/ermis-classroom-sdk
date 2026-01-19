@@ -3,9 +3,9 @@
  * Uses existing EventEmitter infrastructure with singleton pattern
  */
 
-import {EventEmitter} from "./EventEmitter";
-import type {ServerEvent} from "../types/core/room.types";
-import {log} from "../utils";
+import { EventEmitter } from "./EventEmitter";
+import type { ServerEvent } from "../types/core/room.types";
+import { log } from "../utils";
 
 /**
  * Global event names - centralized event registry
@@ -19,19 +19,24 @@ export enum GlobalEvents {
   LOCAL_SCREEN_SHARE_READY = "publisher:localScreenShareReady",
   SCREEN_SHARE_STARTED = "publisher:screenShareStarted",
   SCREEN_SHARE_STOPPED = "publisher:screenShareStopped",
-  MEDIA_STREAM_REPLACED = "publisher:mediaStreamReplaced",
+  LIVESTREAM_STARTED = "publisher:livestreamStarted",
+  LIVESTREAM_STOPPED = "publisher:livestreamStopped",
+
+  // Publisher connection events
+  PUBLISHER_CONNECTED = "publisher:connected",
+  PUBLISHER_DISCONNECTED = "publisher:disconnected",
+  PUBLISHER_RECONNECTING = "publisher:reconnecting",
+  PUBLISHER_RECONNECTED = "publisher:reconnected",
+  PUBLISHER_RECONNECTION_FAILED = "publisher:reconnectionFailed",
+  PUBLISHER_CONNECTION_HEALTH_CHANGED = "publisher:connectionHealthChanged",
 
   // Subscriber media events
   REMOTE_STREAM_READY = "subscriber:remoteStreamReady",
-  REMOTE_SCREEN_SHARE_READY = "subscriber:remoteScreenShareReady",
-  REMOTE_VIDEO_INITIALIZED = "subscriber:remoteVideoInitialized",
-  REMOTE_AUDIO_INITIALIZED = "subscriber:remoteAudioInitialized",
 
-  // Connection events
-  PUBLISHER_CONNECTED = "publisher:connected",
-  PUBLISHER_DISCONNECTED = "publisher:disconnected",
-  SUBSCRIBER_CONNECTED = "subscriber:connected",
-  SUBSCRIBER_DISCONNECTED = "subscriber:disconnected",
+  // Subscriber connection events
+  SUBSCRIBER_RECONNECTING = "subscriber:reconnecting",
+  SUBSCRIBER_RECONNECTED = "subscriber:reconnected",
+  SUBSCRIBER_RECONNECTION_FAILED = "subscriber:reconnectionFailed",
 }
 
 /**
@@ -80,13 +85,21 @@ export interface GlobalEventMap extends Record<string, unknown> {
   };
 
   [GlobalEvents.SCREEN_SHARE_STOPPED]: undefined;
+  [GlobalEvents.LIVESTREAM_STARTED]: undefined;
+  [GlobalEvents.LIVESTREAM_STOPPED]: undefined;
 
-  [GlobalEvents.MEDIA_STREAM_REPLACED]: {
-    stream: MediaStream;
-    videoOnlyStream: MediaStream;
-    hasVideo: boolean;
-    hasAudio: boolean;
+  // Publisher connection events
+  [GlobalEvents.PUBLISHER_CONNECTED]: { streamId?: string };
+  [GlobalEvents.PUBLISHER_DISCONNECTED]: { streamId?: string; reason?: string };
+  [GlobalEvents.PUBLISHER_RECONNECTING]: {
+    streamId?: string;
+    attempt: number;
+    maxAttempts: number;
+    delay: number;
   };
+  [GlobalEvents.PUBLISHER_RECONNECTED]: { streamId?: string };
+  [GlobalEvents.PUBLISHER_RECONNECTION_FAILED]: { streamId?: string; reason: string };
+  [GlobalEvents.PUBLISHER_CONNECTION_HEALTH_CHANGED]: { streamId?: string; isHealthy: boolean };
 
   // Subscriber events
   [GlobalEvents.REMOTE_STREAM_READY]: {
@@ -95,34 +108,15 @@ export interface GlobalEventMap extends Record<string, unknown> {
     subscribeType: string;
   };
 
-  [GlobalEvents.REMOTE_SCREEN_SHARE_READY]: {
-    stream: MediaStream;
-    videoOnlyStream: MediaStream;
+  // Subscriber connection events
+  [GlobalEvents.SUBSCRIBER_RECONNECTING]: {
     streamId: string;
-    config: {
-      codec: string;
-      width: number;
-      height: number;
-      framerate: number;
-      bitrate: number;
-    };
-    hasAudio: boolean;
-    hasVideo: boolean;
+    attempt: number;
+    maxAttempts: number;
+    delay: number;
   };
-
-  [GlobalEvents.REMOTE_VIDEO_INITIALIZED]: {
-    streamId: string;
-  };
-
-  [GlobalEvents.REMOTE_AUDIO_INITIALIZED]: {
-    streamId: string;
-  };
-
-  // Connection events
-  [GlobalEvents.PUBLISHER_CONNECTED]: undefined;
-  [GlobalEvents.PUBLISHER_DISCONNECTED]: { reason?: string };
-  [GlobalEvents.SUBSCRIBER_CONNECTED]: { streamId: string };
-  [GlobalEvents.SUBSCRIBER_DISCONNECTED]: { streamId: string; reason?: string };
+  [GlobalEvents.SUBSCRIBER_RECONNECTED]: { streamId: string };
+  [GlobalEvents.SUBSCRIBER_RECONNECTION_FAILED]: { streamId: string; reason: string };
 }
 
 /**

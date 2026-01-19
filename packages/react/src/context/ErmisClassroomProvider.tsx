@@ -12,6 +12,8 @@ import ErmisClassroom, {
   ROOM_EVENTS,
   type SelectedDevices,
   PinType,
+  globalEventBus,
+  GlobalEvents,
 } from '@ermisnetwork/ermis-classroom-sdk';
 import { ErmisClassroomContext } from './ErmisClassroomContext';
 import type { ErmisClassroomContextValue, ErmisClassroomProviderProps, ScreenShareData, } from '../types';
@@ -62,6 +64,9 @@ export function ErmisClassroomProvider({
   // Pin/Hand state
   const [handRaised, setHandRaised] = useState(false);
   const [pinType, setPinType] = useState<'local' | 'everyone' | null>(null);
+
+  // Livestream state
+  const [isLivestreamActive, setIsLivestreamActive] = useState(false);
 
   // Device state
   const [devices, setDevices] = useState<MediaDevices | null>(null);
@@ -445,6 +450,24 @@ export function ErmisClassroomProvider({
         console.error('[Provider] Unmount cleanup failed:', e);
       }
       clientRef.current = null;
+    };
+  }, []);
+
+  // Effect: Listen for livestream stopped from browser UI
+  useEffect(() => {
+    const handleLivestreamStarted = () => {
+      log('[Provider] Livestream started');
+      setIsLivestreamActive(true);
+    };
+    const handleLivestreamStopped = () => {
+      log('[Provider] Livestream stopped from browser UI');
+      setIsLivestreamActive(false);
+    };
+    globalEventBus.on(GlobalEvents.LIVESTREAM_STARTED, handleLivestreamStarted);
+    globalEventBus.on(GlobalEvents.LIVESTREAM_STOPPED, handleLivestreamStopped);
+    return () => {
+      globalEventBus.off(GlobalEvents.LIVESTREAM_STARTED, handleLivestreamStarted);
+      globalEventBus.off(GlobalEvents.LIVESTREAM_STOPPED, handleLivestreamStopped);
     };
   }, []);
 
@@ -863,6 +886,36 @@ export function ErmisClassroomProvider({
     return await currentRoom.fetchParticipants();
   }, [currentRoom]);
 
+  // Livestream methods
+  const startLivestream = useCallback(async () => {
+    if (!currentRoom) throw new Error('Not in a room');
+    const local = currentRoom.localParticipant as any;
+    if (!local?.publisher) {
+      throw new Error('Publisher not initialized');
+    }
+    try {
+      await local.publisher.startLivestream();
+      setIsLivestreamActive(true);
+    } catch (error) {
+      console.error('Failed to start livestream:', error);
+      setIsLivestreamActive(false);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  const stopLivestream = useCallback(async () => {
+    if (!currentRoom) return;
+    const local = currentRoom.localParticipant as any;
+    if (!local?.publisher) return;
+    try {
+      await local.publisher.stopLivestream();
+      setIsLivestreamActive(false);
+    } catch (error) {
+      console.error('Failed to stop livestream:', error);
+      throw error;
+    }
+  }, [currentRoom]);
+
   const value: ErmisClassroomContextValue = useMemo(
     () => ({
       client: clientRef.current,
@@ -911,6 +964,10 @@ export function ErmisClassroomProvider({
       fetchParticipants,
       enableParticipantScreenShare,
       disableParticipantScreenShare,
+      // Livestream
+      startLivestream,
+      stopLivestream,
+      isLivestreamActive,
     }),
     [
       participants,
@@ -957,6 +1014,9 @@ export function ErmisClassroomProvider({
       fetchParticipants,
       enableParticipantScreenShare,
       disableParticipantScreenShare,
+      startLivestream,
+      stopLivestream,
+      isLivestreamActive,
     ]
   );
 

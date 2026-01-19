@@ -15,9 +15,12 @@ import { WebRTCManager } from "./transports/WebRTCManager";
 import { StreamManager } from "./transports/StreamManager";
 import { VideoEncoderManager } from "./managers/VideoEncoderManager";
 import { AudioEncoderManager } from "./managers/AudioEncoderManager";
+import { AACEncoderManager } from "./managers/AACEncoderManager";
 import { VideoProcessor } from "./processors/VideoProcessor";
 import { AudioProcessor } from "./processors/AudioProcessor";
+import { LivestreamAudioMixer } from "../audioMixer/LivestreamAudioMixer";
 import { log } from "../../utils";
+import { SUB_STREAMS } from "../../constants/publisherConstants";
 
 interface PublisherEvents extends Record<string, unknown> {
   statusUpdate: { message: string; isError: boolean };
@@ -68,6 +71,14 @@ interface PublisherEvents extends Record<string, unknown> {
     hasVideo: boolean;
     hasAudio: boolean;
   };
+  // Reconnection events
+  streamReconnecting: { attempt: number; maxAttempts: number; delay: number };
+  streamReconnected: undefined;
+  streamReconnectionFailed: { reason: string };
+  connectionHealthChanged: { isHealthy: boolean };
+  livestreamStarted: { tabStream: MediaStream; mixedAudioStream: MediaStream };
+  livestreamStopped: undefined;
+  tabCaptureError: unknown;
 }
 
 export class Publisher extends EventEmitter<PublisherEvents> {
@@ -89,6 +100,24 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private audioProcessor: AudioProcessor | null = null;
   private InitAudioRecorder: any = null;
   private permissions: ParticipantPermissions;
+
+  // Reconnection state
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 3;
+  private baseReconnectDelay = 1000; // 1 second
+  private maxReconnectDelay = 10000; // 10 seconds
+  private isReconnecting = false;
+  private connectionHealthChecker: ReturnType<typeof setInterval> | null = null;
+
+  // Livestream state
+  private isLivestreaming = false;
+  private livestreamVideoProcessor: VideoProcessor | null = null;
+  private livestreamAudioProcessor: AudioProcessor | null = null;
+  private livestreamVideoEncoderManager: VideoEncoderManager | null = null;
+  private livestreamAudioEncoderManager: AACEncoderManager | null = null;
+  private livestreamAudioMixer: LivestreamAudioMixer | null = null;
+  private tabStream: MediaStream | null = null;
+  private mixedAudioStream: MediaStream | null = null;
 
   constructor(config: PublisherConfig) {
     super();
@@ -192,9 +221,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       }
 
       if (this.options.useWebRTC) {
-        await this.setupWebRTCConnection();
+        await this.setupWebRTCConnectionWithRetry();
       } else {
-        await this.setupWebTransportConnection();
+        await this.setupWebTransportConnectionWithRetry();
       }
 
       await this.initializeProcessors();
@@ -207,6 +236,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Send initial state to server so other clients know the mic/camera status
       // This is important when user joins with mic/camera already disabled
       await this.sendInitialState();
+
+      // Start connection health monitoring
+      this.startConnectionHealthMonitoring();
 
       if (this.options.onStreamStart) {
         this.options.onStreamStart();
@@ -374,6 +406,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     this.updateStatus("WebTransport connected");
     this.emit("connected");
+    globalEventBus.emit(GlobalEvents.PUBLISHER_CONNECTED, { streamId: this.options.streamId });
   }
 
   private async setupWebRTCConnection(): Promise<void> {
@@ -433,6 +466,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     this.updateStatus("WebRTC connected");
     this.emit("connected");
+    globalEventBus.emit(GlobalEvents.PUBLISHER_CONNECTED, { streamId: this.options.streamId });
   }
 
   private async initializeProcessors(): Promise<void> {
@@ -711,6 +745,44 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     await this.streamManager.sendEvent(event);
   }
 
+  /**
+   * Wait for config to be sent for a specific channel
+   * @param channelName - Channel to wait for config
+   * @param timeout - Timeout in milliseconds (default 10000ms)
+   */
+  private async waitForConfigSent(channelName: ChannelName, timeout = 2000): Promise<void> {
+    if (!this.streamManager) {
+      throw new Error("StreamManager not initialized");
+    }
+
+    // Check if already sent
+    if (this.streamManager.isConfigSent(channelName)) {
+      log(`[Publisher] Config already sent for ${channelName}`);
+      return;
+    }
+
+    log(`[Publisher] Waiting for config to be sent for ${channelName}...`);
+
+    return new Promise((resolve, reject) => {
+      const startTime = Date.now();
+      const checkInterval = 100; // Check every 100ms
+
+      const intervalId = setInterval(() => {
+        if (this.streamManager?.isConfigSent(channelName)) {
+          clearInterval(intervalId);
+          log(`[Publisher] Config sent for ${channelName} after ${Date.now() - startTime}ms`);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - startTime > timeout) {
+          clearInterval(intervalId);
+          reject(new Error(`Timeout waiting for config to be sent for ${channelName}`));
+        }
+      }, checkInterval);
+    });
+  }
+
   /// send custom event to specific targets
   /// targets = [] => send to whole room
   /// targets = ['streamId1', 'streamId2'] => send to specific stream ids
@@ -727,6 +799,14 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     try {
       this.updateStatus("Stopping publisher...");
+
+      // Stop connection health monitoring
+      this.stopConnectionHealthMonitoring();
+
+      // Stop livestream first if active
+      if (this.isLivestreaming) {
+        await this.stopLivestream();
+      }
 
       // Stop heartbeat first to prevent errors during cleanup
       if (this.streamManager) {
@@ -984,6 +1064,18 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         await this.startScreenAudioStreaming();
       }
 
+      // Wait for video config to be sent before announcing screen share
+      log(`[Publisher] Waiting for screen share video config to be sent...`);
+      await this.waitForConfigSent(ChannelName.SCREEN_SHARE_720P, 2000);
+      log(`[Publisher] Screen share video config sent successfully`);
+
+      // Also wait for audio config if we have audio
+      if (hasAudio) {
+        log(`[Publisher] Waiting for screen share audio config to be sent...`);
+        await this.waitForConfigSent(ChannelName.SCREEN_SHARE_AUDIO, 2000);
+        log(`[Publisher] Screen share audio config sent successfully`);
+      }
+
       // Send event with has_audio so subscribers know whether to subscribe to audio
       console.warn(`[Publisher] Sending START_SCREEN_SHARE event with has_audio: ${hasAudio}`);
 
@@ -1022,6 +1114,14 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       await this.sendMeetingEvent(MEETING_EVENTS.START_SCREEN_SHARE, {
         has_audio: hasAudio,
       });
+
+      // If livestreaming and screen share has audio, add it to the livestream mix
+      if (this.isLivestreaming && hasAudio && this.livestreamAudioMixer && this.screenStream) {
+        log("[Publisher] Adding screen share audio to active livestream mix");
+        const screenAudioStream = new MediaStream(this.screenStream.getAudioTracks());
+        this.livestreamAudioMixer.addScreenShareAudio(screenAudioStream);
+      }
+
       this.updateStatus(`Screen sharing started (Video: ${hasVideo}, Audio: ${hasAudio})`);
 
     } catch (error) {
@@ -1150,6 +1250,12 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Send STOP_SCREEN_SHARE event
       await this.sendMeetingEvent(MEETING_EVENTS.STOP_SCREEN_SHARE);
 
+      // If livestreaming, remove screen share audio from the mix
+      if (this.isLivestreaming && this.livestreamAudioMixer) {
+        log("[Publisher] Removing screen share audio from livestream mix");
+        this.livestreamAudioMixer.removeScreenShareAudio();
+      }
+
       this.updateStatus("Screen sharing stopped");
 
       // Emit to global event bus so Room can update state
@@ -1276,5 +1382,681 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
   get mediaStream(): MediaStream | null {
     return this.currentStream;
+  }
+
+  // ========== Reconnection Methods ==========
+
+  /**
+   * Calculate exponential backoff delay for reconnection
+   */
+  private calculateBackoffDelay(): number {
+    const delay = Math.min(
+      this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      this.maxReconnectDelay
+    );
+    // Add jitter (±20%) to prevent thundering herd
+    const jitter = delay * 0.2 * (Math.random() * 2 - 1);
+    return Math.floor(delay + jitter);
+  }
+
+  /**
+   * Delay helper for async/await
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Setup WebTransport connection with retry logic
+   */
+  private async setupWebTransportConnectionWithRetry(): Promise<void> {
+    let lastError: Error | null = null;
+    this.reconnectAttempts = 0;
+
+    while (this.reconnectAttempts < this.maxReconnectAttempts) {
+      try {
+        await this.setupWebTransportConnection();
+        this.reconnectAttempts = 0;
+        if (this.isReconnecting) {
+          this.emit("streamReconnected");
+          globalEventBus.emit(GlobalEvents.PUBLISHER_RECONNECTED, { streamId: this.options.streamId });
+          log("[Publisher] ✅ WebTransport reconnection successful");
+        }
+        return;
+      } catch (error) {
+        lastError = error as Error;
+        this.reconnectAttempts++;
+
+        log(`[Publisher] ❌ WebTransport connection failed (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}):`, error);
+
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          break;
+        }
+
+        const delay = this.calculateBackoffDelay();
+        this.emit("streamReconnecting", {
+          attempt: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          delay,
+        });
+        globalEventBus.emit(GlobalEvents.PUBLISHER_RECONNECTING, {
+          streamId: this.options.streamId,
+          attempt: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          delay,
+        });
+        this.updateStatus(`Reconnecting WebTransport (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+
+        await this.delay(delay);
+      }
+    }
+
+    this.emit("streamReconnectionFailed", { reason: lastError?.message || "Unknown error" });
+    globalEventBus.emit(GlobalEvents.PUBLISHER_RECONNECTION_FAILED, {
+      streamId: this.options.streamId,
+      reason: lastError?.message || "Unknown error",
+    });
+    this.updateStatus("WebTransport reconnection failed", true);
+    throw lastError;
+  }
+
+  /**
+   * Setup WebRTC connection with retry logic
+   */
+  private async setupWebRTCConnectionWithRetry(): Promise<void> {
+    let lastError: Error | null = null;
+    this.reconnectAttempts = 0;
+
+    while (this.reconnectAttempts < this.maxReconnectAttempts) {
+      try {
+        await this.setupWebRTCConnection();
+        this.reconnectAttempts = 0;
+        if (this.isReconnecting) {
+          this.emit("streamReconnected");
+          globalEventBus.emit(GlobalEvents.PUBLISHER_RECONNECTED, { streamId: this.options.streamId });
+          log("[Publisher] ✅ WebRTC reconnection successful");
+        }
+        return;
+      } catch (error) {
+        lastError = error as Error;
+        this.reconnectAttempts++;
+
+        log(`[Publisher] ❌ WebRTC connection failed (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}):`, error);
+
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          break;
+        }
+
+        const delay = this.calculateBackoffDelay();
+        this.emit("streamReconnecting", {
+          attempt: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          delay,
+        });
+        globalEventBus.emit(GlobalEvents.PUBLISHER_RECONNECTING, {
+          streamId: this.options.streamId,
+          attempt: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          delay,
+        });
+        this.updateStatus(`Reconnecting WebRTC (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+
+        await this.delay(delay);
+      }
+    }
+
+    this.emit("streamReconnectionFailed", { reason: lastError?.message || "Unknown error" });
+    globalEventBus.emit(GlobalEvents.PUBLISHER_RECONNECTION_FAILED, {
+      streamId: this.options.streamId,
+      reason: lastError?.message || "Unknown error",
+    });
+    this.updateStatus("WebRTC reconnection failed", true);
+    throw lastError;
+  }
+
+  /**
+   * Start monitoring connection health
+   * Checks every 5 seconds and attempts reconnection if connection is lost
+   */
+  startConnectionHealthMonitoring(): void {
+    if (this.connectionHealthChecker) {
+      return; // Already monitoring
+    }
+
+    log("[Publisher] Starting connection health monitoring");
+    let wasHealthy = true;
+
+    this.connectionHealthChecker = setInterval(async () => {
+      if (!this.isPublishing || this.isReconnecting) {
+        return;
+      }
+
+      const isHealthy = this.checkConnectionHealth();
+
+      // Emit health change event if status changed
+      if (isHealthy !== wasHealthy) {
+        this.emit("connectionHealthChanged", { isHealthy });
+        globalEventBus.emit(GlobalEvents.PUBLISHER_CONNECTION_HEALTH_CHANGED, {
+          streamId: this.options.streamId,
+          isHealthy,
+        });
+        wasHealthy = isHealthy;
+      }
+
+      if (!isHealthy) {
+        log("[Publisher] ⚠️ Connection health check failed, attempting reconnection...");
+        await this.handleConnectionFailure();
+      }
+    }, 5000);
+  }
+
+  /**
+   * Stop connection health monitoring
+   */
+  stopConnectionHealthMonitoring(): void {
+    if (this.connectionHealthChecker) {
+      clearInterval(this.connectionHealthChecker);
+      this.connectionHealthChecker = null;
+      log("[Publisher] Connection health monitoring stopped");
+    }
+  }
+
+  /**
+   * Check if the current connection is healthy
+   */
+  private checkConnectionHealth(): boolean {
+    if (this.options.useWebRTC) {
+      // Check if WebRTC manager exists and has connected peer connections
+      if (!this.webRtcManager) return false;
+      return this.webRtcManager.isRTCConnected();
+    } else {
+      // Check if WebTransport is connected
+      if (!this.webTransportManager) return false;
+      return this.webTransportManager.isTransportConnected();
+    }
+  }
+
+  /**
+   * Handle connection failure - attempt to reconnect
+   */
+  private async handleConnectionFailure(): Promise<void> {
+    if (this.isReconnecting) {
+      log("[Publisher] Already reconnecting, skipping...");
+      return;
+    }
+
+    this.isReconnecting = true;
+    this.updateStatus("Connection lost, reconnecting...");
+
+    try {
+      await this.reconnect();
+      this.updateStatus("Reconnected successfully");
+    } catch (error) {
+      console.error("[Publisher] Reconnection failed:", error);
+      this.updateStatus("Reconnection failed", true);
+    } finally {
+      this.isReconnecting = false;
+    }
+  }
+
+  /**
+   * Stop media processing (for reconnection)
+   */
+  private async stopProcessing(): Promise<void> {
+    // Stop heartbeat first to prevent errors during cleanup
+    if (this.streamManager) {
+      this.streamManager.stopHeartbeat();
+    }
+
+    if (this.videoProcessor) {
+      await this.videoProcessor.stop();
+    }
+
+    if (this.audioProcessor) {
+      await this.audioProcessor.stop();
+    }
+  }
+
+  /**
+   * Reconnect publisher - full connection re-establishment
+   * Can be called manually or automatically by health monitor
+   */
+  async reconnect(): Promise<void> {
+    if (!this.isPublishing) {
+      throw new Error("Cannot reconnect - not currently publishing");
+    }
+
+    log("[Publisher] 🔄 Starting reconnection process...");
+    this.isReconnecting = true;
+    this.reconnectAttempts = 0;
+
+    try {
+      // Stop current processing
+      await this.stopProcessing();
+
+      // Close current transport connections
+      if (this.webTransportManager) {
+        await this.webTransportManager.close();
+        this.webTransportManager = null;
+      }
+
+      if (this.webRtcManager) {
+        await this.webRtcManager.close();
+        this.webRtcManager = null;
+      }
+
+      this.streamManager = null;
+
+      // Small delay before reconnecting
+      await this.delay(500);
+
+      // Reconnect transport with retry
+      if (this.options.useWebRTC) {
+        await this.setupWebRTCConnectionWithRetry();
+      } else {
+        await this.setupWebTransportConnectionWithRetry();
+      }
+
+      // Re-initialize processors
+      await this.initializeProcessors();
+
+      // Restart media processing
+      await this.startMediaProcessing();
+
+      // Send initial state to sync with server
+      await this.sendInitialState();
+
+      log("[Publisher] ✅ Reconnection completed successfully");
+      this.emit("connected");
+    } catch (error) {
+      console.error("[Publisher] ❌ Reconnection failed:", error);
+      throw error;
+    } finally {
+      this.isReconnecting = false;
+    }
+  }
+
+  /**
+   * Get current reconnection state
+   */
+  getReconnectionState(): {
+    isReconnecting: boolean;
+    attempts: number;
+    maxAttempts: number;
+  } {
+    return {
+      isReconnecting: this.isReconnecting,
+      attempts: this.reconnectAttempts,
+      maxAttempts: this.maxReconnectAttempts,
+    };
+  }
+
+  /**
+   * Configure reconnection parameters
+   */
+  setReconnectionConfig(config: {
+    maxAttempts?: number;
+    baseDelay?: number;
+    maxDelay?: number;
+  }): void {
+    if (config.maxAttempts !== undefined) {
+      this.maxReconnectAttempts = config.maxAttempts;
+    }
+    if (config.baseDelay !== undefined) {
+      this.baseReconnectDelay = config.baseDelay;
+    }
+    if (config.maxDelay !== undefined) {
+      this.maxReconnectDelay = config.maxDelay;
+    }
+    log("[Publisher] Reconnection config updated:", {
+      maxAttempts: this.maxReconnectAttempts,
+      baseDelay: this.baseReconnectDelay,
+      maxDelay: this.maxReconnectDelay,
+    });
+  }
+
+  // ==========================================
+  // LIVESTREAM METHODS
+  // ==========================================
+
+  /**
+   * Start livestreaming - captures current tab and mixes audio
+   * Uses the existing connection to publish on LIVESTREAM_VIDEO and LIVESTREAM_AUDIO channels
+   */
+  async startLivestream(): Promise<void> {
+    if (this.isLivestreaming) {
+      console.warn("[Publisher] Already livestreaming");
+      return;
+    }
+
+    if (!this.isPublishing) {
+      throw new Error("Publisher must be publishing before starting livestream");
+    }
+
+    if (!this.streamManager) {
+      throw new Error("StreamManager not initialized");
+    }
+
+    try {
+      this.updateStatus("Starting livestream...");
+
+      // Capture current tab
+      await this.captureCurrentTab();
+
+      if (!this.tabStream) {
+        throw new Error("Failed to capture tab stream");
+      }
+
+      // Mix audio streams
+      await this.setupLivestreamAudioMixing();
+
+      // Add livestream channels using StreamManager (works for both WebRTC and WebTransport)
+      log("[Publisher] Adding livestream channels...");
+      await this.streamManager.addStream(ChannelName.LIVESTREAM_720P);
+      await this.streamManager.addStream(ChannelName.LIVESTREAM_AUDIO);
+
+      // Wait for channels to be ready
+      await this.streamManager.waitForStreamReady(ChannelName.LIVESTREAM_720P);
+      await this.streamManager.waitForStreamReady(ChannelName.LIVESTREAM_AUDIO);
+      log("[Publisher] Livestream channels ready");
+
+      // Initialize processors for livestream
+      await this.initializeLivestreamProcessors();
+
+      // Start media processing
+      await this.startLivestreamProcessing();
+
+      this.isLivestreaming = true;
+      this.updateStatus("Livestream started");
+
+      this.emit("livestreamStarted", {
+        tabStream: this.tabStream,
+        mixedAudioStream: this.mixedAudioStream!,
+      });
+      globalEventBus.emit(GlobalEvents.LIVESTREAM_STARTED, undefined);
+
+      log("[Publisher] Livestream started successfully");
+    } catch (error) {
+      console.error("[Publisher] Failed to start livestream:", error);
+      this.updateStatus("Failed to start livestream", true);
+      await this.stopLivestream();
+      throw error;
+    }
+  }
+
+  /**
+   * Stop livestreaming
+   */
+  async stopLivestream(): Promise<void> {
+    if (!this.isLivestreaming) return;
+
+    try {
+      this.updateStatus("Stopping livestream...");
+
+      // Stop livestream processors
+      if (this.livestreamVideoProcessor) {
+        await this.livestreamVideoProcessor.stop();
+        this.livestreamVideoProcessor = null;
+      }
+
+      if (this.livestreamAudioProcessor) {
+        await this.livestreamAudioProcessor.stop();
+        this.livestreamAudioProcessor = null;
+      }
+
+      // Stop encoder managers
+      if (this.livestreamVideoEncoderManager) {
+        await this.livestreamVideoEncoderManager.closeAll();
+        this.livestreamVideoEncoderManager = null;
+      }
+
+      if (this.livestreamAudioEncoderManager) {
+        await this.livestreamAudioEncoderManager.stop();
+        this.livestreamAudioEncoderManager = null;
+      }
+
+      // Cleanup audio mixer
+      if (this.livestreamAudioMixer) {
+        await this.livestreamAudioMixer.cleanup();
+        this.livestreamAudioMixer = null;
+      }
+
+      // Stop tab stream
+      if (this.tabStream) {
+        this.tabStream.getTracks().forEach((track) => track.stop());
+        this.tabStream = null;
+      }
+
+      this.mixedAudioStream = null;
+      this.isLivestreaming = false;
+
+      this.updateStatus("Livestream stopped");
+      this.emit("livestreamStopped", undefined);
+      globalEventBus.emit(GlobalEvents.LIVESTREAM_STOPPED, undefined);
+
+      log("[Publisher] Livestream stopped successfully");
+    } catch (error) {
+      console.error("[Publisher] Error stopping livestream:", error);
+      this.updateStatus("Error stopping livestream", true);
+    }
+  }
+
+  /**
+   * Capture current browser tab
+   */
+  private async captureCurrentTab(): Promise<void> {
+    this.updateStatus("Capturing current tab...");
+
+    try {
+      const displayMediaOptions: DisplayMediaStreamOptions & {
+        preferCurrentTab?: boolean;
+        selfBrowserSurface?: string;
+      } = {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 15 },
+        },
+        audio: true,
+      };
+
+      // Chrome-specific options for preferring current tab
+      displayMediaOptions.preferCurrentTab = true;
+      displayMediaOptions.selfBrowserSurface = "include";
+
+      this.tabStream = await navigator.mediaDevices.getDisplayMedia(
+        displayMediaOptions as DisplayMediaStreamOptions
+      );
+
+      const hasVideo = this.tabStream.getVideoTracks().length > 0;
+      const hasAudio = this.tabStream.getAudioTracks().length > 0;
+
+      log(`[Publisher] Tab captured - Video: ${hasVideo}, Audio: ${hasAudio}`);
+
+      if (!hasVideo) {
+        throw new Error("Tab capture must have video");
+      }
+
+      // Handle tab capture stop (user stops from browser UI)
+      const videoTrack = this.tabStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          log("[Publisher] Tab capture stopped by user");
+          this.stopLivestream();
+        };
+      }
+
+      this.updateStatus("Tab captured successfully");
+    } catch (error) {
+      console.error("[Publisher] Tab capture failed:", error);
+      this.emit("tabCaptureError", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Setup audio mixing (tab audio + mic)
+   */
+  private async setupLivestreamAudioMixing(): Promise<void> {
+    this.updateStatus("Setting up audio mixing...");
+
+    // Initialize audio mixer
+    this.livestreamAudioMixer = new LivestreamAudioMixer({
+      micVolume: 1.0,
+      tabAudioVolume: 1.0,
+      screenShareVolume: 1.0,
+      debug: false,
+    });
+    await this.livestreamAudioMixer.initialize();
+
+    // Get tab audio stream (if available)
+    let tabAudioStream: MediaStream | null = null;
+    if (this.tabStream && this.tabStream.getAudioTracks().length > 0) {
+      tabAudioStream = new MediaStream(this.tabStream.getAudioTracks());
+    }
+
+    // Mix the audio streams (mic from current stream + tab audio)
+    this.mixedAudioStream = await this.livestreamAudioMixer.mixAudioStreams(
+      this.currentStream,
+      tabAudioStream
+    );
+
+    // If currently screen sharing with audio, add it to the mix
+    if (this.isScreenSharing && this.screenStream) {
+      const screenAudioTracks = this.screenStream.getAudioTracks();
+      if (screenAudioTracks.length > 0) {
+        log("[Publisher] Adding screen share audio to livestream mix");
+        const screenAudioStream = new MediaStream(screenAudioTracks);
+        this.livestreamAudioMixer.addScreenShareAudio(screenAudioStream);
+      }
+    }
+
+    log("[Publisher] Audio mixing setup complete");
+  }
+
+  /**
+   * Initialize processors for livestream channels
+   */
+  private async initializeLivestreamProcessors(): Promise<void> {
+    if (!this.tabStream || !this.streamManager) {
+      throw new Error("Tab stream or StreamManager not initialized");
+    }
+
+    // Video processor for livestream
+    this.livestreamVideoEncoderManager = new VideoEncoderManager();
+    this.livestreamVideoProcessor = new VideoProcessor(
+      this.livestreamVideoEncoderManager,
+      this.streamManager,
+      [SUB_STREAMS.LIVESTREAM_720P] as SubStream[]
+    );
+
+    this.livestreamVideoProcessor.on("encoderError", (error) => {
+      console.error("[Publisher] Livestream video encoder error:", error);
+      this.updateStatus("Livestream video encoder error", true);
+    });
+
+    // Audio processor for livestream - use AAC encoder for HLS compatibility
+    if (this.mixedAudioStream) {
+      const audioConfig = {
+        sampleRate: 48000,
+        numberOfChannels: 2, // Stereo for better HLS compatibility
+      };
+
+      this.livestreamAudioEncoderManager = new AACEncoderManager(
+        ChannelName.LIVESTREAM_AUDIO,
+        audioConfig
+      );
+
+      this.livestreamAudioProcessor = new AudioProcessor(
+        this.livestreamAudioEncoderManager as any, // AACEncoderManager has compatible interface
+        this.streamManager,
+        ChannelName.LIVESTREAM_AUDIO
+      );
+
+      this.livestreamAudioProcessor.on("encoderError", (error) => {
+        console.error("[Publisher] Livestream audio encoder error:", error);
+        this.updateStatus("Livestream audio encoder error", true);
+      });
+    }
+
+    log("[Publisher] Livestream processors initialized");
+  }
+
+  /**
+   * Start livestream media processing
+   */
+  private async startLivestreamProcessing(): Promise<void> {
+    if (!this.tabStream) {
+      throw new Error("Tab stream not available");
+    }
+
+    // Start video processing
+    if (this.livestreamVideoProcessor) {
+      const videoTrack = this.tabStream.getVideoTracks()[0];
+      if (videoTrack) {
+        const baseConfig = {
+          codec: "avc1.640c34",
+          width: 1280,
+          height: 720,
+          framerate: 15,
+          bitrate: 1_500_000,
+        };
+
+        await this.livestreamVideoProcessor.initialize(videoTrack, baseConfig);
+        await this.livestreamVideoProcessor.start();
+        log("[Publisher] Livestream video processing started");
+      }
+    }
+
+    // Start audio processing
+    if (this.livestreamAudioProcessor && this.mixedAudioStream) {
+      await this.livestreamAudioProcessor.initialize(this.mixedAudioStream);
+      await this.livestreamAudioProcessor.start();
+      log("[Publisher] Livestream audio processing started");
+    }
+  }
+
+  /**
+   * Set microphone volume in the livestream mix
+   * @param volume - Volume level (0-1)
+   */
+  setLivestreamMicVolume(volume: number): void {
+    if (this.livestreamAudioMixer) {
+      this.livestreamAudioMixer.setMicVolume(volume);
+    }
+  }
+
+  /**
+   * Set tab audio volume in the livestream mix
+   * @param volume - Volume level (0-1)
+   */
+  setLivestreamTabAudioVolume(volume: number): void {
+    if (this.livestreamAudioMixer) {
+      this.livestreamAudioMixer.setTabAudioVolume(volume);
+    }
+  }
+
+  /**
+   * Set screen share audio volume in the livestream mix
+   * @param volume - Volume level (0-1)
+   */
+  setLivestreamScreenShareVolume(volume: number): void {
+    if (this.livestreamAudioMixer) {
+      this.livestreamAudioMixer.setScreenShareVolume(volume);
+    }
+  }
+
+  /**
+   * Check if currently livestreaming
+   */
+  get isLivestreamActive(): boolean {
+    return this.isLivestreaming;
+  }
+
+  /**
+   * Get the tab video stream (for preview)
+   */
+  get livestreamTabStream(): MediaStream | null {
+    return this.tabStream;
   }
 }

@@ -1234,6 +1234,104 @@ export class Room extends EventEmitter {
     }
   }
 
+  // ========== Stream Reconnection Methods ==========
+
+  /**
+   * Reconnect local participant's stream (Publisher)
+   * Call this when you want to manually trigger a reconnection for the local user's audio/video
+   * 
+   * @example
+   * ```typescript
+   * try {
+   *   await room.reconnectLocalStream();
+   *   console.log("Reconnected successfully");
+   * } catch (error) {
+   *   console.error("Reconnection failed:", error);
+   * }
+   * ```
+   */
+  async reconnectLocalStream(): Promise<void> {
+    if (!this.localParticipant) {
+      throw new Error("Local participant not available");
+    }
+
+    if (!this.localParticipant.publisher) {
+      throw new Error("Publisher not initialized");
+    }
+
+    log("[Room] Manual reconnection requested for local stream");
+    await this.localParticipant.publisher.reconnect();
+  }
+
+  /**
+   * Reconnect a remote participant's stream (Subscriber)
+   * Call this when you want to manually trigger a reconnection for receiving a specific participant's audio/video
+   * 
+   * @param participantUserId - The user ID of the remote participant
+   * 
+   * @example
+   * ```typescript
+   * try {
+   *   await room.reconnectRemoteStream("user-123");
+   *   console.log("Reconnected to remote participant");
+   * } catch (error) {
+   *   console.error("Reconnection failed:", error);
+   * }
+   * ```
+   */
+  async reconnectRemoteStream(participantUserId: string): Promise<void> {
+    const participant = this.participants.get(participantUserId);
+
+    if (!participant) {
+      throw new Error(`Participant not found: ${participantUserId}`);
+    }
+
+    if (!participant.subscriber) {
+      throw new Error(`Subscriber not initialized for participant: ${participantUserId}`);
+    }
+
+    log("[Room] Manual reconnection requested for remote stream:", participantUserId);
+    await participant.subscriber.reconnect();
+  }
+
+  /**
+   * Reconnect all streams (local publisher + all remote subscribers)
+   * Use with caution - this will reconnect everything
+   * 
+   * @example
+   * ```typescript
+   * await room.reconnectAllStreams();
+   * ```
+   */
+  async reconnectAllStreams(): Promise<void> {
+    log("[Room] Manual reconnection requested for ALL streams");
+
+    const reconnectPromises: Promise<void>[] = [];
+
+    // Reconnect local publisher
+    if (this.localParticipant?.publisher) {
+      reconnectPromises.push(
+        this.localParticipant.publisher.reconnect().catch(err => {
+          console.error("[Room] Failed to reconnect local stream:", err);
+        })
+      );
+    }
+
+    // Reconnect all remote subscribers
+    for (const [userId, participant] of this.participants) {
+      if (!participant.isLocal && participant.subscriber) {
+        reconnectPromises.push(
+          participant.subscriber.reconnect().catch(err => {
+            console.error(`[Room] Failed to reconnect remote stream for ${userId}:`, err);
+          })
+        );
+      }
+    }
+
+    await Promise.all(reconnectPromises);
+    log("[Room] All stream reconnections completed");
+  }
+
   /**
    * Handle remote screen share
    * @param participantId - The participant's user ID
@@ -1393,8 +1491,7 @@ export class Room extends EventEmitter {
       },
     });
 
-    // No need to listen to publisher events - Room subscribes directly from globalEventBus
-    // This eliminates event re-emission chain: StreamManager -> Publisher -> Room
+    // Reconnection events are now handled via GlobalEventBus in _setupGlobalEventListeners()
 
     await publisher.startPublishing();
     this.localParticipant.setPublisher(publisher);
@@ -1442,8 +1539,7 @@ export class Room extends EventEmitter {
       subscriber.setAudioMixer(this.audioMixer);
     }
 
-    // No need to listen to subscriber events - Room subscribes directly from globalEventBus
-    // This eliminates event re-emission: Subscriber -> Room
+    // Reconnection events are now handled via GlobalEventBus in _setupGlobalEventListeners()
 
     await subscriber.start();
     participant.setSubscriber(subscriber);
@@ -1971,12 +2067,97 @@ export class Room extends EventEmitter {
       }
     };
 
+    // Publisher reconnection handlers
+    const handlePublisherReconnecting = (data: any) => {
+      log("[Room] Publisher reconnecting:", data);
+      this.emit("localStreamReconnecting", {
+        room: this,
+        ...data,
+      });
+    };
+
+    const handlePublisherReconnected = (data: any) => {
+      log("[Room] Publisher reconnected:", data);
+      this.emit("localStreamReconnected", { room: this });
+    };
+
+    const handlePublisherReconnectionFailed = (data: any) => {
+      log("[Room] Publisher reconnection failed:", data);
+      this.emit("localStreamReconnectionFailed", {
+        room: this,
+        ...data,
+      });
+    };
+
+    const handlePublisherConnectionHealthChanged = (data: any) => {
+      log("[Room] Publisher connection health changed:", data);
+      this.emit("localConnectionHealthChanged", {
+        room: this,
+        ...data,
+      });
+    };
+
+    // Subscriber reconnection handlers
+    const handleSubscriberReconnecting = (data: any) => {
+      const participant = Array.from(this.participants.values()).find(
+        p => p.streamId === data.streamId
+      );
+      if (participant) {
+        log("[Room] Subscriber reconnecting for:", participant.userId, data);
+        this.emit("remoteStreamReconnecting", {
+          room: this,
+          participant,
+          attempt: data.attempt,
+          maxAttempts: data.maxAttempts,
+          delay: data.delay,
+        });
+      }
+    };
+
+    const handleSubscriberReconnected = (data: any) => {
+      const participant = Array.from(this.participants.values()).find(
+        p => p.streamId === data.streamId
+      );
+      if (participant) {
+        log("[Room] Subscriber reconnected for:", participant.userId);
+        this.emit("remoteStreamReconnected", {
+          room: this,
+          participant,
+        });
+      }
+    };
+
+    const handleSubscriberReconnectionFailed = (data: any) => {
+      const participant = Array.from(this.participants.values()).find(
+        p => p.streamId === data.streamId
+      );
+      if (participant) {
+        log("[Room] Subscriber reconnection failed for:", participant.userId, data);
+        this.emit("remoteStreamReconnectionFailed", {
+          room: this,
+          participant,
+          reason: data.reason,
+        });
+      }
+    };
+
     // Subscribe to global events
     globalEventBus.on(GlobalEvents.SERVER_EVENT, handleServerEvent);
     globalEventBus.on(GlobalEvents.LOCAL_STREAM_READY, handleLocalStreamReady);
     globalEventBus.on(GlobalEvents.LOCAL_SCREEN_SHARE_READY, handleLocalScreenShareReady);
     globalEventBus.on(GlobalEvents.SCREEN_SHARE_STOPPED, handleScreenShareStopped);
     globalEventBus.on(GlobalEvents.REMOTE_STREAM_READY, handleRemoteStreamReady);
+
+    // Subscribe to Publisher reconnection events
+    globalEventBus.on(GlobalEvents.PUBLISHER_RECONNECTING, handlePublisherReconnecting);
+    globalEventBus.on(GlobalEvents.PUBLISHER_RECONNECTED, handlePublisherReconnected);
+    globalEventBus.on(GlobalEvents.PUBLISHER_RECONNECTION_FAILED, handlePublisherReconnectionFailed);
+    globalEventBus.on(GlobalEvents.PUBLISHER_CONNECTION_HEALTH_CHANGED, handlePublisherConnectionHealthChanged);
+
+    // Subscribe to Subscriber reconnection events
+    globalEventBus.on(GlobalEvents.SUBSCRIBER_RECONNECTING, handleSubscriberReconnecting);
+    globalEventBus.on(GlobalEvents.SUBSCRIBER_RECONNECTED, handleSubscriberReconnected);
+    globalEventBus.on(GlobalEvents.SUBSCRIBER_RECONNECTION_FAILED, handleSubscriberReconnectionFailed);
 
     // Store cleanup functions
     this.globalEventCleanups.push(
@@ -1985,6 +2166,15 @@ export class Room extends EventEmitter {
       () => globalEventBus.off(GlobalEvents.LOCAL_SCREEN_SHARE_READY, handleLocalScreenShareReady),
       () => globalEventBus.off(GlobalEvents.SCREEN_SHARE_STOPPED, handleScreenShareStopped),
       () => globalEventBus.off(GlobalEvents.REMOTE_STREAM_READY, handleRemoteStreamReady),
+      // Publisher reconnection cleanups
+      () => globalEventBus.off(GlobalEvents.PUBLISHER_RECONNECTING, handlePublisherReconnecting),
+      () => globalEventBus.off(GlobalEvents.PUBLISHER_RECONNECTED, handlePublisherReconnected),
+      () => globalEventBus.off(GlobalEvents.PUBLISHER_RECONNECTION_FAILED, handlePublisherReconnectionFailed),
+      () => globalEventBus.off(GlobalEvents.PUBLISHER_CONNECTION_HEALTH_CHANGED, handlePublisherConnectionHealthChanged),
+      // Subscriber reconnection cleanups
+      () => globalEventBus.off(GlobalEvents.SUBSCRIBER_RECONNECTING, handleSubscriberReconnecting),
+      () => globalEventBus.off(GlobalEvents.SUBSCRIBER_RECONNECTED, handleSubscriberReconnected),
+      () => globalEventBus.off(GlobalEvents.SUBSCRIBER_RECONNECTION_FAILED, handleSubscriberReconnectionFailed),
     );
 
     log("[Room] ✅ Global event listeners setup complete");

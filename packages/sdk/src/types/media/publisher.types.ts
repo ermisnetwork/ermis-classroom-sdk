@@ -23,6 +23,8 @@ export enum FrameType {
   SCREEN_SHARE_KEY = 4,
   SCREEN_SHARE_DELTA = 5,
   AUDIO = 6,
+  LIVESTREAM_KEY = 10,
+  LIVESTREAM_DELTA = 11,
   CONFIG = 0xfd,
   EVENT = 0xfe,
   PUBLISHER_COMMAND = 0xff,
@@ -46,6 +48,8 @@ export enum ChannelName {
   SCREEN_SHARE_720P = "screen_share_720p",
   SCREEN_SHARE_1080P = "screen_share_1080p",
   SCREEN_SHARE_AUDIO = "screen_share_audio",
+  LIVESTREAM_720P = "livestream_720p",
+  LIVESTREAM_AUDIO = "livestream_audio",
 }
 
 // Publisher configuration
