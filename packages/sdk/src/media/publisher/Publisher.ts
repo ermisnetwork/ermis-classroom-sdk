@@ -1775,6 +1775,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       });
       globalEventBus.emit(GlobalEvents.LIVESTREAM_STARTED, undefined);
 
+      // Send event to server
+      await this.sendMeetingEvent(MEETING_EVENTS.START_LIVESTREAM);
+
       log("[Publisher] Livestream started successfully");
     } catch (error) {
       console.error("[Publisher] Failed to start livestream:", error);
@@ -1833,6 +1836,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       this.updateStatus("Livestream stopped");
       this.emit("livestreamStopped", undefined);
       globalEventBus.emit(GlobalEvents.LIVESTREAM_STOPPED, undefined);
+
+      // Send event to server
+      await this.sendMeetingEvent(MEETING_EVENTS.STOP_LIVESTREAM);
 
       log("[Publisher] Livestream stopped successfully");
     } catch (error) {
