@@ -2,17 +2,19 @@
  * VCR SDK - Virtual Classroom SDK
  * A TypeScript SDK for Virtual Classroom API
  * 
- * This SDK provides access to 4 resources:
+ * This SDK provides access to 5 resources:
  * - Events: Create, read, update, delete events
  * - Registrants: Manage event participants
  * - Rewards: Manage event rewards
  * - Ratings: Read-only access to event ratings
+ * - Permissions: Manage student permissions in the classroom
  */
 
 import { VCRHTTPClient } from './client';
 import { EventsResource, RegistrantsResource } from './api/events';
 import { RewardsResource } from './api/rewards';
 import { RatingsResource } from './api/ratings';
+import { PermissionsResource } from './api/permissions';
 
 export interface VCRClientConfig {
   /**
@@ -45,11 +47,12 @@ export interface VCRClientConfig {
 export class VCRClient {
   private httpClient: VCRHTTPClient;
 
-  // API resources - only 4 resources as per API documentation
+  // API resources
   public readonly events: EventsResource;
   public readonly registrants: RegistrantsResource;
   public readonly rewards: RewardsResource;
   public readonly ratings: RatingsResource;
+  public readonly permissions: PermissionsResource;
 
   constructor(config: VCRClientConfig) {
     // Initialize HTTP client
@@ -66,6 +69,7 @@ export class VCRClient {
     this.registrants = new RegistrantsResource(this.httpClient);
     this.rewards = new RewardsResource(this.httpClient);
     this.ratings = new RatingsResource(this.httpClient);
+    this.permissions = new PermissionsResource(this.httpClient);
   }
 
   /**

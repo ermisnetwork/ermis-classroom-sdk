@@ -254,3 +254,68 @@ export interface RatingList {
   ratings: Rating[];
 }
 
+// ============================================================================
+// Permission Types
+// ============================================================================
+
+export type PermissionType = 'camera' | 'mic' | 'screenShare' | 'chat' | 'draw';
+
+export interface BlockPermissionParams {
+  participantAuthId: string;
+  permissionType: PermissionType;
+  reason?: string;
+}
+
+export interface UnblockPermissionParams {
+  participantAuthId: string;
+  permissionType: PermissionType;
+  reason?: string;
+}
+
+export interface PermissionBlockData {
+  participantAuthId: string;
+  permissionType: PermissionType;
+  blockedBy?: string;
+  blockedAt: string;
+  reason?: string;
+}
+
+export interface PermissionUnblockData {
+  participantAuthId: string;
+  permissionType: PermissionType;
+  unblockedBy?: string;
+  unblockedAt: string;
+  reason?: string;
+}
+
+export interface UpdateRoomSettingsParams {
+  blockAllCameras?: boolean;
+  blockAllMics?: boolean;
+  blockAllScreenShares?: boolean;
+  blockAllChat?: boolean;
+  requirePermissionForCamera?: boolean;
+  requirePermissionForMic?: boolean;
+  requirePermissionForScreenShare?: boolean;
+}
+
+export interface PermissionHistoryItem {
+  _id: string;
+  eventId: string;
+  participantAuthId: string;
+  permissionType: PermissionType;
+  action: 'block' | 'unblock';
+  blockedBy?: string;
+  unblockedBy?: string;
+  blockedAt?: string;
+  unblockedAt?: string;
+  reason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PermissionHistoryResponse {
+  data: PermissionHistoryItem[];
+  success: boolean;
+  message?: string;
+}
+
