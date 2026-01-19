@@ -4,6 +4,8 @@ import {
   BreakoutRoomResponse,
   CreateRoomResponse,
   CustomEventRequest,
+  EndRoomRequest,
+  EndRoomResponse,
   GetServiceTokenRequest,
   GetTokenResponse,
   GetUserTokenRequest,
@@ -15,6 +17,7 @@ import {
   ParticipantPermissions,
   ParticipantResponse,
   PermissionChanged,
+  RemoveParticipantRequest,
   RoomServiceDetailResponse,
   UpdateParticipantRequest,
 } from '../types';
@@ -101,6 +104,23 @@ export class RoomServiceClient {
     await this.call<null>('PUT', `/meeting/rooms/${mainRoomId}/breakout/close`);
   }
 
+  /**
+   * End a meeting room
+   * @param roomId - Room ID to end
+   * @param reason - Optional reason for ending the meeting
+   */
+  async endRoom(roomId: string, reason?: string): Promise<EndRoomResponse> {
+    const request: EndRoomRequest = {
+      room_id: roomId,
+    };
+
+    if (reason) {
+      request.reason = reason;
+    }
+
+    return this.call<EndRoomResponse>('PUT', '/meeting/rooms/end', request);
+  }
+
   async sendCustomEvent(request: CustomEventRequest): Promise<void> {
     await this.call<null>('POST', '/meeting/rooms/custom-event', request);
   }
@@ -128,7 +148,22 @@ export class RoomServiceClient {
     return this.call<UpdateParticipantRequest>('PUT', '/meeting/participants', req);
   }
 
-  async removeParticipant(streamId: string): Promise<void> {
-    await this.call<null>('DELETE', `/meeting/participants/remove/${streamId}`);
+  /**
+   * Remove a participant from a room
+   * @param roomId - Room ID
+   * @param streamId - Stream ID of the participant to remove
+   * @param reason - Optional reason for removal
+   */
+  async removeParticipant(roomId: string, streamId: string, reason?: string): Promise<void> {
+    const request: RemoveParticipantRequest = {
+      room_id: roomId,
+      stream_id: streamId,
+    };
+
+    if (reason) {
+      request.reason = reason;
+    }
+
+    await this.call<null>('DELETE', '/meeting/participants/remove', request);
   }
 }
