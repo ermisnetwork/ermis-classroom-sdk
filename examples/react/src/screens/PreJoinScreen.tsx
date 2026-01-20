@@ -13,7 +13,7 @@ interface PreJoinScreenProps {
 }
 
 export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
-  const [roomCode, setRoomCode] = useState("5fqw-ph5a-vjj9")
+  const [roomCode, setRoomCode] = useState('5ft5-x5sx-7utm');
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [micEnabled, setMicEnabled] = useState(true)

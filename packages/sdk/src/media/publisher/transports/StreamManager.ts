@@ -4,6 +4,7 @@ import { ChannelName, FrameType } from "../../../types/media/publisher.types";
 import type {
   StreamData,
   ServerEvent,
+  StreamDataGop,
 } from "../../../types/media/publisher.types";
 import { PacketBuilder } from "../../shared/utils/PacketBuilder";
 import type { RaptorQConfig } from "../../shared/utils/PacketBuilder";
@@ -12,6 +13,7 @@ import { LengthDelimitedReader } from "../../shared/utils/LengthDelimitedReader"
 import CommandSender, { PublisherState } from "../ClientCommand";
 import { log } from "../../../utils";
 import type { WebRTCManager } from "./WebRTCManager";
+import { GopStreamSender } from "./GopStreamSender";
 
 // Default publisher state - will be updated by Publisher
 const DEFAULT_PUBLISHER_STATE: PublisherState = {
@@ -84,6 +86,15 @@ export class StreamManager extends EventEmitter<{
   public streamId: string;
   private publisherState: PublisherState = { ...DEFAULT_PUBLISHER_STATE };
 
+  // private gopSender = new GopStreamSender(this.webTransport, this.streamId);
+  // private currentGopFrames = 0;
+  // private readonly GOP_SIZE = 30;
+
+  // private gopSender: GopStreamSender | null = null;
+  private gopSenders = new Map<ChannelName, StreamDataGop>();
+  // private currentGopFrames = 0;
+  private readonly GOP_SIZE = 30;
+
   constructor(isWebRTC: boolean = false, streamID?: string) {
     super();
     this.isWebRTC = isWebRTC;
@@ -103,6 +114,8 @@ export class StreamManager extends EventEmitter<{
       protocol: "webtransport",
       sendDataFn: this.sendViaWebTransport.bind(this),
     });
+
+    
   }
 
   /**
@@ -195,8 +208,17 @@ export class StreamManager extends EventEmitter<{
   ): Promise<void> {
     this.webTransport = webTransport;
 
+    // this.gopSender = new GopStreamSender(this.webTransport, this.streamId);
+
     for (const channelName of channelNames) {
       await this.createBidirectionalStream(channelName);
+      // Initialize GOP sender for video channels
+      const gopSender = new GopStreamSender(this.webTransport, this.streamId);
+      this.gopSenders.set(channelName, {
+        gopId: 0,
+        gopSender,
+        currentGopFrames: 0,
+      });
     }
 
     log(
@@ -612,8 +634,68 @@ export class StreamManager extends EventEmitter<{
       sequenceNumber,
     );
 
-    await this.sendPacket(channelName, packet, frameType);
+  
+
+    let channel: number;
+    switch (channelName) {
+      case ChannelName.MEETING_CONTROL:
+        channel = 0;
+        break;
+      case ChannelName.VIDEO_360P:
+        channel = 1;
+        break;
+      case ChannelName.VIDEO_720P:
+        channel = 2;
+        break;
+      case ChannelName.SCREEN_SHARE_720P:
+        channel = 3;
+        break;
+      case ChannelName.SCREEN_SHARE_1080P:
+        channel = 4;
+        break;
+      case ChannelName.MICROPHONE:
+        channel = 5;
+        break;
+      case ChannelName.SCREEN_SHARE_AUDIO:
+        channel = 6;
+        break;
+      default:
+        channel = 2; // Default to Video720p
+    }
+
+    const isKeyframe = chunk.type === "key";
+
+    const gopData = this.gopSenders.get(channelName);
+    const gopSender = gopData?.gopSender;
+    // use GOP sender if iswebtransport
+    if (!this.isWebRTC && gopSender) {
+      if (isKeyframe) {
+        if (gopData?.currentGopFrames > 0) {
+          await gopSender.closeCurrentGop();
+        }
+        await gopSender.startGop(channel, this.GOP_SIZE);
+        gopData.currentGopFrames = 0;
+
+      }
+
+     
+
+      // Send frame
+      await gopSender.sendFrame(
+        packet,
+        chunk.timestamp,
+        frameType
+      );
+
+      gopData.currentGopFrames++;
+    } else {
+      await this.sendPacket(channelName, packet, frameType);
+    }
+
   }
+
+
+  
 
   /**
    * Send audio chunk (EXACT copy from JS handleAudioChunk logic)
@@ -853,11 +935,6 @@ export class StreamManager extends EventEmitter<{
         await this.sendViaWebTransport(streamData, packet);
       }
     } catch (error) {
-      // ? thêm log cho trường hợp ban
-      // console.error(
-      //   `[StreamManager] Error sending packet on ${channelName}:`,
-      //   error,
-      // );
       this.emit("sendError", { channelName, error });
       throw error;
     }
