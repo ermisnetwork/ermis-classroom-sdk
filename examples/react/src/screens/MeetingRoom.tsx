@@ -10,7 +10,7 @@ import {
 } from "@ermisnetwork/ermis-classroom-react"
 import { Button } from "@/components/ui/button"
 import {
-  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers, IconDoorExit, IconPlayerStop, IconUserMinus, IconBan, IconBroadcast, IconBroadcastOff
+  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers, IconDoorExit, IconPlayerStop, IconUserMinus, IconBan, IconBroadcast, IconBroadcastOff, IconPlayerRecord, IconPlayerRecordFilled
 } from "@tabler/icons-react"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { cn } from "@/lib/utils"
@@ -534,6 +534,10 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     startLivestream,
     stopLivestream,
     isLivestreamActive,
+    // Recording
+    startRecording,
+    stopRecording,
+    isRecordingActive,
   } = useErmisClassroom()
 
   const {
@@ -736,6 +740,25 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
       }
     }
   }, [isLivestreamActive, startLivestream, stopLivestream])
+
+  // Recording toggle handler
+  const handleRecordToggle = useCallback(async () => {
+    if (isRecordingActive) {
+      try {
+        await stopRecording()
+        log("[MeetingRoom] Recording stopped")
+      } catch (error) {
+        console.error("[MeetingRoom] Failed to stop recording:", error)
+      }
+    } else {
+      try {
+        await startRecording()
+        log("[MeetingRoom] Recording started successfully")
+      } catch (error) {
+        console.error("[MeetingRoom] Failed to start recording:", error)
+      }
+    }
+  }, [isRecordingActive, startRecording, stopRecording])
 
 
 
@@ -1169,6 +1192,20 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
             title={isLivestreamActive ? "Stop Livestream" : "Start Livestream"}
           >
             {isLivestreamActive ? <IconBroadcastOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconBroadcast className="h-4 w-4 sm:h-5 sm:w-5" />}
+          </Button>
+
+          {/* Record Button */}
+          <Button
+            variant={isRecordingActive ? "default" : "secondary"}
+            size="icon"
+            onClick={handleRecordToggle}
+            className={cn(
+              "h-10 w-10 sm:h-12 sm:w-12 rounded-full",
+              isRecordingActive && "bg-red-500 hover:bg-red-600 animate-pulse"
+            )}
+            title={isRecordingActive ? "Stop Recording" : "Start Recording"}
+          >
+            {isRecordingActive ? <IconPlayerRecordFilled className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconPlayerRecord className="h-4 w-4 sm:h-5 sm:w-5" />}
           </Button>
 
           <DropdownMenu.Root>

@@ -220,5 +220,12 @@ export interface ErmisClassroomContextValue {
 
   /** Register callback for when a participant is removed by host (including self) */
   onParticipantRemoved: (callback: (data: { participant: Participant; reason: string; isLocal: boolean }) => void) => () => void;
+  // Recording actions
+  /** Start recording - captures current tab and sends to server */
+  startRecording: () => Promise<void>;
+  /** Stop recording */
+  stopRecording: () => Promise<void>;
+  /** Whether currently recording */
+  isRecordingActive: boolean;
 }
 
