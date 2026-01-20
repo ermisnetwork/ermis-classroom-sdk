@@ -219,6 +219,26 @@ export class RegistrantsResource {
   }
 
   /**
+   * Toggle chat permission for a registrant
+   * Enable/disable chat for a specific registrant.
+   * Updates both database setting and active session permissions.
+   *
+   * Endpoint: POST /events/:eventId/registrants/:registrantId/chat/toggle
+   * Body: { blocked: boolean }
+   */
+  async toggleChat(
+    eventId: string,
+    registrantId: string,
+    blocked: boolean
+  ): Promise<Registrant> {
+    const response = await this.client.post<ApiResponse<Registrant>>(
+      `/events/${eventId}/registrants/${registrantId}/chat/toggle`,
+      { blocked }
+    );
+    return response.data;
+  }
+
+  /**
    * Ban a registrant from an event
    * Kicks the user and prevents them from rejoining the event.
    * @param eventId Event ID
