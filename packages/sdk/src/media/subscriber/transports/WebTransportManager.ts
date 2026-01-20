@@ -8,7 +8,7 @@
  */
 
 import EventEmitter from "../../../events/EventEmitter";
-import {log} from "../../../utils";
+import { log } from "../../../utils";
 
 /**
  * Stream channel types
@@ -120,15 +120,27 @@ export class WebTransportManager extends EventEmitter<WebTransportManagerEvents>
   /**
    * Disconnect from WebTransport
    */
+  private isIntentionalDisconnect = false;
+
+  /**
+   * Disconnect from WebTransport
+   */
   async disconnect(): Promise<void> {
     if (this.webTransport) {
+      this.isIntentionalDisconnect = true;
       try {
-        this.webTransport.close();
+        try {
+          this.webTransport.close();
+        } catch (e) {
+          log("Note: Error closing subscriber transport (likely already closed):", e);
+        }
         this.webTransport = null;
         this.isConnected = false;
         log("WebTransport disconnected");
       } catch (error) {
         console.error("Error during disconnect:", error);
+      } finally {
+        this.isIntentionalDisconnect = false;
       }
     }
   }
@@ -137,6 +149,8 @@ export class WebTransportManager extends EventEmitter<WebTransportManagerEvents>
    * Handle disconnection with smart retry logic
    */
   private handleDisconnection(error?: unknown): void {
+    if (this.isIntentionalDisconnect) return;
+
     this.isConnected = false;
     this.webTransport = null;
 

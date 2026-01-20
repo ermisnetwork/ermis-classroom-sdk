@@ -283,6 +283,10 @@ export type ServerEventType =
   | 'request_share_screen'
   | 'start_share_screen'
   | 'stop_share_screen'
+  | 'start_livestream'
+  | 'stop_livestream'
+  | 'start_record'
+  | 'stop_record'
   | 'break_out_room'
   | 'close_breakout_room'
   | 'join_sub_room'
@@ -290,7 +294,8 @@ export type ServerEventType =
   | 'disconnected'
   | 'reconnected'
   | 'room_ended'
-  | 'update_permission';
+  | 'update_permission'
+  | 'removed';
 
 /**
  * Media channel types (matching server MediaChannel enum)
@@ -365,11 +370,23 @@ export interface UpdatePermissionEvent extends ServerEventBase {
 }
 
 /**
+ * Removed (kicked) event
+ */
+export interface RemovedEvent extends ServerEventBase {
+  type: 'removed';
+  participant: {
+    user_id: string;
+    stream_id?: string;
+  };
+  reason?: string;
+}
+
+/**
  * Server event union type
  * Only includes events from ServerMeetingEvent (Rust server)
  * Note: Chat/message events are handled separately via API/WebSocket
  */
-export type ServerEvent = JoinEvent | LeaveEvent | UpdatePermissionEvent | ServerEventBase;
+export type ServerEvent = JoinEvent | LeaveEvent | UpdatePermissionEvent | RemovedEvent | ServerEventBase;
 
 /**
  * Chat message event (handled separately, not part of ServerMeetingEvent)
@@ -491,6 +508,14 @@ export interface RoomEventMap {
   participantReconnected: {
     room: any;
     participant: Participant;
+  };
+
+  /** Participant removed by host */
+  participantRemovedByHost: {
+    room: any;
+    participant: Participant;
+    reason: string;
+    isLocal: boolean;
   };
 
   /** Local stream ready */

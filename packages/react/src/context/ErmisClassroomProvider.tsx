@@ -67,6 +67,8 @@ export function ErmisClassroomProvider({
 
   // Livestream state
   const [isLivestreamActive, setIsLivestreamActive] = useState(false);
+  // Recording state
+  const [isRecordingActive, setIsRecordingActive] = useState(false);
 
   // Device state
   const [devices, setDevices] = useState<MediaDevices | null>(null);
@@ -77,6 +79,7 @@ export function ErmisClassroomProvider({
   const deviceManagerRef = useRef<MediaDeviceManager | null>(null);
   const unsubRef = useRef<(() => void)[]>([]);
   const roomEndedCallbacksRef = useRef<Set<() => void>>(new Set());
+  const participantRemovedCallbacksRef = useRef<Set<(data: { participant: Participant; reason: string; isLocal: boolean }) => void>>(new Set());
 
   // Debounced update function to batch participant changes
   const scheduleParticipantsUpdate = useCallback(() => {
@@ -357,6 +360,41 @@ export function ErmisClassroomProvider({
       }
     });
 
+    // Participant removed by host
+    on(events.PARTICIPANT_REMOVED_BY_HOST, (data: any) => {
+      log('[Provider] Participant removed by host:', data.participant?.userId, 'isLocal:', data.isLocal);
+
+      // Call all registered callbacks
+      participantRemovedCallbacksRef.current.forEach(callback => {
+        try {
+          callback({
+            participant: data.participant,
+            reason: data.reason || 'Removed by host',
+            isLocal: data.isLocal || false,
+          });
+        } catch (e) {
+          console.error('[Provider] Error in participantRemoved callback:', e);
+        }
+      });
+
+      // If local participant was removed, clean up state
+      if (data.isLocal) {
+        setInRoom(false);
+        setCurrentRoom(null);
+        const emptyMap = new Map();
+        participantsRef.current = emptyMap;
+        setParticipants(emptyMap);
+        setRemoteStreams(new Map());
+        setScreenShareStreams(new Map());
+        setIsScreenSharing(false);
+        setMicEnabled(true);
+        setVideoEnabled(true);
+        setHandRaised(false);
+        setPinType(null);
+        setRoomCode(undefined);
+      }
+    });
+
     return unsubs;
   }, [scheduleParticipantsUpdate]);
 
@@ -463,11 +501,23 @@ export function ErmisClassroomProvider({
       log('[Provider] Livestream stopped from browser UI');
       setIsLivestreamActive(false);
     };
+    const handleRecordingStarted = () => {
+      log('[Provider] Recording started');
+      setIsRecordingActive(true);
+    };
+    const handleRecordingStopped = () => {
+      log('[Provider] Recording stopped');
+      setIsRecordingActive(false);
+    };
     globalEventBus.on(GlobalEvents.LIVESTREAM_STARTED, handleLivestreamStarted);
     globalEventBus.on(GlobalEvents.LIVESTREAM_STOPPED, handleLivestreamStopped);
+    globalEventBus.on(GlobalEvents.RECORDING_STARTED, handleRecordingStarted);
+    globalEventBus.on(GlobalEvents.RECORDING_STOPPED, handleRecordingStopped);
     return () => {
       globalEventBus.off(GlobalEvents.LIVESTREAM_STARTED, handleLivestreamStarted);
       globalEventBus.off(GlobalEvents.LIVESTREAM_STOPPED, handleLivestreamStopped);
+      globalEventBus.off(GlobalEvents.RECORDING_STARTED, handleRecordingStarted);
+      globalEventBus.off(GlobalEvents.RECORDING_STOPPED, handleRecordingStopped);
     };
   }, []);
 
@@ -522,18 +572,24 @@ export function ErmisClassroomProvider({
   const leaveRoom = useCallback(async () => {
     const client = clientRef.current;
     if (!client || !inRoom) return;
-    await client.leaveRoom();
-    setInRoom(false);
-    setCurrentRoom(null);
-    const emptyMap = new Map();
-    participantsRef.current = emptyMap;
-    setParticipants(emptyMap);
-    setRemoteStreams(new Map());
-    setMicEnabled(true);
-    setVideoEnabled(true);
-    setHandRaised(false);
-    setPinType(null);
-    setRoomCode(undefined);
+
+    try {
+      await client.leaveRoom();
+    } catch (e) {
+      console.warn("Error leaving room in client:", e);
+    } finally {
+      setInRoom(false);
+      setCurrentRoom(null);
+      const emptyMap = new Map();
+      participantsRef.current = emptyMap;
+      setParticipants(emptyMap);
+      setRemoteStreams(new Map());
+      setMicEnabled(true);
+      setVideoEnabled(true);
+      setHandRaised(false);
+      setPinType(null);
+      setRoomCode(undefined);
+    }
   }, [inRoom]);
 
   const endRoom = useCallback(async () => {
@@ -866,9 +922,9 @@ export function ErmisClassroomProvider({
     await currentRoom.enableParticipantCamera(participantUserId);
   }, [currentRoom]);
 
-  const kickParticipant = useCallback(async (participantUserId: string) => {
+  const removeParticipant = useCallback(async (participantUserId: string, reason?: string) => {
     if (!currentRoom) throw new Error('Not in a room');
-    await currentRoom.kickParticipant(participantUserId);
+    await currentRoom.removeParticipantByHost(participantUserId, reason);
   }, [currentRoom]);
 
   const enableParticipantScreenShare = useCallback(async (participantUserId: string) => {
@@ -885,6 +941,15 @@ export function ErmisClassroomProvider({
     if (!currentRoom) throw new Error('Not in a room');
     return await currentRoom.fetchParticipants();
   }, [currentRoom]);
+
+  // Register callback for when a participant is removed by host
+  const onParticipantRemoved = useCallback((callback: (data: { participant: Participant; reason: string; isLocal: boolean }) => void) => {
+    participantRemovedCallbacksRef.current.add(callback);
+    // Return unsubscribe function
+    return () => {
+      participantRemovedCallbacksRef.current.delete(callback);
+    };
+  }, []);
 
   // Livestream methods
   const startLivestream = useCallback(async () => {
@@ -912,6 +977,36 @@ export function ErmisClassroomProvider({
       setIsLivestreamActive(false);
     } catch (error) {
       console.error('Failed to stop livestream:', error);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  // Recording methods
+  const startRecording = useCallback(async () => {
+    if (!currentRoom) throw new Error('Not in a room');
+    const local = currentRoom.localParticipant as any;
+    if (!local?.publisher) {
+      throw new Error('Publisher not initialized');
+    }
+    try {
+      await local.publisher.startRecording();
+      setIsRecordingActive(true);
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+      setIsRecordingActive(false);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  const stopRecording = useCallback(async () => {
+    if (!currentRoom) return;
+    const local = currentRoom.localParticipant as any;
+    if (!local?.publisher) return;
+    try {
+      await local.publisher.stopRecording();
+      setIsRecordingActive(false);
+    } catch (error) {
+      console.error('Failed to stop recording:', error);
       throw error;
     }
   }, [currentRoom]);
@@ -960,7 +1055,7 @@ export function ErmisClassroomProvider({
       unmuteParticipant,
       disableParticipantCamera,
       enableParticipantCamera,
-      kickParticipant,
+      removeParticipant,
       fetchParticipants,
       enableParticipantScreenShare,
       disableParticipantScreenShare,
@@ -968,6 +1063,12 @@ export function ErmisClassroomProvider({
       startLivestream,
       stopLivestream,
       isLivestreamActive,
+      // Participant removed callback
+      onParticipantRemoved,
+      // Recording
+      startRecording,
+      stopRecording,
+      isRecordingActive,
     }),
     [
       participants,
@@ -1010,13 +1111,17 @@ export function ErmisClassroomProvider({
       unmuteParticipant,
       disableParticipantCamera,
       enableParticipantCamera,
-      kickParticipant,
+      removeParticipant,
       fetchParticipants,
       enableParticipantScreenShare,
       disableParticipantScreenShare,
       startLivestream,
       stopLivestream,
       isLivestreamActive,
+      onParticipantRemoved,
+      startRecording,
+      stopRecording,
+      isRecordingActive,
     ]
   );
 

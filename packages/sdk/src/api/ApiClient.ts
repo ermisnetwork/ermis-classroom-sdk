@@ -20,6 +20,7 @@ import {
   ListParticipantsRequest,
   ListParticipantsResponse,
   ListRoomsResponse,
+  RemoveParticipantRequest,
   RemoveParticipantResponse,
   RoomDetailsResponse,
   RoomUpdateData,
@@ -426,8 +427,29 @@ export class ApiClient {
   /**
    * Remove a participant from a room by stream ID (requires service token)
    */
-  async removeParticipant(streamId: string): Promise<RemoveParticipantResponse> {
-    return await this.serviceApiCall<RemoveParticipantResponse>(`/participants/remove/${streamId}`, 'DELETE');
+  async removeParticipant(request: RemoveParticipantRequest): Promise<void> {
+    if (!this.serviceToken) {
+      throw new Error('Service token not found. Call getDummyServiceToken first.');
+    }
+
+    const options: RequestInit = {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${this.serviceToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    };
+
+    try {
+      const response = await fetch(`${this.apiBaseUrl}/participants/remove`, options);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Remove participant failed:', error);
+      throw error;
+    }
   }
 
   /**

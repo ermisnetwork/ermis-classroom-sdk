@@ -3,7 +3,7 @@ import type {
   WebTransportConfig,
   TransportManagerEvents,
 } from "../../../types/media/transport.types";
-import {log} from "../../../utils";
+import { log } from "../../../utils";
 
 /**
  * WebTransportManager - Manages WebTransport connection lifecycle
@@ -128,10 +128,11 @@ export class WebTransportManager extends EventEmitter<
 
     this.emit("disconnected", { reason, error });
 
-    // Attempt reconnection if not gracefully closed
+    // Attempt reconnection if not gracefully closed AND not intentionally closed locally
     if (
       reason === "error" &&
-      this.reconnectAttempts < this.maxReconnectAttempts
+      this.reconnectAttempts < this.maxReconnectAttempts &&
+      !this.isIntentionalClose
     ) {
       void this.attemptReconnect();
     }
@@ -226,18 +227,32 @@ export class WebTransportManager extends EventEmitter<
   /**
    * Close connection gracefully
    */
+  private isIntentionalClose = false;
+
+  /**
+   * Close connection gracefully
+   */
   async close(closeInfo?: WebTransportCloseInfo): Promise<void> {
     if (!this.transport) {
       log("[WebTransport] No active connection to close");
       return;
     }
 
+    this.isIntentionalClose = true;
+
     try {
       log("[WebTransport] Closing connection...");
-      this.transport.close(closeInfo);
-
-      // Wait for closure
-      await this.transport.closed;
+      try {
+        this.transport.close(closeInfo);
+        // Wait for closure, but don't block indefinitely if it fails
+        await Promise.race([
+          this.transport.closed,
+          new Promise(resolve => setTimeout(resolve, 500))
+        ]);
+      } catch (e: any) {
+        // Ignore errors if session is already closed
+        log("[WebTransport] Note: Error closing transport (likely already closed):", e);
+      }
 
       this.isConnected = false;
       this.transport = null;
@@ -246,8 +261,9 @@ export class WebTransportManager extends EventEmitter<
       this.emit("closed");
       log("[WebTransport] Connection closed successfully");
     } catch (error) {
-      console.error("[WebTransport] Error during close:", error);
-      throw error;
+      console.warn("[WebTransport] Error during close cleanup:", error);
+    } finally {
+      this.isIntentionalClose = false;
     }
   }
 
