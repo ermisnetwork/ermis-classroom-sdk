@@ -692,6 +692,7 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     if (!currentRoom) return
 
     const handleParticipantRemoved = (event: any) => {
+      log('[MeetingRoom] Participant removed:', event)
       // Check if we are the one being removed
       if (event.isLocal) {
         setKickedState({
