@@ -13,6 +13,7 @@
   - [Room](user-guide/room.md)
   - [Participant](user-guide/participant.md)
   - [Events](user-guide/events.md)
+  - [Event Integration Guide](user-guide/event-integration.md)
   - [Features](user-guide/features/README.md)
     - [Screen Share](user-guide/features/screen-share.md)
     - [Device Switching](user-guide/features/device-switching.md)

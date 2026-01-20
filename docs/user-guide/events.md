@@ -2,6 +2,8 @@
 
 The SDK uses an event-driven architecture. This page documents all available events.
 
+> 💡 **Looking for integration examples?** See the [Event Integration Guide](event-integration.md) for complete examples, best practices, and common patterns when handling events in your application.
+
 ## MeetingClient Events
 
 ### Authentication Events
