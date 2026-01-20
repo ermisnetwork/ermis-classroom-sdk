@@ -119,6 +119,7 @@ const event = await client.events.create(payload);
 - `client.registrants.update(eventId: string, registrantId: string, data: UpdateRegistrantParams): Promise<Registrant>` → `PATCH /events/:eventId/registrants/:registrantId`
 - `client.registrants.delete(eventId: string, registrantId: string): Promise<void>` → `DELETE /events/:eventId/registrants/:registrantId`
 - `client.registrants.kick(eventId: string, registrantId: string, reason?: string): Promise<Registrant>` → `POST /events/:eventId/registrants/:registrantId/kick`
+- `client.registrants.toggleChat(eventId: string, registrantId: string, blocked: boolean): Promise<Registrant>` → `POST /events/:eventId/registrants/:registrantId/chat/toggle`
 - `client.registrants.ban(eventId: string, registrantId: string, reason?: string): Promise<Registrant>` → `POST /events/:eventId/registrants/:registrantId/ban`
 - `client.registrants.unban(eventId: string, registrantId: string): Promise<Registrant>` → `POST /events/:eventId/registrants/:registrantId/unban`
 
