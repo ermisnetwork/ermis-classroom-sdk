@@ -63,48 +63,6 @@ export class EventsResource {
     await this.client.delete(`/events/${eventId}`);
   }
 
-  /**
-   * Kick a user from the event's video room
-   * Disconnects the user from the video room immediately by closing their stream/socket connection.
-   * 
-   * **Important Notes:**
-   * - This API ONLY disconnects the user from the current session, it does NOT prevent them from rejoining.
-   * - The user can join again immediately after being kicked (unless they are also banned).
-   * - To permanently prevent rejoining, use `registrants.ban()` after kicking.
-   * - Backend automatically looks up the `streamId` from `authId`, so you only need to provide `authId`.
-   * 
-   * @param eventId Event ID
-   * @param authId User ID (authId) of the user to kick - this is the `authId` field from registrant/user system
-   * @param reason Optional reason for kicking (will be shown to the user when they are disconnected)
-   * @returns Promise that resolves when kick is successful (API returns 204 No Content)
-   * @throws {NotFoundError} If event doesn't exist or doesn't have a video room
-   * @throws {PermissionError} If user doesn't have permission to kick
-   * @note Requires Bearer Token (Teacher/Admin/AO) or API Key
-   * @example
-   * ```typescript
-   * // Scenario 1: Temporary kick (user can rejoin)
-   * await client.events.kick('event-123', 'student_12345', 'Gây mất trật tự');
-   * 
-   * // Scenario 2: Permanent ban (kick + ban)
-   * // Step 1: Ban the registrant (prevents future joins)
-   * await client.registrants.ban('event-123', 'registrant-456', 'Vi phạm quy chế thi');
-   * // Step 2: Kick if currently online (disconnects immediately)
-   * await client.events.kick('event-123', 'student_12345', 'Vi phạm quy chế thi');
-   * ```
-   */
-  async kick(
-    eventId: string,
-    authId: string,
-    reason?: string
-  ): Promise<void> {
-    const body: { authId: string; reason?: string } = { authId };
-    if (reason) {
-      body.reason = reason;
-    }
-    
-    // API returns 204 No Content on success, so we don't expect a response body
-    await this.client.post<void>(`/events/${eventId}/kick`, body);
-  }
 }
 
 /**
@@ -179,36 +137,68 @@ export class RegistrantsResource {
    * 
    * **Important Notes:**
    * - This API automatically updates the database status (`isBanned = true`) AND kicks the user from the video room if they are currently online.
-   * - The system will automatically call the kick service when banning, so you don't need to call `events.kick()` separately.
+   * - The system will automatically call the kick service when banning, so you **don't need** to call `kick()` separately.
    * - If the kick fails (e.g., user is not online), the ban operation still succeeds because the database ban is completed.
-   * - Uses `authId` (User ID from your auth system) instead of `registrantId` for easier integration.
+   * - Backend automatically looks up `authId` and `streamId` from `registrantId`, so you only need to provide `registrantId`.
    * 
    * @param eventId Event ID
-   * @param authId User ID (authId) of the user to ban - this is the `authId` field from your auth/registrant system
+   * @param registrantId Registrant ID (the `_id` field from the registrants collection)
    * @param reason Optional reason for banning
    * @returns Success response with message
    * @note Only Admin and Teacher can ban registrants
    * @example
    * ```typescript
    * // Ban a registrant (automatically kicks if online)
-   * await client.registrants.ban('event-123', 'student_12345', 'Vi phạm quy chế thi');
+   * await client.registrants.ban('event-123', 'registrant-456', 'Vi phạm quy chế thi');
    * ```
    */
   async ban(
     eventId: string,
-    authId: string,
+    registrantId: string,
     reason?: string
   ): Promise<ApiResponse<{ success: boolean; message: string }>> {
-    const body: { authId: string; reason?: string } = { authId };
-    if (reason) {
-      body.reason = reason;
-    }
+    const body = reason ? { reason } : undefined;
     
     const response = await this.client.post<ApiResponse<{ success: boolean; message: string }>>(
-      `/events/${eventId}/registrants/ban`,
+      `/events/${eventId}/registrants/${registrantId}/ban`,
       body
     );
     return response;
+  }
+
+  /**
+   * Kick a registrant from the event's video room
+   * Disconnects the user from the video room immediately by closing their stream/socket connection.
+   * This is a temporary action - the user can join again immediately (unless they are also banned).
+   * 
+   * **Important Notes:**
+   * - This API ONLY disconnects the user from the current session, it does NOT prevent them from rejoining.
+   * - The user can join again immediately after being kicked (unless they are also banned).
+   * - To permanently prevent rejoining, use `ban()` instead (which automatically kicks).
+   * - Backend automatically looks up `authId` and `streamId` from `registrantId`.
+   * 
+   * @param eventId Event ID
+   * @param registrantId Registrant ID (the `_id` field from the registrants collection)
+   * @param reason Optional reason for kicking (will be shown to the user when they are disconnected)
+   * @returns Promise that resolves when kick is successful (API returns 204 No Content)
+   * @throws {NotFoundError} If event or registrant doesn't exist or doesn't have a video room
+   * @throws {PermissionError} If user doesn't have permission to kick
+   * @note Requires Bearer Token (Teacher/Admin/AO) or API Key
+   * @example
+   * ```typescript
+   * // Temporary kick (user can rejoin)
+   * await client.registrants.kick('event-123', 'registrant-456', 'Gây mất trật tự');
+   * ```
+   */
+  async kick(
+    eventId: string,
+    registrantId: string,
+    reason?: string
+  ): Promise<void> {
+    const body = reason ? { reason } : undefined;
+    
+    // API returns 204 No Content on success, so we don't expect a response body
+    await this.client.post<void>(`/events/${eventId}/registrants/${registrantId}/kick`, body);
   }
 
   /**
@@ -216,24 +206,19 @@ export class RegistrantsResource {
    * Allows the registrant to join the event again by removing the ban status.
    * After unbanning, the user can join the event using their join code or personal join link.
    * 
-   * **Important Notes:**
-   * - Uses `authId` (User ID from your auth system) instead of `registrantId` for easier integration.
-   * - The system will find the registrant by `authId` and remove the ban status.
-   * 
    * @param eventId Event ID
-   * @param authId User ID (authId) of the user to unban - this is the `authId` field from your auth/registrant system
+   * @param registrantId Registrant ID (the `_id` field from the registrants collection)
    * @returns Success response with message
    * @note Only Admin and Teacher can unban registrants
    * @example
    * ```typescript
    * // Unban a registrant
-   * await client.registrants.unban('event-123', 'student_12345');
+   * await client.registrants.unban('event-123', 'registrant-456');
    * ```
    */
-  async unban(eventId: string, authId: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  async unban(eventId: string, registrantId: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
     const response = await this.client.post<ApiResponse<{ success: boolean; message: string }>>(
-      `/events/${eventId}/registrants/unban`,
-      { authId }
+      `/events/${eventId}/registrants/${registrantId}/unban`
     );
     return response;
   }

@@ -217,26 +217,6 @@ const updatedEvent = await client.events.update('event-id', {
 await client.events.delete('event-id');
 ```
 
-#### Kick User from Video Room
-
-Kick (đuổi) a user from the event's video room immediately. This disconnects the user from the current session but does NOT prevent them from rejoining.
-
-**Important Notes:**
-- This API **ONLY** disconnects the user from the current session
-- The user can join again immediately after being kicked (unless they are also banned)
-- To permanently prevent rejoining, use `registrants.ban()` after kicking
-- Backend automatically looks up the `streamId` from `authId`, so you only need to provide `authId`
-
-```typescript
-// Scenario 1: Temporary kick (user can rejoin)
-await client.events.kick('event-id', 'student_12345', 'Gây mất trật tự');
-
-// Scenario 2: Permanent ban (automatically kicks if online)
-// Ban automatically kicks the user if they are online - no need to call kick separately
-await client.registrants.ban('event-id', 'student_12345', 'Vi phạm quy chế thi');
-```
-
-> **Note:** Requires Bearer Token (Teacher/Admin/AO) or API Key. The `authId` parameter is the user's `authId` field from your registrant/user system.
 
 ### Registrants
 
@@ -299,46 +279,82 @@ Ban a registrant from an event. This prevents them from joining the event, even 
 
 **Important Notes:**
 - This API **automatically** updates the database status (`isBanned = true`) **AND** kicks the user from the video room if they are currently online
-- The system will automatically call the kick service when banning, so you **don't need** to call `events.kick()` separately
+- The system will automatically call the kick service when banning, so you **don't need** to call `kick()` separately
 - If the kick fails (e.g., user is not online), the ban operation still succeeds because the database ban is completed
-- Uses `authId` (User ID from your auth system) instead of `registrantId` for easier integration
+- Backend automatically looks up `authId` and `streamId` from `registrantId`, so you only need to provide `registrantId`
+- You need to get `registrantId` from the registrants list API first
 
 ```typescript
-// Ban a registrant (automatically kicks if online)
-const result = await client.registrants.ban(
-  'event-id',
-  'student_12345', // authId, not registrantId
-  'Vi phạm quy chế thi'
-);
+// Step 1: Get registrantId from the registrants list
+const registrants = await client.registrants.list('event-id');
+const targetRegistrant = registrants.data.find(r => r.authId === 'student_12345');
 
-// Response:
-// {
-//   success: true,
-//   message: "Registrant banned from event" // or "Đã cấm người tham gia khỏi sự kiện" (vi)
-// }
+if (targetRegistrant) {
+  // Step 2: Ban the registrant (automatically kicks if online)
+  const result = await client.registrants.ban(
+    'event-id',
+    targetRegistrant._id, // registrantId from the list
+    'Vi phạm quy chế thi'
+  );
+
+  // Response:
+  // {
+  //   success: true,
+  //   message: "Registrant banned from event" // or "Đã cấm người tham gia khỏi sự kiện" (vi)
+  // }
+}
 ```
 
-> **Note:** Only Admin and Teacher can ban registrants. Banned registrants cannot join the event unless the join request uses an API key. The system automatically finds the registrant by `authId` and performs both ban and kick operations.
+> **Note:** Only Admin and Teacher can ban registrants. Banned registrants cannot join the event unless the join request uses an API key. The system automatically performs both ban and kick operations.
+
+#### Kick Registrant (Temporary)
+
+Kick a registrant from the event's video room temporarily. This disconnects the user from the current session but does NOT prevent them from rejoining.
+
+**Important Notes:**
+- This API **ONLY** disconnects the user from the current session
+- The user can join again immediately after being kicked (unless they are also banned)
+- To permanently prevent rejoining, use `ban()` instead (which automatically kicks)
+- Backend automatically looks up `authId` and `streamId` from `registrantId`
+
+```typescript
+// Get registrantId from the registrants list first
+const registrants = await client.registrants.list('event-id');
+const targetRegistrant = registrants.data.find(r => r.authId === 'student_12345');
+
+if (targetRegistrant) {
+  // Temporary kick (user can rejoin)
+  await client.registrants.kick(
+    'event-id',
+    targetRegistrant._id, // registrantId
+    'Gây mất trật tự'
+  );
+}
+```
+
+> **Note:** Requires Bearer Token (Teacher/Admin/AO) or API Key. API returns 204 No Content on success.
 
 #### Unban Registrant
 
 Unban a registrant from an event, allowing them to join again.
 
-**Important Notes:**
-- Uses `authId` (User ID from your auth system) instead of `registrantId` for easier integration
-- The system will find the registrant by `authId` and remove the ban status
-
 ```typescript
-const result = await client.registrants.unban(
-  'event-id',
-  'student_12345' // authId, not registrantId
-);
+// Get registrantId from the registrants list first
+const registrants = await client.registrants.list('event-id');
+const targetRegistrant = registrants.data.find(r => r.authId === 'student_12345');
 
-// Response:
-// {
-//   success: true,
-//   message: "Registrant unbanned from event" // or "Đã bỏ cấm người tham gia khỏi sự kiện" (vi)
-// }
+if (targetRegistrant) {
+  const result = await client.registrants.unban(
+    'event-id',
+    targetRegistrant._id // registrantId
+  );
+
+  // Response:
+  // {
+  //   success: true,
+  //   message: "Registrant unbanned from event" // or "Đã bỏ cấm người tham gia khỏi sự kiện" (vi)
+  // }
+}
 ```
 
 > **Note:** Only Admin and Teacher can unban registrants. After unbanning, the user can join the event using their join code or personal join link.
@@ -591,8 +607,38 @@ const ratingData: CreateRatingParams = {
 
 | Feature | Action | Purpose | Effect on User |
 | :--- | :--- | :--- | :--- |
-| **Kick** | Disconnects Stream/Socket | Remove user from room **immediately** | User is disconnected from video room. Can rejoin immediately if not banned. |
-| **Ban** | Sets `isBanned = true` in DB + **Auto Kick** | **Prevent** user from joining event + **Remove** from room | User cannot call `/join` API to enter the class anymore. Automatically kicked if currently online. |
+| **Kick** | Disconnects Stream/Socket | Remove user from room **immediately** (temporary) | User is disconnected from video room. Can rejoin immediately if not banned. |
+| **Ban** | Sets `isBanned = true` in DB + **Auto Kick** | **Prevent** user from joining event + **Remove** from room (permanent) | User cannot call `/join` API to enter the class anymore. Automatically kicked if currently online. |
+
+### Getting Registrant ID
+
+All Kick, Ban, and Unban APIs require `registrantId` (the `_id` field from the registrants collection). You need to get this from the registrants list API first:
+
+```typescript
+// Get list of registrants for an event
+const registrants = await client.registrants.list('event-id', {
+  page: 1,
+  limit: 100,
+  // Optional filters
+  role: 'student',
+  status: 'active',
+});
+
+// Find registrant by authId (your internal user ID)
+const targetRegistrant = registrants.data.find(r => r.authId === 'student_12345');
+
+if (targetRegistrant) {
+  const registrantId = targetRegistrant._id; // Use this for ban/kick/unban
+  console.log('Registrant ID:', registrantId);
+  console.log('Registrant info:', {
+    _id: targetRegistrant._id,        // registrantId - use this for API calls
+    authId: targetRegistrant.authId,  // Your internal user ID
+    firstName: targetRegistrant.firstName,
+    lastName: targetRegistrant.lastName,
+    isBanned: targetRegistrant.isBanned,
+  });
+}
+```
 
 ### Best Practices
 
@@ -600,24 +646,42 @@ const ratingData: CreateRatingParams = {
 Use when you want to warn a student but allow them to rejoin:
 
 ```typescript
-// Just kick - user can rejoin
-await client.events.kick('event-id', 'student_12345', 'Gây mất trật tự');
+// Step 1: Get registrantId from the registrants list
+const registrants = await client.registrants.list('event-id');
+const targetRegistrant = registrants.data.find(r => r.authId === 'student_12345');
+
+if (targetRegistrant) {
+  // Step 2: Kick temporarily - user can rejoin
+  await client.registrants.kick('event-id', targetRegistrant._id, 'Gây mất trật tự');
+}
 ```
 
 #### Scenario 2: Permanent Ban (Automatically Kicks)
 Use when you want to permanently remove a student. The ban API automatically kicks the user if they are online:
 
 ```typescript
-// Ban automatically kicks if user is online - no need to call kick separately
-await client.registrants.ban('event-id', 'student_12345', 'Vi phạm quy chế thi');
+// Step 1: Get registrantId from the registrants list
+const registrants = await client.registrants.list('event-id');
+const targetRegistrant = registrants.data.find(r => r.authId === 'student_12345');
+
+if (targetRegistrant) {
+  // Step 2: Ban automatically kicks if user is online - no need to call kick separately
+  await client.registrants.ban('event-id', targetRegistrant._id, 'Vi phạm quy chế thi');
+}
 ```
 
 #### Scenario 3: Unban a User
 Allow a previously banned user to rejoin:
 
 ```typescript
-// Use authId instead of registrantId
-await client.registrants.unban('event-id', 'student_12345');
+// Step 1: Get registrantId from the registrants list
+const registrants = await client.registrants.list('event-id');
+const targetRegistrant = registrants.data.find(r => r.authId === 'student_12345');
+
+if (targetRegistrant) {
+  // Step 2: Unban the registrant
+  await client.registrants.unban('event-id', targetRegistrant._id);
+}
 ```
 
 ### Handling Kick Events in Client Applications
