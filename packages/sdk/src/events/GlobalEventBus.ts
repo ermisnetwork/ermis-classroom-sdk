@@ -21,6 +21,8 @@ export enum GlobalEvents {
   SCREEN_SHARE_STOPPED = "publisher:screenShareStopped",
   LIVESTREAM_STARTED = "publisher:livestreamStarted",
   LIVESTREAM_STOPPED = "publisher:livestreamStopped",
+  RECORDING_STARTED = "publisher:recordingStarted",
+  RECORDING_STOPPED = "publisher:recordingStopped",
 
   // Publisher connection events
   PUBLISHER_CONNECTED = "publisher:connected",
@@ -87,6 +89,8 @@ export interface GlobalEventMap extends Record<string, unknown> {
   [GlobalEvents.SCREEN_SHARE_STOPPED]: undefined;
   [GlobalEvents.LIVESTREAM_STARTED]: undefined;
   [GlobalEvents.LIVESTREAM_STOPPED]: undefined;
+  [GlobalEvents.RECORDING_STARTED]: undefined;
+  [GlobalEvents.RECORDING_STOPPED]: undefined;
 
   // Publisher connection events
   [GlobalEvents.PUBLISHER_CONNECTED]: { streamId?: string };

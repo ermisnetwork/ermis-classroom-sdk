@@ -78,6 +78,8 @@ interface PublisherEvents extends Record<string, unknown> {
   connectionHealthChanged: { isHealthy: boolean };
   livestreamStarted: { tabStream: MediaStream; mixedAudioStream: MediaStream };
   livestreamStopped: undefined;
+  recordingStarted: { tabStream: MediaStream; mixedAudioStream: MediaStream };
+  recordingStopped: undefined;
   tabCaptureError: unknown;
 }
 
@@ -111,6 +113,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
   // Livestream state
   private isLivestreaming = false;
+  // Recording state
+  private isRecording = false;
+  private isCapturingTab = false; // Lock to prevent concurrent tab capture requests
   private livestreamVideoProcessor: VideoProcessor | null = null;
   private livestreamAudioProcessor: AudioProcessor | null = null;
   private livestreamVideoEncoderManager: VideoEncoderManager | null = null;
@@ -1796,41 +1801,47 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     try {
       this.updateStatus("Stopping livestream...");
 
-      // Stop livestream processors
-      if (this.livestreamVideoProcessor) {
-        await this.livestreamVideoProcessor.stop();
-        this.livestreamVideoProcessor = null;
+      // Only cleanup infrastructure if recording is not active
+      if (!this.isRecording) {
+        // Stop livestream processors
+        if (this.livestreamVideoProcessor) {
+          await this.livestreamVideoProcessor.stop();
+          this.livestreamVideoProcessor = null;
+        }
+
+        if (this.livestreamAudioProcessor) {
+          await this.livestreamAudioProcessor.stop();
+          this.livestreamAudioProcessor = null;
+        }
+
+        // Stop encoder managers
+        if (this.livestreamVideoEncoderManager) {
+          await this.livestreamVideoEncoderManager.closeAll();
+          this.livestreamVideoEncoderManager = null;
+        }
+
+        if (this.livestreamAudioEncoderManager) {
+          await this.livestreamAudioEncoderManager.stop();
+          this.livestreamAudioEncoderManager = null;
+        }
+
+        // Cleanup audio mixer
+        if (this.livestreamAudioMixer) {
+          await this.livestreamAudioMixer.cleanup();
+          this.livestreamAudioMixer = null;
+        }
+
+        // Stop tab stream
+        if (this.tabStream) {
+          this.tabStream.getTracks().forEach((track) => track.stop());
+          this.tabStream = null;
+        }
+
+        this.mixedAudioStream = null;
+      } else {
+        log("[Publisher] Recording is active, keeping infrastructure running");
       }
 
-      if (this.livestreamAudioProcessor) {
-        await this.livestreamAudioProcessor.stop();
-        this.livestreamAudioProcessor = null;
-      }
-
-      // Stop encoder managers
-      if (this.livestreamVideoEncoderManager) {
-        await this.livestreamVideoEncoderManager.closeAll();
-        this.livestreamVideoEncoderManager = null;
-      }
-
-      if (this.livestreamAudioEncoderManager) {
-        await this.livestreamAudioEncoderManager.stop();
-        this.livestreamAudioEncoderManager = null;
-      }
-
-      // Cleanup audio mixer
-      if (this.livestreamAudioMixer) {
-        await this.livestreamAudioMixer.cleanup();
-        this.livestreamAudioMixer = null;
-      }
-
-      // Stop tab stream
-      if (this.tabStream) {
-        this.tabStream.getTracks().forEach((track) => track.stop());
-        this.tabStream = null;
-      }
-
-      this.mixedAudioStream = null;
       this.isLivestreaming = false;
 
       this.updateStatus("Livestream stopped");
@@ -1851,6 +1862,27 @@ export class Publisher extends EventEmitter<PublisherEvents> {
    * Capture current browser tab
    */
   private async captureCurrentTab(): Promise<void> {
+    if (this.tabStream) {
+      log("[Publisher] Tab stream already exists, skipping capture");
+      return;
+    }
+
+    if (this.isCapturingTab) {
+      log("[Publisher] Tab capture already in progress, waiting...");
+      const startTime = Date.now();
+      while (this.isCapturingTab) {
+        if (Date.now() - startTime > 30000) { // 30s timeout
+           throw new Error("Timeout waiting for pending tab capture");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        if (this.tabStream) {
+          log("[Publisher] Tab stream became available from pending capture");
+          return;
+        }
+      }
+    }
+
+    this.isCapturingTab = true;
     this.updateStatus("Capturing current tab...");
 
     try {
@@ -1897,6 +1929,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       console.error("[Publisher] Tab capture failed:", error);
       this.emit("tabCaptureError", error);
       throw error;
+    } finally {
+      this.isCapturingTab = false;
     }
   }
 
@@ -2064,5 +2098,171 @@ export class Publisher extends EventEmitter<PublisherEvents> {
    */
   get livestreamTabStream(): MediaStream | null {
     return this.tabStream;
+  }
+
+  // ==========================================
+  // === Recording Methods (Independent)    ===
+  // ==========================================
+
+  /**
+   * Start recording - captures current tab and mixes audio
+   * Uses the same channels as livestream (LIVESTREAM_720P, LIVESTREAM_AUDIO)
+   * but sends START_RECORD event to server instead of START_LIVESTREAM
+   */
+  async startRecording(): Promise<void> {
+    if (this.isRecording) {
+      console.warn("[Publisher] Already recording");
+      return;
+    }
+
+    if (!this.isPublishing) {
+      throw new Error("Publisher must be publishing before starting recording");
+    }
+
+    if (!this.streamManager) {
+      throw new Error("StreamManager not initialized");
+    }
+
+    // Check if livestream infrastructure is already set up
+    const needsSetup = !this.tabStream;
+
+    try {
+      this.updateStatus("Starting recording...");
+
+      if (needsSetup) {
+        // Capture current tab
+        await this.captureCurrentTab();
+
+        if (!this.tabStream) {
+          throw new Error("Failed to capture tab stream");
+        }
+
+        // Mix audio streams
+        await this.setupLivestreamAudioMixing();
+
+        // Add channels using StreamManager
+        log("[Publisher] Adding recording channels...");
+        await this.streamManager.addStream(ChannelName.LIVESTREAM_720P);
+        await this.streamManager.addStream(ChannelName.LIVESTREAM_AUDIO);
+
+        // Wait for channels to be ready
+        await this.streamManager.waitForStreamReady(ChannelName.LIVESTREAM_720P);
+        await this.streamManager.waitForStreamReady(ChannelName.LIVESTREAM_AUDIO);
+        log("[Publisher] Recording channels ready");
+
+        // Initialize processors
+        await this.initializeLivestreamProcessors();
+
+        // Start media processing
+        await this.startLivestreamProcessing();
+      }
+
+      this.isRecording = true;
+      this.updateStatus("Recording started");
+
+      this.emit("recordingStarted", {
+        tabStream: this.tabStream!,
+        mixedAudioStream: this.mixedAudioStream!,
+      });
+      globalEventBus.emit(GlobalEvents.RECORDING_STARTED, undefined);
+
+      // Wait for configs to be sent before sending START_RECORD
+      log("[Publisher] Waiting for recording configs to be sent...");
+      await Promise.all([
+        this.waitForConfigSent(ChannelName.LIVESTREAM_720P, 5000),
+        this.waitForConfigSent(ChannelName.LIVESTREAM_AUDIO, 5000),
+      ]);
+      log("[Publisher] Recording configs sent, sending START_RECORD event");
+
+      // Send event to server
+      await this.sendMeetingEvent(MEETING_EVENTS.START_RECORD);
+
+      log("[Publisher] Recording started successfully");
+    } catch (error) {
+      console.error("[Publisher] Failed to start recording:", error);
+      this.updateStatus("Failed to start recording", true);
+      await this.stopRecording();
+      throw error;
+    }
+  }
+
+  /**
+   * Stop recording
+   */
+  async stopRecording(): Promise<void> {
+    if (!this.isRecording) return;
+
+    try {
+      this.updateStatus("Stopping recording...");
+
+      // Only cleanup infrastructure if livestream is not active
+      if (!this.isLivestreaming) {
+        log("[Publisher] Cleaning up infrastructure (no livestream active)");
+        // Stop processors
+        if (this.livestreamVideoProcessor) {
+          await this.livestreamVideoProcessor.stop();
+          this.livestreamVideoProcessor = null;
+        }
+
+        if (this.livestreamAudioProcessor) {
+          await this.livestreamAudioProcessor.stop();
+          this.livestreamAudioProcessor = null;
+        }
+
+        // Stop encoder managers
+        if (this.livestreamVideoEncoderManager) {
+          await this.livestreamVideoEncoderManager.closeAll();
+          this.livestreamVideoEncoderManager = null;
+        }
+
+        if (this.livestreamAudioEncoderManager) {
+          await this.livestreamAudioEncoderManager.stop();
+          this.livestreamAudioEncoderManager = null;
+        }
+
+        // Cleanup audio mixer
+        if (this.livestreamAudioMixer) {
+          await this.livestreamAudioMixer.cleanup();
+          this.livestreamAudioMixer = null;
+        }
+
+        // Stop tab stream
+        if (this.tabStream) {
+          const tracks = this.tabStream.getTracks();
+          tracks.forEach((track) => {
+            track.stop();
+          });
+          this.tabStream = null;
+          log("[Publisher] Tab stream stopped");
+        } else {
+          log("[Publisher] No tab stream to stop");
+        }
+
+        this.mixedAudioStream = null;
+      } else {
+        log("[Publisher] Livestream is active, keeping infrastructure running");
+      }
+
+      this.isRecording = false;
+
+      this.updateStatus("Recording stopped");
+      this.emit("recordingStopped", undefined);
+      globalEventBus.emit(GlobalEvents.RECORDING_STOPPED, undefined);
+
+      // Send event to server
+      await this.sendMeetingEvent(MEETING_EVENTS.STOP_RECORD);
+
+      log("[Publisher] Recording stopped successfully");
+    } catch (error) {
+      console.error("[Publisher] Error stopping recording:", error);
+      this.updateStatus("Error stopping recording", true);
+    }
+  }
+
+  /**
+   * Check if currently recording
+   */
+  get isRecordingActive(): boolean {
+    return this.isRecording;
   }
 }
