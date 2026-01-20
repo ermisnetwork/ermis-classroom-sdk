@@ -52,6 +52,7 @@ export interface PaginationParams {
 
 export interface EventSettings {
   maxParticipants?: number;
+  earlyJoinMinutes?: number;  
   recordingEnabled?: boolean;
   chatEnabled?: boolean;
   screenShareEnabled?: boolean;
@@ -115,6 +116,19 @@ export interface Event {
   rewards?: string[] | any[]; // Depends on population
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface ListEventsParams extends PaginationParams {
+  // Additional filters can be added here if needed
+}
+
+export interface ParticipantStats {
+  total: number;
+  present: number;
+  absent: number;
+  late: number;
+  excused: number;
+  byRole?: Record<RegistrantRole, number>;
 }
 
 // ============================================================================
@@ -225,6 +239,10 @@ export interface Reward {
   createdByApiKey?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface ListRewardsParams extends PaginationParams {
+  // Additional filters can be added here if needed
 }
 
 // ============================================================================

@@ -1,6 +1,7 @@
 /**
  * Events API
- * Manages events (lớp học/sự kiện)
+ * Backend services can strictly manage the "Event" entity.
+ * Supports: Create, Get, List, Update, Delete, and Get Participant Statistics
  */
 
 import type { VCRHTTPClient } from '../client';
@@ -16,6 +17,8 @@ import type {
   ListRegistrantsParams,
   BulkCreateRegistrantsParams,
   BulkCreateRegistrantsResult,
+  ListEventsParams,
+  ParticipantStats,
 } from '../types';
 
 export class EventsResource {
@@ -29,6 +32,15 @@ export class EventsResource {
   async create(data: CreateEventParams): Promise<Event> {
     const response = await this.client.post<ApiResponse<Event>>('/events', data);
     return response.data;
+  }
+
+  /**
+   * List events with pagination
+   * @param params Query parameters (page, limit, search, etc.)
+   * @returns Paginated list of events
+   */
+  async list(params?: ListEventsParams): Promise<PaginatedResponse<Event>> {
+    return this.client.get<PaginatedResponse<Event>>('/events', params);
   }
 
   /**
@@ -62,11 +74,24 @@ export class EventsResource {
   async delete(eventId: string): Promise<void> {
     await this.client.delete(`/events/${eventId}`);
   }
+
+  /**
+   * Get participant statistics for an event
+   * @param eventId Event ID
+   * @returns Participant statistics
+   */
+  async getParticipantStats(eventId: string): Promise<ParticipantStats> {
+    const response = await this.client.get<ApiResponse<ParticipantStats>>(
+      `/events/${eventId}/participants/stats`
+    );
+    return response.data;
+  }
 }
 
 /**
  * Registrants API
- * Manages event registrants (học viên/người tham dự)
+ * Full control over the attendee list.
+ * Supports: Create, Bulk Create, Create Mock, List, Update, Delete, Kick, Ban, Unban
  */
 export class RegistrantsResource {
   constructor(private client: VCRHTTPClient) {}
@@ -130,43 +155,6 @@ export class RegistrantsResource {
   }
 
   /**
-   * Ban a registrant from an event
-   * Prevents the registrant from joining the event, even with a valid join code.
-   * API keys can bypass this restriction when joining.
-   * @param eventId Event ID
-   * @param registrantId Registrant ID
-   * @param reason Optional reason for banning
-   * @returns Updated registrant with ban information
-   * @note Only Admin and Teacher can ban registrants
-   */
-  async ban(
-    eventId: string,
-    registrantId: string,
-    reason?: string
-  ): Promise<Registrant> {
-    const response = await this.client.post<ApiResponse<Registrant>>(
-      `/events/${eventId}/registrants/${registrantId}/ban`,
-      reason ? { reason } : undefined
-    );
-    return response.data;
-  }
-
-  /**
-   * Unban a registrant from an event
-   * Allows the registrant to join the event again.
-   * @param eventId Event ID
-   * @param registrantId Registrant ID
-   * @returns Updated registrant without ban information
-   * @note Only Admin and Teacher can unban registrants
-   */
-  async unban(eventId: string, registrantId: string): Promise<Registrant> {
-    const response = await this.client.post<ApiResponse<Registrant>>(
-      `/events/${eventId}/registrants/${registrantId}/unban`
-    );
-    return response.data;
-  }
-
-  /**
    * Bulk create registrants for an event
    * Supports partial success: some registrants may fail while others succeed.
    * The server enforces max 100 registrants per request.
@@ -189,6 +177,78 @@ export class RegistrantsResource {
       payload,
     );
 
+    return response.data;
+  }
+
+  /**
+   * Create mock registrants for an event
+   * Creates fake users for testing purposes.
+   * @param eventId Event ID
+   * @param count Number of mock registrants to create
+   * @returns Created mock registrants
+   */
+  async createMock(
+    eventId: string,
+    count: number
+  ): Promise<Registrant[]> {
+    const response = await this.client.post<ApiResponse<Registrant[]>>(
+      `/events/${eventId}/registrants/mock`,
+      { count }
+    );
+    return response.data;
+  }
+
+  /**
+   * Kick a participant from an event
+   * Removes the user from the video room immediately. They can rejoin if they have valid access.
+   * @param eventId Event ID
+   * @param registrantId Registrant ID
+   * @param reason Optional reason for kicking
+   * @returns Updated registrant
+   */
+  async kick(
+    eventId: string,
+    registrantId: string,
+    reason?: string
+  ): Promise<Registrant> {
+    const response = await this.client.post<ApiResponse<Registrant>>(
+      `/events/${eventId}/registrants/${registrantId}/kick`,
+      reason ? { reason } : undefined
+    );
+    return response.data;
+  }
+
+  /**
+   * Ban a registrant from an event
+   * Kicks the user and prevents them from rejoining the event.
+   * @param eventId Event ID
+   * @param registrantId Registrant ID
+   * @param reason Optional reason for banning
+   * @returns Updated registrant with ban information
+   */
+  async ban(
+    eventId: string,
+    registrantId: string,
+    reason?: string
+  ): Promise<Registrant> {
+    const response = await this.client.post<ApiResponse<Registrant>>(
+      `/events/${eventId}/registrants/${registrantId}/ban`,
+      reason ? { reason } : undefined
+    );
+    return response.data;
+  }
+
+  /**
+   * Unban a registrant from an event
+   * Allows the registrant to join the event again.
+   * @param eventId Event ID
+   * @param registrantId Registrant ID
+   * @returns Updated registrant without ban information
+   */
+  async unban(eventId: string, registrantId: string): Promise<Registrant> {
+    const response = await this.client.post<ApiResponse<Registrant>>(
+      `/events/${eventId}/registrants/${registrantId}/unban`
+    );
     return response.data;
   }
 }

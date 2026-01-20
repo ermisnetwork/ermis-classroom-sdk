@@ -1,6 +1,7 @@
 /**
  * Rewards API
- * Manages event rewards (phần thưởng)
+ * Services can manage rewards (CRUD).
+ * Ownership Rule: You can only Update or Delete rewards that were created by your API Key.
  */
 
 import type { VCRHTTPClient } from '../client';
@@ -9,6 +10,8 @@ import type {
   UpdateRewardParams,
   Reward,
   ApiResponse,
+  PaginatedResponse,
+  ListRewardsParams,
 } from '../types';
 
 export class RewardsResource {
@@ -31,6 +34,15 @@ export class RewardsResource {
       formData
     );
     return response.data;
+  }
+
+  /**
+   * Get all available rewards
+   * @param params Query parameters (page, limit, search, etc.)
+   * @returns Paginated list of rewards
+   */
+  async list(params?: ListRewardsParams): Promise<PaginatedResponse<Reward>> {
+    return this.client.get<PaginatedResponse<Reward>>('/event-rewards', params);
   }
 
   /**
