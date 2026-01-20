@@ -123,6 +123,14 @@ export class VCRHTTPClient {
     try {
       const response = await fetch(url.toString(), fetchOptions);
 
+      // Handle 204 No Content responses (no body)
+      if (response.status === 204) {
+        if (!response.ok) {
+          throw new VCRError(`HTTP ${response.status}: ${response.statusText}`, response.status);
+        }
+        return undefined as T;
+      }
+
       // Handle non-JSON responses
       const contentType = response.headers.get('content-type');
       let data: any;

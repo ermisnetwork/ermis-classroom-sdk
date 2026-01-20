@@ -217,6 +217,27 @@ const updatedEvent = await client.events.update('event-id', {
 await client.events.delete('event-id');
 ```
 
+#### Kick User from Video Room
+
+Kick (đuổi) a user from the event's video room immediately. This disconnects the user from the current session but does NOT prevent them from rejoining.
+
+**Important Notes:**
+- This API **ONLY** disconnects the user from the current session
+- The user can join again immediately after being kicked (unless they are also banned)
+- To permanently prevent rejoining, use `registrants.ban()` after kicking
+- Backend automatically looks up the `streamId` from `authId`, so you only need to provide `authId`
+
+```typescript
+// Scenario 1: Temporary kick (user can rejoin)
+await client.events.kick('event-id', 'student_12345', 'Gây mất trật tự');
+
+// Scenario 2: Permanent ban (automatically kicks if online)
+// Ban automatically kicks the user if they are online - no need to call kick separately
+await client.registrants.ban('event-id', 'student_12345', 'Vi phạm quy chế thi');
+```
+
+> **Note:** Requires Bearer Token (Teacher/Admin/AO) or API Key. The `authId` parameter is the user's `authId` field from your registrant/user system.
+
 ### Registrants
 
 Manage event participants (học viên/người tham dự).
@@ -276,37 +297,51 @@ await client.registrants.delete('event-id', 'registrant-id');
 
 Ban a registrant from an event. This prevents them from joining the event, even with a valid join code. API keys can bypass this restriction when joining.
 
+**Important Notes:**
+- This API **automatically** updates the database status (`isBanned = true`) **AND** kicks the user from the video room if they are currently online
+- The system will automatically call the kick service when banning, so you **don't need** to call `events.kick()` separately
+- If the kick fails (e.g., user is not online), the ban operation still succeeds because the database ban is completed
+- Uses `authId` (User ID from your auth system) instead of `registrantId` for easier integration
+
 ```typescript
-// Ban a registrant with optional reason
-const bannedRegistrant = await client.registrants.ban(
+// Ban a registrant (automatically kicks if online)
+const result = await client.registrants.ban(
   'event-id',
-  'registrant-id',
-  'Disruptive behavior in previous session'
+  'student_12345', // authId, not registrantId
+  'Vi phạm quy chế thi'
 );
 
-// Response includes ban information:
-// - isBanned: true
-// - bannedAt: "2026-01-19T04:00:00.000Z"
-// - bannedBy: "teacher-user-id"
-// - banReason: "Disruptive behavior in previous session"
+// Response:
+// {
+//   success: true,
+//   message: "Registrant banned from event" // or "Đã cấm người tham gia khỏi sự kiện" (vi)
+// }
 ```
 
-> **Note:** Only Admin and Teacher can ban registrants. Banned registrants cannot join the event unless the join request uses an API key.
+> **Note:** Only Admin and Teacher can ban registrants. Banned registrants cannot join the event unless the join request uses an API key. The system automatically finds the registrant by `authId` and performs both ban and kick operations.
 
 #### Unban Registrant
 
 Unban a registrant from an event, allowing them to join again.
 
+**Important Notes:**
+- Uses `authId` (User ID from your auth system) instead of `registrantId` for easier integration
+- The system will find the registrant by `authId` and remove the ban status
+
 ```typescript
-const unbannedRegistrant = await client.registrants.unban(
+const result = await client.registrants.unban(
   'event-id',
-  'registrant-id'
+  'student_12345' // authId, not registrantId
 );
 
-// Response: ban fields are removed (isBanned: false, bannedAt, bannedBy, banReason removed)
+// Response:
+// {
+//   success: true,
+//   message: "Registrant unbanned from event" // or "Đã bỏ cấm người tham gia khỏi sự kiện" (vi)
+// }
 ```
 
-> **Note:** Only Admin and Teacher can unban registrants.
+> **Note:** Only Admin and Teacher can unban registrants. After unbanning, the user can join the event using their join code or personal join link.
 
 #### Bulk Create Registrants
 
@@ -548,6 +583,77 @@ const ratingData: CreateRatingParams = {
   teacher: 5,
   otherThoughts: 'Great class!',
 };
+```
+
+## Kick & Ban Workflows
+
+### Understanding Kick vs Ban
+
+| Feature | Action | Purpose | Effect on User |
+| :--- | :--- | :--- | :--- |
+| **Kick** | Disconnects Stream/Socket | Remove user from room **immediately** | User is disconnected from video room. Can rejoin immediately if not banned. |
+| **Ban** | Sets `isBanned = true` in DB + **Auto Kick** | **Prevent** user from joining event + **Remove** from room | User cannot call `/join` API to enter the class anymore. Automatically kicked if currently online. |
+
+### Best Practices
+
+#### Scenario 1: Temporary Kick (Warning)
+Use when you want to warn a student but allow them to rejoin:
+
+```typescript
+// Just kick - user can rejoin
+await client.events.kick('event-id', 'student_12345', 'Gây mất trật tự');
+```
+
+#### Scenario 2: Permanent Ban (Automatically Kicks)
+Use when you want to permanently remove a student. The ban API automatically kicks the user if they are online:
+
+```typescript
+// Ban automatically kicks if user is online - no need to call kick separately
+await client.registrants.ban('event-id', 'student_12345', 'Vi phạm quy chế thi');
+```
+
+#### Scenario 3: Unban a User
+Allow a previously banned user to rejoin:
+
+```typescript
+// Use authId instead of registrantId
+await client.registrants.unban('event-id', 'student_12345');
+```
+
+### Handling Kick Events in Client Applications
+
+When a user is kicked, the Room SDK will emit a `participantRemovedByHost` event. Handle this in your application:
+
+```typescript
+// In your Room SDK integration
+room.on('participantRemovedByHost', (event) => {
+  if (event.isLocal) {
+    // Current user was kicked
+    alert(`Bạn đã bị mời ra khỏi phòng học. Lý do: ${event.reason}`);
+    // Redirect to home page
+    window.location.href = '/';
+  } else {
+    // Another participant was kicked
+    console.log(`Participant ${event.participant.userId} was removed: ${event.reason}`);
+  }
+});
+```
+
+### Handling Ban Errors
+
+When a banned user tries to join, the API will return a `403 Forbidden` error:
+
+```typescript
+try {
+  await client.registrants.join('event-id', { joinCode: 'ABC123' });
+} catch (error) {
+  if (error instanceof PermissionError) {
+    // Check if it's a ban error
+    if (error.message.includes('banned')) {
+      alert(`Bạn đã bị cấm tham gia sự kiện này. Lý do: ${error.data?.reason || 'Không rõ'}`);
+    }
+  }
+}
 ```
 
 ## Best Practices
