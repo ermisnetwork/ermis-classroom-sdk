@@ -184,6 +184,14 @@ export const MEETING_EVENTS = {
   START_SCREEN_SHARE: 'start_share_screen',
   STOP_SCREEN_SHARE: 'stop_share_screen',
 
+  // Livestream
+  START_LIVESTREAM: 'start_livestream',
+  STOP_LIVESTREAM: 'stop_livestream',
+
+  // Recording
+  START_RECORD: 'start_record',
+  STOP_RECORD: 'stop_record',
+
   // Breakout room
   BREAKOUT_ROOM: 'break_out_room',
   CLOSE_BREAKOUT_ROOM: 'close_breakout_room',

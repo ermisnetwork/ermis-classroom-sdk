@@ -65,6 +65,8 @@ export function ErmisClassroomProvider({
 
   // Livestream state
   const [isLivestreamActive, setIsLivestreamActive] = useState(false);
+  // Recording state
+  const [isRecordingActive, setIsRecordingActive] = useState(false);
 
   // Device state
   const [devices, setDevices] = useState<MediaDevices | null>(null);
@@ -448,6 +450,36 @@ export function ErmisClassroomProvider({
         console.error('[Provider] Unmount cleanup failed:', e);
       }
       clientRef.current = null;
+    };
+  }, []);
+
+  // Effect: Listen for livestream stopped from browser UI
+  useEffect(() => {
+    const handleLivestreamStarted = () => {
+      log('[Provider] Livestream started');
+      setIsLivestreamActive(true);
+    };
+    const handleLivestreamStopped = () => {
+      log('[Provider] Livestream stopped from browser UI');
+      setIsLivestreamActive(false);
+    };
+    const handleRecordingStarted = () => {
+      log('[Provider] Recording started');
+      setIsRecordingActive(true);
+    };
+    const handleRecordingStopped = () => {
+      log('[Provider] Recording stopped');
+      setIsRecordingActive(false);
+    };
+    globalEventBus.on(GlobalEvents.LIVESTREAM_STARTED, handleLivestreamStarted);
+    globalEventBus.on(GlobalEvents.LIVESTREAM_STOPPED, handleLivestreamStopped);
+    globalEventBus.on(GlobalEvents.RECORDING_STARTED, handleRecordingStarted);
+    globalEventBus.on(GlobalEvents.RECORDING_STOPPED, handleRecordingStopped);
+    return () => {
+      globalEventBus.off(GlobalEvents.LIVESTREAM_STARTED, handleLivestreamStarted);
+      globalEventBus.off(GlobalEvents.LIVESTREAM_STOPPED, handleLivestreamStopped);
+      globalEventBus.off(GlobalEvents.RECORDING_STARTED, handleRecordingStarted);
+      globalEventBus.off(GlobalEvents.RECORDING_STOPPED, handleRecordingStopped);
     };
   }, []);
 
@@ -896,6 +928,36 @@ export function ErmisClassroomProvider({
     }
   }, [currentRoom]);
 
+  // Recording methods
+  const startRecording = useCallback(async () => {
+    if (!currentRoom) throw new Error('Not in a room');
+    const local = currentRoom.localParticipant as any;
+    if (!local?.publisher) {
+      throw new Error('Publisher not initialized');
+    }
+    try {
+      await local.publisher.startRecording();
+      setIsRecordingActive(true);
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+      setIsRecordingActive(false);
+      throw error;
+    }
+  }, [currentRoom]);
+
+  const stopRecording = useCallback(async () => {
+    if (!currentRoom) return;
+    const local = currentRoom.localParticipant as any;
+    if (!local?.publisher) return;
+    try {
+      await local.publisher.stopRecording();
+      setIsRecordingActive(false);
+    } catch (error) {
+      console.error('Failed to stop recording:', error);
+      throw error;
+    }
+  }, [currentRoom]);
+
   const value: ErmisClassroomContextValue = useMemo(
     () => ({
       client: clientRef.current,
@@ -948,6 +1010,10 @@ export function ErmisClassroomProvider({
       startLivestream,
       stopLivestream,
       isLivestreamActive,
+      // Recording
+      startRecording,
+      stopRecording,
+      isRecordingActive,
     }),
     [
       participants,
@@ -997,6 +1063,9 @@ export function ErmisClassroomProvider({
       startLivestream,
       stopLivestream,
       isLivestreamActive,
+      startRecording,
+      stopRecording,
+      isRecordingActive,
     ]
   );
 

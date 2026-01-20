@@ -217,5 +217,13 @@ export interface ErmisClassroomContextValue {
   stopLivestream: () => Promise<void>;
   /** Whether currently livestreaming */
   isLivestreamActive: boolean;
+
+  // Recording actions
+  /** Start recording - captures current tab and sends to server */
+  startRecording: () => Promise<void>;
+  /** Stop recording */
+  stopRecording: () => Promise<void>;
+  /** Whether currently recording */
+  isRecordingActive: boolean;
 }
 
