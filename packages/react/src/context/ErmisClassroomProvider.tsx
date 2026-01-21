@@ -951,6 +951,10 @@ export function ErmisClassroomProvider({
     };
   }, []);
 
+  // Recording permission state (for pre-grant before joining room)
+  const [recordingPermissionStream, setRecordingPermissionStream] = useState<MediaStream | null>(null);
+  const [recordingPermissionGranted, setRecordingPermissionGranted] = useState(false);
+
   // Livestream methods
   const startLivestream = useCallback(async () => {
     if (!currentRoom) throw new Error('Not in a room');
@@ -959,6 +963,15 @@ export function ErmisClassroomProvider({
       throw new Error('Publisher not initialized');
     }
     try {
+      // If we have a pre-granted stream from waiting room, pass it to Publisher
+      if (recordingPermissionStream && recordingPermissionGranted) {
+        log('[Provider] Using pre-granted recording stream for livestream');
+        local.publisher.setPreGrantedTabStream(recordingPermissionStream);
+        // Clear the React state since Publisher now owns the stream
+        setRecordingPermissionStream(null);
+        setRecordingPermissionGranted(false);
+      }
+      
       await local.publisher.startLivestream();
       setIsLivestreamActive(true);
     } catch (error) {
@@ -966,7 +979,7 @@ export function ErmisClassroomProvider({
       setIsLivestreamActive(false);
       throw error;
     }
-  }, [currentRoom]);
+  }, [currentRoom, recordingPermissionStream, recordingPermissionGranted]);
 
   const stopLivestream = useCallback(async () => {
     if (!currentRoom) return;
@@ -989,6 +1002,15 @@ export function ErmisClassroomProvider({
       throw new Error('Publisher not initialized');
     }
     try {
+      // If we have a pre-granted stream from waiting room, pass it to Publisher
+      if (recordingPermissionStream && recordingPermissionGranted) {
+        log('[Provider] Using pre-granted recording stream');
+        local.publisher.setPreGrantedTabStream(recordingPermissionStream);
+        // Clear the React state since Publisher now owns the stream
+        setRecordingPermissionStream(null);
+        setRecordingPermissionGranted(false);
+      }
+      
       await local.publisher.startRecording();
       setIsRecordingActive(true);
     } catch (error) {
@@ -996,7 +1018,7 @@ export function ErmisClassroomProvider({
       setIsRecordingActive(false);
       throw error;
     }
-  }, [currentRoom]);
+  }, [currentRoom, recordingPermissionStream, recordingPermissionGranted]);
 
   const stopRecording = useCallback(async () => {
     if (!currentRoom) return;
@@ -1010,6 +1032,132 @@ export function ErmisClassroomProvider({
       throw error;
     }
   }, [currentRoom]);
+
+
+  // Request recording permissions before joining room
+  const requestRecordingPermissions = useCallback(async () => {
+    try {
+      // If already have permission with valid stream, return early
+      if (recordingPermissionStream && recordingPermissionGranted) {
+        return {
+          granted: true,
+          stream: recordingPermissionStream,
+        };
+      }
+
+      const displayMediaOptions: DisplayMediaStreamOptions & {
+        preferCurrentTab?: boolean;
+        selfBrowserSurface?: string;
+      } = {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 15 },
+        },
+        audio: true,
+      };
+
+      // Chrome-specific options
+      displayMediaOptions.preferCurrentTab = true;
+      displayMediaOptions.selfBrowserSurface = "include";
+
+      const stream = await navigator.mediaDevices.getDisplayMedia(
+        displayMediaOptions as DisplayMediaStreamOptions
+      );
+
+      const videoTracks = stream.getVideoTracks();
+      const audioTracks = stream.getAudioTracks();
+      
+      const hasVideo = videoTracks.length > 0;
+      const hasAudio = audioTracks.length > 0;
+
+      // Get display surface type
+      let displaySurface: string | undefined;
+      if (hasVideo) {
+        const settings = videoTracks[0].getSettings() as MediaTrackSettings & { displaySurface?: string };
+        displaySurface = settings.displaySurface;
+      }
+
+      log(`[Provider] Recording permission check - Video: ${hasVideo}, Audio: ${hasAudio}, Surface: ${displaySurface}`);
+
+      const isTabSharing = displaySurface === "browser";
+      const audioShouldBeAvailable = isTabSharing;
+
+      // Case 1: No video
+      if (!hasVideo) {
+        stream.getTracks().forEach(track => track.stop());
+        return {
+          granted: false,
+          error: new Error("Screen sharing requires video."),
+          missingVideo: true,
+        };
+      }
+
+      // Case 2: Has video, check audio
+      if (!hasAudio) {
+        if (audioShouldBeAvailable) {
+          // Tab sharing but user unchecked audio
+          stream.getTracks().forEach(track => track.stop());
+          return {
+            granted: false,
+            error: new Error("Tab audio is required for recording. Please enable audio when sharing."),
+            missingAudio: true,
+          };
+        } else {
+          // Window/screen sharing - audio unavailable, still grant
+          setRecordingPermissionStream(stream);
+          setRecordingPermissionGranted(true);
+          
+          // Setup onended handler
+          videoTracks[0].onended = () => {
+            log("[Provider] Tab capture stopped by user");
+            setRecordingPermissionGranted(false);
+            setRecordingPermissionStream(null);
+          };
+          
+          return {
+            granted: true,
+            stream,
+            audioUnavailable: true,
+          };
+        }
+      }
+
+      // Case 3: Both video and audio available
+      setRecordingPermissionStream(stream);
+      setRecordingPermissionGranted(true);
+      
+      videoTracks[0].onended = () => {
+        log("[Provider] Tab capture stopped by user");
+        setRecordingPermissionGranted(false);
+        setRecordingPermissionStream(null);
+      };
+
+      return {
+        granted: true,
+        stream,
+      };
+    } catch (error) {
+      log("[Provider] Recording permission denied:", error);
+      return {
+        granted: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
+  }, [recordingPermissionStream, recordingPermissionGranted]);
+
+  const isRecordingPermissionGrantedFn = useCallback(() => {
+    return recordingPermissionGranted && recordingPermissionStream !== null;
+  }, [recordingPermissionGranted, recordingPermissionStream]);
+
+  const releaseRecordingPermissions = useCallback(() => {
+    if (recordingPermissionStream) {
+      recordingPermissionStream.getTracks().forEach(track => track.stop());
+      setRecordingPermissionStream(null);
+    }
+    setRecordingPermissionGranted(false);
+    log("[Provider] Recording permissions released");
+  }, [recordingPermissionStream]);
 
   const value: ErmisClassroomContextValue = useMemo(
     () => ({
@@ -1069,6 +1217,10 @@ export function ErmisClassroomProvider({
       startRecording,
       stopRecording,
       isRecordingActive,
+      // Recording permission (pre-grant before joining)
+      requestRecordingPermissions,
+      isRecordingPermissionGranted: isRecordingPermissionGrantedFn,
+      releaseRecordingPermissions,
     }),
     [
       participants,
@@ -1122,6 +1274,9 @@ export function ErmisClassroomProvider({
       startRecording,
       stopRecording,
       isRecordingActive,
+      requestRecordingPermissions,
+      isRecordingPermissionGrantedFn,
+      releaseRecordingPermissions,
     ]
   );
 

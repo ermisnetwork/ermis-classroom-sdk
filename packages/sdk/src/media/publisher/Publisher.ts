@@ -116,6 +116,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   // Recording state
   private isRecording = false;
   private isCapturingTab = false; // Lock to prevent concurrent tab capture requests
+  private recordingPermissionGranted = false; // Indicates if permission was pre-granted via requestRecordingPermissions
   private livestreamVideoProcessor: VideoProcessor | null = null;
   private livestreamAudioProcessor: AudioProcessor | null = null;
   private livestreamVideoEncoderManager: VideoEncoderManager | null = null;
@@ -1756,13 +1757,15 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     try {
       this.updateStatus("Starting livestream...");
 
-      // Only setup infrastructure if recording is not active
-      if (!this.isRecording) {
-        // Capture current tab
-        await this.captureCurrentTab();
-
+      // Check if livestream/recording infrastructure is already set up (channels ready, processors running)
+      const needsInfrastructureSetup = !this.isRecording && !this.livestreamVideoEncoderManager;
+      if (needsInfrastructureSetup) {
+        // If we don't have a stream (no pre-grant), capture it
         if (!this.tabStream) {
-          throw new Error("Failed to capture tab stream");
+          await this.captureCurrentTab();
+          if (!this.tabStream) {
+            throw new Error("Failed to capture tab stream");
+          }
         }
 
         // Mix audio streams
@@ -1783,7 +1786,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
         // Start media processing
         await this.startLivestreamProcessing();
-      } else {
+      } else if (this.isRecording) {
         log("[Publisher] Reusing active recording infrastructure for livestream");
         // Ensure tab stream is available (should be if recording, but safety check)
         if (!this.tabStream) {
@@ -1884,6 +1887,16 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private async captureCurrentTab(): Promise<void> {
     if (this.tabStream) {
       log("[Publisher] Tab stream already exists, skipping capture");
+      return;
+    }
+
+    // If permission was pre-granted but stream was lost, request again
+    if (this.recordingPermissionGranted && !this.tabStream) {
+      log("[Publisher] Permission was granted but stream lost, requesting again");
+      const result = await this.requestRecordingPermissions();
+      if (!result.granted) {
+        throw new Error("Failed to re-acquire tab stream");
+      }
       return;
     }
 
@@ -2152,18 +2165,18 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       throw new Error("StreamManager not initialized");
     }
 
-    // Check if livestream infrastructure is already set up
-    const needsSetup = !this.tabStream;
-
+    // Check if livestream/recording infrastructure is already set up (channels ready, processors running)
+    const needsInfrastructureSetup = !this.isLivestreaming && !this.livestreamVideoEncoderManager;
     try {
       this.updateStatus("Starting recording...");
 
-      if (needsSetup) {
-        // Capture current tab
-        await this.captureCurrentTab();
-
+      if (needsInfrastructureSetup) {
+        // If we don't have a stream (no pre-grant), capture it
         if (!this.tabStream) {
-          throw new Error("Failed to capture tab stream");
+          await this.captureCurrentTab();
+          if (!this.tabStream) {
+            throw new Error("Failed to capture tab stream");
+          }
         }
 
         // Mix audio streams
@@ -2302,5 +2315,203 @@ export class Publisher extends EventEmitter<PublisherEvents> {
    */
   get isRecordingActive(): boolean {
     return this.isRecording;
+  }
+
+  // ==========================================
+  // === Recording Permission Methods       ===
+  // ==========================================
+
+  /**
+   * Request recording permissions (screen sharing with audio) before joining a meeting.
+   * This allows teachers to grant permission in the waiting room.
+   * 
+   * Distinguishes between:
+   * - User denial (missingVideo/missingAudio) - user chose not to grant
+   * - System unavailability (videoUnavailable/audioUnavailable) - system doesn't support
+   * 
+   * @returns Promise with permission result
+   */
+  async requestRecordingPermissions(): Promise<{
+    granted: boolean;
+    stream?: MediaStream;
+    error?: Error;
+    // User denial flags (when granted = false)
+    missingVideo?: boolean;
+    missingAudio?: boolean;
+    // System unavailability flags (when granted = true but feature unavailable)
+    videoUnavailable?: boolean;
+    audioUnavailable?: boolean;
+  }> {
+    try {
+      // If already have permission with valid stream, return early
+      if (this.tabStream && this.recordingPermissionGranted) {
+        return {
+          granted: true,
+          stream: this.tabStream,
+        };
+      }
+
+      const displayMediaOptions: DisplayMediaStreamOptions & {
+        preferCurrentTab?: boolean;
+        selfBrowserSurface?: string;
+      } = {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 15 },
+        },
+        audio: true, // Request audio capture from tab
+      };
+
+      // Chrome-specific options for preferring current tab
+      displayMediaOptions.preferCurrentTab = true;
+      displayMediaOptions.selfBrowserSurface = "include";
+
+      this.tabStream = await navigator.mediaDevices.getDisplayMedia(
+        displayMediaOptions as DisplayMediaStreamOptions
+      );
+
+      const videoTracks = this.tabStream.getVideoTracks();
+      const audioTracks = this.tabStream.getAudioTracks();
+      
+      const hasVideo = videoTracks.length > 0;
+      const hasAudio = audioTracks.length > 0;
+
+      // Get display surface type to determine if audio/video SHOULD be available
+      let displaySurface: string | undefined;
+      if (hasVideo) {
+        const settings = videoTracks[0].getSettings() as MediaTrackSettings & { displaySurface?: string };
+        displaySurface = settings.displaySurface;
+      }
+
+      log(`[Publisher] Recording permission check - Video: ${hasVideo}, Audio: ${hasAudio}, Surface: ${displaySurface}`);
+
+      // Determine if audio SHOULD be available based on display surface
+      // "browser" = tab sharing (audio available)
+      // "window" or "monitor" = window/screen sharing (audio may not be available)
+      const isTabSharing = displaySurface === "browser";
+      const audioShouldBeAvailable = isTabSharing;
+
+      // Case 1: No video at all - this is always a denial (can't share without video)
+      if (!hasVideo) {
+        this.tabStream.getTracks().forEach(track => track.stop());
+        this.tabStream = null;
+        
+        return {
+          granted: false,
+          error: new Error("Screen sharing requires video."),
+          missingVideo: true,
+        };
+      }
+
+      // Case 2: Has video, check audio
+      if (!hasAudio) {
+        if (audioShouldBeAvailable) {
+          // Tab sharing but user unchecked audio → User denial
+          this.tabStream.getTracks().forEach(track => track.stop());
+          this.tabStream = null;
+          
+          return {
+            granted: false,
+            error: new Error("Tab audio is required for recording. Please enable audio when sharing."),
+            missingAudio: true,
+          };
+        } else {
+          // Window/screen sharing - audio not available → System limitation, still grant
+          this.recordingPermissionGranted = true;
+          log("[Publisher] Recording permission granted - video available, audio unavailable (system limitation)");
+          
+          // Setup onended handler
+          this.setupTabStreamEndedHandler();
+          
+          return {
+            granted: true,
+            stream: this.tabStream,
+            audioUnavailable: true,
+          };
+        }
+      }
+
+      // Case 3: Both video and audio available
+      this.recordingPermissionGranted = true;
+      log("[Publisher] Recording permission granted - both video and audio available");
+      
+      // Setup onended handler
+      this.setupTabStreamEndedHandler();
+
+      return {
+        granted: true,
+        stream: this.tabStream,
+      };
+    } catch (error) {
+      log("[Publisher] Recording permission denied:", error);
+      return {
+        granted: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
+  }
+
+  /**
+   * Setup handler for when tab capture is stopped by user via browser UI
+   */
+  private setupTabStreamEndedHandler(): void {
+    if (!this.tabStream) return;
+    
+    const videoTrack = this.tabStream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.onended = () => {
+        log("[Publisher] Tab capture stopped by user (browser UI)");
+        this.recordingPermissionGranted = false;
+        this.tabStream = null;
+        
+        if (this.isLivestreaming) {
+          this.stopLivestream();
+        }
+        if (this.isRecording) {
+          this.stopRecording();
+        }
+      };
+    }
+  }
+
+  /**
+   * Check if recording permission has been granted
+   */
+  isRecordingPermissionGranted(): boolean {
+    return this.recordingPermissionGranted && this.tabStream !== null;
+  }
+
+  /**
+   * Release the pre-granted recording permission and stop the stream.
+   * Call this if the user decides not to join the meeting.
+   */
+  releaseRecordingPermissions(): void {
+    if (this.tabStream) {
+      this.tabStream.getTracks().forEach(track => track.stop());
+      this.tabStream = null;
+    }
+    this.recordingPermissionGranted = false;
+    log("[Publisher] Recording permissions released");
+  }
+
+  /**
+   * Set a pre-granted tab stream from external source (e.g., React provider).
+   * This allows the stream captured in waiting room to be used by startRecording.
+   */
+  setPreGrantedTabStream(stream: MediaStream): void {
+    if (this.tabStream) {
+      log("[Publisher] Replacing existing tabStream with pre-granted stream");
+      // Stop existing stream tracks
+      this.tabStream.getTracks().forEach(track => track.stop());
+    }
+    
+    this.tabStream = stream;
+    this.recordingPermissionGranted = true;
+    
+    // Setup onended handler
+    this.setupTabStreamEndedHandler();
+    
+    log("[Publisher] Pre-granted tab stream set successfully");
   }
 }
