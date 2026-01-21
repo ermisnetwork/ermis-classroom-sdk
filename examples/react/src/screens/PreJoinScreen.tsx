@@ -43,6 +43,10 @@ export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
     stopPreviewStream,
     previewStream,
     joinRoom,
+    // Recording permission methods
+    requestRecordingPermissions,
+    isRecordingPermissionGranted,
+    releaseRecordingPermissions,
   } = useErmisClassroom()
 
   // Start preview stream on mount
@@ -113,7 +117,7 @@ export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
   const toggleMic = () => {
     setMicEnabled(!micEnabled)
     if (previewStream) {
-      previewStream.getAudioTracks().forEach(track => {
+      previewStream.getAudioTracks().forEach((track: MediaStreamTrack) => {
         track.enabled = !micEnabled
       })
     }
@@ -510,6 +514,68 @@ export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
                   ))}
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Recording Permission Demo Section */}
+        <div className="mt-6">
+          <Card className="bg-slate-800 border-slate-700">
+            <CardHeader>
+              <CardTitle className="text-white flex items-center gap-2">
+                🎥 Recording Permission Demo
+              </CardTitle>
+              <CardDescription className="text-slate-400">
+                Request screen sharing permission before joining the meeting.
+                This allows teachers to grant permission in the waiting room.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-4">
+                <Button
+                  onClick={async () => {
+                    const result = await requestRecordingPermissions()
+                    if (!result.granted) {
+                      if (result.missingVideo) {
+                        alert("Screen sharing requires video. Please share your screen.")
+                      } else if (result.missingAudio) {
+                        alert("Tab audio is required. Please enable audio when sharing.")
+                      } else {
+                        alert(`Permission denied: ${result.error?.message}`)
+                      }
+                    } else if (result.audioUnavailable) {
+                      alert("Permission granted! Note: Tab audio unavailable (you shared window/screen instead of tab)")
+                    } else {
+                      alert("Permission granted! Both video and audio available.")
+                    }
+                  }}
+                  disabled={isRecordingPermissionGranted()}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {isRecordingPermissionGranted() ? "✓ Permission Granted" : "Request Recording Permission"}
+                </Button>
+                
+                {isRecordingPermissionGranted() && (
+                  <Button
+                    variant="outline"
+                    onClick={releaseRecordingPermissions}
+                    className="border-red-600 text-red-400 hover:bg-red-900/50"
+                  >
+                    Release Permission
+                  </Button>
+                )}
+              </div>
+
+              {isRecordingPermissionGranted() && (
+                <div className="mt-4 p-2 bg-green-900/30 rounded-lg">
+                  <p className="text-green-400 text-sm">✓ Screen sharing permission granted. Ready to record.</p>
+                </div>
+              )}
+
+              <div className="text-slate-500 text-xs">
+                <p>💡 Tip: When joining as a teacher, call this before joinRoom() to pre-grant permission.</p>
+                <p>Then startRecording() will use the pre-granted stream without showing a dialog.</p>
+              </div>
             </CardContent>
           </Card>
         </div>

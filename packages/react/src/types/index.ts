@@ -227,5 +227,25 @@ export interface ErmisClassroomContextValue {
   stopRecording: () => Promise<void>;
   /** Whether currently recording */
   isRecordingActive: boolean;
+
+  // Recording permission actions (can be called before joining room)
+  /**
+   * Request recording permissions (screen sharing with audio) before joining a meeting.
+   * This allows teachers to grant permission in the waiting room.
+   * Returns result with flags indicating what's missing if not granted.
+   */
+  requestRecordingPermissions: () => Promise<{
+    granted: boolean;
+    stream?: MediaStream;
+    error?: Error;
+    missingVideo?: boolean;
+    missingAudio?: boolean;
+    videoUnavailable?: boolean;
+    audioUnavailable?: boolean;
+  }>;
+  /** Check if recording permission has been pre-granted */
+  isRecordingPermissionGranted: () => boolean;
+  /** Release pre-granted recording permissions (stop the stream) */
+  releaseRecordingPermissions: () => void;
 }
 

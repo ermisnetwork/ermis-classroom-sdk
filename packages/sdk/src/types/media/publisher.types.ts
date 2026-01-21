@@ -256,3 +256,27 @@ export enum PinType {
   User = 1,
   ScreenShare = 2,
 }
+
+/**
+ * Result of recording permission request
+ */
+export interface RecordingPermissionResult {
+  /** Whether permission was granted */
+  granted: boolean;
+  /** The captured MediaStream if granted */
+  stream?: MediaStream;
+  /** Error if permission was denied */
+  error?: Error;
+  
+  // === User denial flags (granted = false) ===
+  /** True if user chose not to share video */
+  missingVideo?: boolean;
+  /** True if user chose not to share audio (when audio was available) */
+  missingAudio?: boolean;
+  
+  // === System unavailability flags (granted = true but limited) ===
+  /** True if video is unavailable due to system limitations */
+  videoUnavailable?: boolean;
+  /** True if audio is unavailable due to sharing window/screen instead of tab */
+  audioUnavailable?: boolean;
+}
