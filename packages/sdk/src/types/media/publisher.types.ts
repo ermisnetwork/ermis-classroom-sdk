@@ -2,6 +2,7 @@
  * Publisher Types and Interfaces
  */
 
+import { GopStreamSender } from "../../media/publisher/transports/GopStreamSender";
 
 // Re-export ServerEvent from room.types to avoid duplication
 export type { ServerEvent } from "../core/room.types";
@@ -255,6 +256,12 @@ export type InitAudioRecorder = (
 export enum PinType {
   User = 1,
   ScreenShare = 2,
+}
+
+export type StreamDataGop = {
+  gopId: number;
+  gopSender: GopStreamSender;
+  currentGopFrames: number;
 }
 
 /**

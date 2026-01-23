@@ -4,6 +4,7 @@ import { ChannelName, FrameType } from "../../../types/media/publisher.types";
 import type {
   StreamData,
   ServerEvent,
+  StreamDataGop,
 } from "../../../types/media/publisher.types";
 import { PacketBuilder } from "../../shared/utils/PacketBuilder";
 import type { RaptorQConfig } from "../../shared/utils/PacketBuilder";
@@ -12,6 +13,7 @@ import { LengthDelimitedReader } from "../../shared/utils/LengthDelimitedReader"
 import CommandSender, { PublisherState } from "../ClientCommand";
 import { log } from "../../../utils";
 import type { WebRTCManager } from "./WebRTCManager";
+import { GopStreamSender } from "./GopStreamSender";
 
 // Default publisher state - will be updated by Publisher
 const DEFAULT_PUBLISHER_STATE: PublisherState = {
@@ -83,6 +85,8 @@ export class StreamManager extends EventEmitter<{
   private commandSender: CommandSender | null;
   public streamId: string;
   private publisherState: PublisherState = { ...DEFAULT_PUBLISHER_STATE };
+  private gopSenders = new Map<ChannelName, StreamDataGop>();
+  private readonly GOP_SIZE = 30;
 
   constructor(isWebRTC: boolean = false, streamID?: string) {
     super();
@@ -197,6 +201,13 @@ export class StreamManager extends EventEmitter<{
 
     for (const channelName of channelNames) {
       await this.createBidirectionalStream(channelName);
+      // Initialize GOP sender for video channels
+      const gopSender = new GopStreamSender(this.webTransport, this.streamId);
+      this.gopSenders.set(channelName, {
+        gopId: 0,
+        gopSender,
+        currentGopFrames: 0,
+      });
     }
 
     log(
@@ -612,7 +623,55 @@ export class StreamManager extends EventEmitter<{
       sequenceNumber,
     );
 
-    await this.sendPacket(channelName, packet, frameType);
+    let channel: number;
+    switch (channelName) {
+      case ChannelName.MEETING_CONTROL:
+        channel = 0;
+        break;
+      case ChannelName.VIDEO_360P:
+        channel = 1;
+        break;
+      case ChannelName.VIDEO_720P:
+        channel = 2;
+        break;
+      case ChannelName.SCREEN_SHARE_720P:
+        channel = 3;
+        break;
+      case ChannelName.SCREEN_SHARE_1080P:
+        channel = 4;
+        break;
+      case ChannelName.MICROPHONE:
+        channel = 5;
+        break;
+      case ChannelName.SCREEN_SHARE_AUDIO:
+        channel = 6;
+        break;
+      default:
+        channel = 2; // Default to Video720p
+    }
+
+    const isKeyframe = chunk.type === "key";
+
+    const gopData = this.gopSenders.get(channelName);
+    const gopSender = gopData?.gopSender;
+    // use GOP sender if iswebtransport
+    if (!this.isWebRTC && gopSender) {
+      if (isKeyframe) {
+        await gopSender.startGop(channel, this.GOP_SIZE);
+        gopData.currentGopFrames = 0;
+      }
+
+      // Send frame
+      await gopSender.sendFrame(
+        packet,
+        chunk.timestamp,
+        frameType
+      );
+
+      gopData.currentGopFrames++;
+    } else {
+      await this.sendPacket(channelName, packet, frameType);
+    }
   }
 
   /**
@@ -1155,9 +1214,24 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
+   * Cleanup all GOP senders
+   * Should be called when connection closes to prevent LocallyClosed errors
+   */
+  cleanupGopSenders(): void {
+    for (const [channelName, gopData] of this.gopSenders) {
+      gopData.gopSender.cleanup();
+      log(`[StreamManager] Cleaned up GOP sender for ${channelName}`);
+    }
+    this.gopSenders.clear();
+  }
+
+  /**
    * Close all streams
    */
   async closeAll(): Promise<void> {
+    // Cleanup GOP senders first to prevent LocallyClosed errors
+    this.cleanupGopSenders();
+
     const closePromises: Promise<void>[] = [];
 
     for (const channelName of this.streams.keys()) {
