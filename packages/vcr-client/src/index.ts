@@ -2,17 +2,19 @@
  * VCR SDK - Virtual Classroom SDK
  * A TypeScript SDK for Virtual Classroom API
  * 
- * This SDK provides access to 4 resources:
+ * This SDK provides access to 5 resources:
  * - Events: Create, read, update, delete events
  * - Registrants: Manage event participants
  * - Rewards: Manage event rewards
  * - Ratings: Read-only access to event ratings
+ * - Documents: Manage event documents (upload, download, organize)
  */
 
 import { VCRHTTPClient } from './client';
 import { EventsResource, RegistrantsResource } from './api/events';
 import { RewardsResource } from './api/rewards';
 import { RatingsResource } from './api/ratings';
+import { DocumentsResource } from './api/documents';
 
 export interface VCRClientConfig {
   /**
@@ -50,11 +52,12 @@ export interface VCRClientConfig {
 export class VCRClient {
   private httpClient: VCRHTTPClient;
 
-  // API resources - only 4 resources as per API documentation
+  // API resources - 5 resources as per API documentation
   public readonly events: EventsResource;
   public readonly registrants: RegistrantsResource;
   public readonly rewards: RewardsResource;
   public readonly ratings: RatingsResource;
+  public readonly documents: DocumentsResource;
 
   constructor(config: VCRClientConfig) {
     // Initialize HTTP client
@@ -72,6 +75,7 @@ export class VCRClient {
     this.registrants = new RegistrantsResource(this.httpClient);
     this.rewards = new RewardsResource(this.httpClient);
     this.ratings = new RatingsResource(this.httpClient);
+    this.documents = new DocumentsResource(this.httpClient);
   }
 
   /**
@@ -126,6 +130,15 @@ export {
   ServerError,
   type Language,
 } from './client';
+
+// Export API resource classes
+export {
+  EventsResource,
+  RegistrantsResource,
+} from './api/events';
+export { RewardsResource } from './api/rewards';
+export { RatingsResource } from './api/ratings';
+export { DocumentsResource } from './api/documents';
 
 // Export utility functions
 export * from './utils';
