@@ -84,7 +84,7 @@ function CustomParticipantTile({
         autoPlay
         playsInline
         muted={participant.isLocal}
-        className={cn("w-full h-full object-fill", participant.isVideoOff && "hidden")}
+        className={cn("w-full h-full object-contain", participant.isVideoOff && "hidden")}
       />
       {participant.isVideoOff && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-700">
@@ -370,8 +370,7 @@ function CustomTile({
         playsInline
         muted={tile.isLocal}
         className={cn(
-          "w-full h-full",
-          isScreenShare ? "object-contain" : "object-cover",
+          "w-full h-full object-contain",
           !isScreenShare && tile.isVideoOff && "hidden"
         )}
       />

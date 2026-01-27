@@ -13,7 +13,7 @@ interface PreJoinScreenProps {
 }
 
 export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
-  const [roomCode, setRoomCode] = useState("5fuk-xc49-7pev")
+  const [roomCode, setRoomCode] = useState("5fwj-svmn-c7bx")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [micEnabled, setMicEnabled] = useState(true)
@@ -554,7 +554,7 @@ export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
                 >
                   {isRecordingPermissionGranted() ? "✓ Permission Granted" : "Request Recording Permission"}
                 </Button>
-                
+
                 {isRecordingPermissionGranted() && (
                   <Button
                     variant="outline"

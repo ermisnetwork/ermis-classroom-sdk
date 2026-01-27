@@ -112,8 +112,9 @@ export class VideoProcessor extends EventEmitter<{
           subStream.name,
           subStream.channelName,
           encoderConfig,
-          (chunk, metadata) =>
-            this.handleEncodedChunk(chunk, metadata, subStream.channelName),
+          (chunk, metadata) => {
+            this.handleEncodedChunk(chunk, metadata, subStream.channelName)
+          },
           (error) => this.handleEncoderError(error, subStream.name),
         );
       }

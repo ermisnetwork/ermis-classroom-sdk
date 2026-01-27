@@ -540,6 +540,56 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (this.hasVideo && this.videoProcessor) {
       const videoTrack = this.currentStream.getVideoTracks()[0];
       if (videoTrack) {
+        // Extract actual video dimensions from the track
+        const { calculateSubStreamResolutions, getVideoTrackDimensions } = await import('../../utils/videoResolutionHelper');
+        const actualDimensions = getVideoTrackDimensions(videoTrack);
+
+        if (actualDimensions) {
+          const { width: actualWidth, height: actualHeight } = actualDimensions;
+          log("[Publisher] Actual video track dimensions:", `${actualWidth}x${actualHeight}`);
+
+          // Calculate proportional resolutions for 360p and 720p
+          const { video360p, video720p } = calculateSubStreamResolutions(actualWidth, actualHeight);
+
+          // Update subStreams with calculated dimensions
+          this.subStreams = this.subStreams.map(subStream => {
+            if (subStream.channelName === ChannelName.VIDEO_360P) {
+              return {
+                ...subStream,
+                width: video360p.width,
+                height: video360p.height
+              };
+            }
+            if (subStream.channelName === ChannelName.VIDEO_720P) {
+              return {
+                ...subStream,
+                width: video720p.width,
+                height: video720p.height
+              };
+            }
+            return subStream;
+          });
+
+          // Re-initialize VideoProcessor with updated subStreams
+          this.videoProcessor = new VideoProcessor(
+            this.videoEncoderManager!,
+            this.streamManager!,
+            this.subStreams as any
+          );
+
+          this.videoProcessor.on("encoderError", (error) => {
+            console.error("[Publisher] Video encoder error:", error);
+            this.updateStatus("Video encoder error", true);
+          });
+
+          this.videoProcessor.on("processingError", (error) => {
+            console.error("[Publisher] Video processing error:", error);
+            this.updateStatus("Video processing error", true);
+          });
+        } else {
+          log("[Publisher] Could not get actual video dimensions, using default subStreams config");
+        }
+
         const baseConfig = {
           codec: "avc1.640c34",
           width: this.options.width || 1280,
@@ -1905,7 +1955,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       const startTime = Date.now();
       while (this.isCapturingTab) {
         if (Date.now() - startTime > 30000) { // 30s timeout
-           throw new Error("Timeout waiting for pending tab capture");
+          throw new Error("Timeout waiting for pending tab capture");
         }
         await new Promise((resolve) => setTimeout(resolve, 200));
         if (this.tabStream) {
@@ -2373,7 +2423,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       const videoTracks = this.tabStream.getVideoTracks();
       const audioTracks = this.tabStream.getAudioTracks();
-      
+
       const hasVideo = videoTracks.length > 0;
       const hasAudio = audioTracks.length > 0;
 
@@ -2396,7 +2446,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       if (!hasVideo) {
         this.tabStream.getTracks().forEach(track => track.stop());
         this.tabStream = null;
-        
+
         return {
           granted: false,
           error: new Error("Screen sharing requires video."),
@@ -2410,7 +2460,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
           // Tab sharing but user unchecked audio → User denial
           this.tabStream.getTracks().forEach(track => track.stop());
           this.tabStream = null;
-          
+
           return {
             granted: false,
             error: new Error("Tab audio is required for recording. Please enable audio when sharing."),
@@ -2420,10 +2470,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
           // Window/screen sharing - audio not available → System limitation, still grant
           this.recordingPermissionGranted = true;
           log("[Publisher] Recording permission granted - video available, audio unavailable (system limitation)");
-          
+
           // Setup onended handler
           this.setupTabStreamEndedHandler();
-          
+
           return {
             granted: true,
             stream: this.tabStream,
@@ -2435,7 +2485,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Case 3: Both video and audio available
       this.recordingPermissionGranted = true;
       log("[Publisher] Recording permission granted - both video and audio available");
-      
+
       // Setup onended handler
       this.setupTabStreamEndedHandler();
 
@@ -2457,14 +2507,14 @@ export class Publisher extends EventEmitter<PublisherEvents> {
    */
   private setupTabStreamEndedHandler(): void {
     if (!this.tabStream) return;
-    
+
     const videoTrack = this.tabStream.getVideoTracks()[0];
     if (videoTrack) {
       videoTrack.onended = () => {
         log("[Publisher] Tab capture stopped by user (browser UI)");
         this.recordingPermissionGranted = false;
         this.tabStream = null;
-        
+
         if (this.isLivestreaming) {
           this.stopLivestream();
         }
@@ -2505,13 +2555,13 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Stop existing stream tracks
       this.tabStream.getTracks().forEach(track => track.stop());
     }
-    
+
     this.tabStream = stream;
     this.recordingPermissionGranted = true;
-    
+
     // Setup onended handler
     this.setupTabStreamEndedHandler();
-    
+
     log("[Publisher] Pre-granted tab stream set successfully");
   }
 }
