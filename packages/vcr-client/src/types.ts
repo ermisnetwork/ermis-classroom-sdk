@@ -52,7 +52,7 @@ export interface PaginationParams {
 
 export interface EventSettings {
   maxParticipants?: number;
-  earlyJoinMinutes?: number;  
+  earlyJoinMinutes?: number;
   recordingEnabled?: boolean;
   chatEnabled?: boolean;
   screenShareEnabled?: boolean;
@@ -276,5 +276,69 @@ export interface RatingList {
   averageTeacher: number;
   totalRatings: number;
   ratings: Rating[];
+}
+
+// ============================================================================
+// Event Document Types
+// ============================================================================
+
+export interface EventDocument {
+  _id: string;
+  eventId: string;
+  title: string;
+  description?: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  s3Key: string;
+  isActive: boolean;
+  displayOrder: number;
+  uploadedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UploadDocumentOptions {
+  /** File object (browser) or Buffer (Node.js) */
+  file: File | Blob;
+  /** Document title (required) */
+  title: string;
+  /** Document description (optional) */
+  description?: string;
+  /** Active status (optional, default: true) */
+  isActive?: boolean;
+  /** Display order (optional) */
+  displayOrder?: number;
+}
+
+export interface UpdateDocumentParams {
+  /** New title (optional) */
+  title?: string;
+  /** New description (optional) */
+  description?: string;
+  /** Active status (optional) */
+  isActive?: boolean;
+  /** Display order (optional) */
+  displayOrder?: number;
+}
+
+export interface ListDocumentsOptions {
+  /** Include inactive documents (default: false) */
+  includeInactive?: boolean;
+}
+
+export interface DocumentListResponse {
+  documents: EventDocument[];
+  total: number;
+}
+
+export interface DocumentReorderItem {
+  documentId: string;
+  displayOrder: number;
+}
+
+export interface ProgressEvent {
+  loaded: number;
+  total: number;
 }
 
