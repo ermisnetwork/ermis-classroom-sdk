@@ -1,7 +1,12 @@
 /**
  * Event Documents API
  * Manages documents attached to events.
- * Supports: Upload, List, Get, Update, Delete, Reorder, and Download
+ * Supports: Upload, List, Get, Update, Delete
+ * 
+ * @version 1.1.0
+ * - Removed `reorder` endpoint and `order` field
+ * - Signed download URL now included in `getById` response
+ * - Removed separate `download` endpoint
  */
 
 import type { VCRHTTPClient } from '../client';
@@ -11,7 +16,6 @@ import type {
     UpdateDocumentParams,
     ListDocumentsOptions,
     DocumentListResponse,
-    DocumentReorderItem,
     ApiResponse,
 } from '../types';
 
@@ -63,9 +67,6 @@ export class DocumentsResource {
         if (options.isActive !== undefined) {
             formData.append('isActive', String(options.isActive));
         }
-        if (options.displayOrder !== undefined) {
-            formData.append('displayOrder', String(options.displayOrder));
-        }
 
         const response = await this.client.postFormData<ApiResponse<EventDocument>>(
             `/events/${eventId}/documents`,
@@ -75,18 +76,28 @@ export class DocumentsResource {
     }
 
     /**
-     * Get all documents for an event
+     * Get paginated list of documents for an event
      * @param eventId Event ID
-     * @param options Query options (includeInactive)
-     * @returns List of documents with total count
+     * @param options Query options (page, limit, includeInactive)
+     * @returns Document list response with data, message, and meta
      * 
      * @example
      * ```typescript
-     * // Get active documents only
-     * const { documents, total } = await client.documents.list(eventId);
+     * // Get first page with 10 items
+     * const response = await client.documents.list(eventId, {
+     *   page: 1,
+     *   limit: 10
+     * });
+     * 
+     * console.log('Message:', response.message);
+     * console.log('Documents:', response.data);
+     * console.log('Total:', response.meta.total);
+     * console.log('Total Pages:', response.meta.totalPages);
      * 
      * // Get all documents (including inactive)
-     * const { documents, total } = await client.documents.list(eventId, {
+     * const response = await client.documents.list(eventId, {
+     *   page: 1,
+     *   limit: 20,
      *   includeInactive: true
      * });
      * ```
@@ -96,27 +107,39 @@ export class DocumentsResource {
         options?: ListDocumentsOptions
     ): Promise<DocumentListResponse> {
         const params: Record<string, any> = {};
-        if (options?.includeInactive) {
+
+        if (options?.page !== undefined) {
+            params.page = options.page;
+        }
+        if (options?.limit !== undefined) {
+            params.limit = options.limit;
+        }
+        if (options?.includeInactive !== undefined) {
             params.includeInactive = options.includeInactive;
         }
 
-        const response = await this.client.get<ApiResponse<DocumentListResponse>>(
+        const response = await this.client.get<DocumentListResponse>(
             `/events/${eventId}/documents`,
             Object.keys(params).length > 0 ? params : undefined
         );
-        return response.data;
+        return response;
     }
 
     /**
      * Get a specific document by ID
+     * Includes signed download URL (valid for 24 hours)
      * @param eventId Event ID
      * @param documentId Document ID
-     * @returns Document details
+     * @returns Document details with downloadUrl
      * 
      * @example
      * ```typescript
      * const document = await client.documents.getById(eventId, documentId);
-     * console.log(document.title);
+     * console.log('Title:', document.title);
+     * console.log('Download URL:', document.downloadUrl);
+     * 
+     * // Open in new tab
+     * window.open(document.downloadUrl, '_blank');
      * ```
      */
     async getById(eventId: string, documentId: string): Promise<EventDocument> {
@@ -127,39 +150,22 @@ export class DocumentsResource {
     }
 
     /**
-     * Get a signed download URL for a document
-     * @param eventId Event ID
-     * @param documentId Document ID
-     * @returns Signed download URL (expires in 1 hour)
-     * 
-     * @example
-     * ```typescript
-     * const downloadUrl = await client.documents.getDownloadUrl(eventId, documentId);
-     * 
-     * // Browser - open in new tab
-     * window.open(downloadUrl, '_blank');
-     * ```
-     * 
-     * @note URL expires in 1 hour. Generate new URL when needed.
-     */
-    async getDownloadUrl(eventId: string, documentId: string): Promise<string> {
-        const response = await this.client.get<ApiResponse<{ url: string }>>(
-            `/events/${eventId}/documents/${documentId}/download`
-        );
-        return response.data.url;
-    }
-
-    /**
      * Update document metadata
      * @param eventId Event ID
      * @param documentId Document ID
-     * @param updates Fields to update
+     * @param updates Fields to update (title, description, isActive)
      * @returns Updated document
      * 
      * @example
      * ```typescript
+     * // Update title and description
      * const updated = await client.documents.update(eventId, documentId, {
      *   title: 'Updated Title',
+     *   description: 'Updated description with more details'
+     * });
+     * 
+     * // Toggle visibility
+     * await client.documents.update(eventId, documentId, {
      *   isActive: false
      * });
      * ```
@@ -177,56 +183,26 @@ export class DocumentsResource {
     }
 
     /**
-     * Delete a document
+     * Permanently delete a document
      * @param eventId Event ID
      * @param documentId Document ID
-     * @returns Deletion result with success status and message
      * 
      * @example
      * ```typescript
-     * const result = await client.documents.delete(eventId, documentId);
-     * console.log(result.message); // "Document deleted successfully"
+     * try {
+     *   await client.documents.delete(eventId, documentId);
+     *   console.log('Document deleted successfully');
+     * } catch (error) {
+     *   console.error('Failed to delete document:', error.message);
+     * }
      * ```
      */
     async delete(
         eventId: string,
         documentId: string
-    ): Promise<{ success: boolean; message: string }> {
-        const response = await this.client.delete<ApiResponse<{ message: string }>>(
+    ): Promise<void> {
+        await this.client.delete<ApiResponse<{ message: string }>>(
             `/events/${eventId}/documents/${documentId}`
         );
-        return {
-            success: true,
-            message: response.data?.message || 'Document deleted successfully',
-        };
-    }
-
-    /**
-     * Reorder multiple documents
-     * @param eventId Event ID
-     * @param orders Array of document IDs with their new display orders
-     * @returns Reorder result with success status and message
-     * 
-     * @example
-     * ```typescript
-     * await client.documents.reorder(eventId, [
-     *   { documentId: 'doc1', displayOrder: 1 },
-     *   { documentId: 'doc2', displayOrder: 2 },
-     *   { documentId: 'doc3', displayOrder: 3 }
-     * ]);
-     * ```
-     */
-    async reorder(
-        eventId: string,
-        orders: DocumentReorderItem[]
-    ): Promise<{ success: boolean; message: string }> {
-        const response = await this.client.patch<ApiResponse<{ message: string }>>(
-            `/events/${eventId}/documents/reorder`,
-            { orders }
-        );
-        return {
-            success: true,
-            message: response.data?.message || 'Documents reordered successfully',
-        };
     }
 }
