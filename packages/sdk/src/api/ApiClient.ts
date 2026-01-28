@@ -27,6 +27,8 @@ import {
   TokenResponse,
   UpdateParticipantRequest,
   UpdateParticipantResponse,
+  ConnectRoomRequest,
+  ConnectRoomResponse,
 } from '../types';
 
 /**
@@ -286,13 +288,26 @@ export class ApiClient {
   }
 
   /**
+   * Check if user is already in a room
+   */
+  async connectRoom(request: ConnectRoomRequest): Promise<ConnectRoomResponse> {
+    return await this.apiCall<ConnectRoomResponse>('/rooms/connect', 'POST', request);
+  }
+
+  /**
    * Join a room by room code
    */
-  async joinRoom(roomCode: string, appName: string = 'Ermis-Meeting'): Promise<JoinRoomResponse> {
-    return await this.apiCall<JoinRoomResponse>('/rooms/join', 'POST', {
+  async joinRoom(roomCode: string, appName: string = 'Ermis-Meeting', replace?: boolean): Promise<JoinRoomResponse> {
+    const body: any = {
       room_code: roomCode,
       app_name: appName,
-    });
+    };
+    
+    if (replace !== undefined) {
+      body.replace = replace;
+    }
+
+    return await this.apiCall<JoinRoomResponse>('/rooms/join', 'POST', body);
   }
 
   /**

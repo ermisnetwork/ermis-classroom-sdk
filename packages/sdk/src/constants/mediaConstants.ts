@@ -25,6 +25,8 @@ export const DATA_CHANNEL_IDS: Record<ChannelName, number> = {
   [ChannelName.SCREEN_SHARE_720P]: 4,
   [ChannelName.SCREEN_SHARE_1080P]: 5,
   [ChannelName.SCREEN_SHARE_AUDIO]: 6,
+  [ChannelName.LIVESTREAM_720P]: 7,
+  [ChannelName.LIVESTREAM_AUDIO]: 8,
 } as const;
 
 /**

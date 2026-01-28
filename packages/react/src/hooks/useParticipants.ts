@@ -36,6 +36,7 @@ export function useParticipants(): Participant[] {
 
 /**
  * Hook to access the local participant
+ * Finds the participant with isLocal = true from all streams
  * 
  * @returns The local participant or null if not in a room
  * 
@@ -49,12 +50,12 @@ export function useParticipants(): Participant[] {
  * ```
  */
 export function useLocalParticipant(): Participant | null {
-  const { participants, userId } = useErmisClassroom();
+  const { participants } = useErmisClassroom();
   
   return useMemo(() => {
-    if (!userId) return null;
-    return participants.get(userId) || null;
-  }, [participants, userId]);
+    // Find by isLocal flag since Map is keyed by streamId
+    return Array.from(participants.values()).find(p => p.isLocal) || null;
+  }, [participants]);
 }
 
 /**
@@ -85,26 +86,56 @@ export function useRemoteParticipants(): Participant[] {
 }
 
 /**
- * Hook to access a specific participant by user ID
+ * Hook to access a specific participant by stream ID
+ * Note: Map is keyed by streamId to support multi-stream per user
  * 
- * @param participantId - The user ID of the participant
+ * @param streamId - The stream ID of the participant
  * @returns The participant or null if not found
  * 
  * @example
  * ```tsx
- * function ParticipantInfo({ participantId }: { participantId: string }) {
- *   const participant = useParticipant(participantId);
+ * function ParticipantInfo({ streamId }: { streamId: string }) {
+ *   const participant = useParticipant(streamId);
  *   if (!participant) return <div>Participant not found</div>;
  *   return <div>{participant.name}</div>;
  * }
  * ```
  */
-export function useParticipant(participantId: string): Participant | null {
+export function useParticipant(streamId: string): Participant | null {
   const { participants } = useErmisClassroom();
   
   return useMemo(() => {
-    return participants.get(participantId) || null;
-  }, [participants, participantId]);
+    return participants.get(streamId) || null;
+  }, [participants, streamId]);
+}
+
+/**
+ * Hook to access all participants with the same user ID (all streams of a user)
+ * Use this to get all streams/tabs/devices of a single user
+ * 
+ * @param userId - The user ID to find all streams for
+ * @returns Array of participants with matching userId
+ * 
+ * @example
+ * ```tsx
+ * function UserStreams({ userId }: { userId: string }) {
+ *   const streams = useParticipantsByUserId(userId);
+ *   return (
+ *     <div>
+ *       {streams.map(p => (
+ *         <VideoTile key={p.streamId} participant={p} />
+ *       ))}
+ *     </div>
+ *   );
+ * }
+ * ```
+ */
+export function useParticipantsByUserId(userId: string): Participant[] {
+  const { participants } = useErmisClassroom();
+  
+  return useMemo(() => {
+    return Array.from(participants.values()).filter(p => p.userId === userId);
+  }, [participants, userId]);
 }
 
 /**

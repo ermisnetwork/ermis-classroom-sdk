@@ -2,6 +2,8 @@ import { signRoomServiceToken } from '../utils/signRoomServiceToken';
 import {
   BreakoutRequest,
   BreakoutRoomResponse,
+  ConnectRoomRequest,
+  ConnectRoomResponse,
   CreateRoomResponse,
   CustomEventRequest,
   EndRoomRequest,
@@ -94,6 +96,10 @@ export class RoomServiceClient {
 
   async joinRoom(request: JoinRoomRequest): Promise<ParticipantResponse> {
     return this.call<ParticipantResponse>('POST', '/meeting/rooms/join', request);
+  }
+
+  async connectRoom(request: ConnectRoomRequest): Promise<ConnectRoomResponse> {
+    return this.call<ConnectRoomResponse>('POST', '/meeting/rooms/connect', request);
   }
 
   async createBreakoutRooms(request: BreakoutRequest): Promise<BreakoutRoomResponse | null> {

@@ -12,6 +12,7 @@ export {
   useRemoteParticipants,
   useParticipant,
   useParticipantCount,
+  useParticipantsByUserId,
 } from './useParticipants';
 
 // Media device hooks
