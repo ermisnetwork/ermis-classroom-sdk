@@ -440,9 +440,17 @@ export class ErmisClient extends EventEmitter {
   }
 
   /**
+   * Check if user is already in a room
+   */
+  async connectRoom(roomCode: string): Promise<any> {
+    this._ensureAuthenticated();
+    return await this.apiClient.connectRoom({ room_code: roomCode });
+  }
+
+  /**
    * Join a room by code
    */
-  async joinRoom(roomCode: string, mediaStream: MediaStream | null = null): Promise<any> {
+  async joinRoom(roomCode: string, mediaStream: MediaStream | null = null, replace?: boolean): Promise<any> {
     this._ensureAuthenticated();
 
     try {
@@ -475,7 +483,7 @@ export class ErmisClient extends EventEmitter {
       this.state.currentRoom = room;
 
       // Join the room with optional custom media stream
-      const joinResult = await room.join(this.state.user!.id, mediaStream);
+      const joinResult = await room.join(this.state.user!.id, mediaStream, replace);
 
       this.state.rooms.set(room.id, room);
 
@@ -1038,6 +1046,8 @@ export class ErmisClient extends EventEmitter {
       'joiningBreakoutRoom',
       'roomEnded',
       'permissionUpdated',
+      'participantRemovedByHost',
+      'replaced',
       'error',
     ];
 

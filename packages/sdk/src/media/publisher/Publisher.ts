@@ -1125,13 +1125,13 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       // Wait for video config to be sent before announcing screen share
       log(`[Publisher] Waiting for screen share video config to be sent...`);
-      await this.waitForConfigSent(ChannelName.SCREEN_SHARE_720P, 2000);
+      await this.waitForConfigSent(ChannelName.SCREEN_SHARE_720P, 5000);
       log(`[Publisher] Screen share video config sent successfully`);
 
       // Also wait for audio config if we have audio
       if (hasAudio) {
         log(`[Publisher] Waiting for screen share audio config to be sent...`);
-        await this.waitForConfigSent(ChannelName.SCREEN_SHARE_AUDIO, 2000);
+        await this.waitForConfigSent(ChannelName.SCREEN_SHARE_AUDIO, 5000);
         log(`[Publisher] Screen share audio config sent successfully`);
       }
 

@@ -295,7 +295,8 @@ export type ServerEventType =
   | 'reconnected'
   | 'room_ended'
   | 'update_permission'
-  | 'removed';
+  | 'removed'
+  | 'replaced';
 
 /**
  * Media channel types (matching server MediaChannel enum)
@@ -330,7 +331,7 @@ export interface ServerEventBase {
   type: ServerEventType;
   data?: unknown;
   /** Timestamp */
-  timestamp?: number;
+  timestamp?: number | string;
 }
 
 /**
@@ -354,6 +355,7 @@ export interface LeaveEvent extends ServerEventBase {
   type: 'leave';
   participant: {
     user_id: string;
+    stream_id?: string; // Added for multi-stream per user support
   };
 }
 
@@ -382,11 +384,23 @@ export interface RemovedEvent extends ServerEventBase {
 }
 
 /**
+ * Replaced event
+ */
+export interface ReplacedEvent extends ServerEventBase {
+  type: 'replaced';
+  participant: {
+    user_id: string;
+    stream_id?: string;
+  };
+  timestamp: string; // User said "timestamp: DateTime<Utc>" which is string in JSON
+}
+
+/**
  * Server event union type
  * Only includes events from ServerMeetingEvent (Rust server)
  * Note: Chat/message events are handled separately via API/WebSocket
  */
-export type ServerEvent = JoinEvent | LeaveEvent | UpdatePermissionEvent | RemovedEvent | ServerEventBase;
+export type ServerEvent = JoinEvent | LeaveEvent | UpdatePermissionEvent | RemovedEvent | ReplacedEvent | ServerEventBase;
 
 /**
  * Chat message event (handled separately, not part of ServerMeetingEvent)
@@ -515,6 +529,14 @@ export interface RoomEventMap {
     room: any;
     participant: Participant;
     reason: string;
+    isLocal: boolean;
+  };
+
+  /** Participant replaced */
+  replaced: {
+    room: any;
+    participant: Participant;
+    timestamp: string;
     isLocal: boolean;
   };
 

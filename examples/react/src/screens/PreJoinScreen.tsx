@@ -47,6 +47,7 @@ export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
     requestRecordingPermissions,
     isRecordingPermissionGranted,
     releaseRecordingPermissions,
+    connectRoom,
   } = useErmisClassroom()
 
   // Start preview stream on mount
@@ -87,7 +88,23 @@ export function PreJoinScreen({ onJoined }: PreJoinScreenProps) {
     setError(null)
 
     try {
-      await joinRoom(roomCode.trim(), previewStream ?? undefined)
+      // Check if user is already in a room
+      const { is_in_room } = await connectRoom(roomCode.trim())
+      
+      let replace = false
+      if (is_in_room) {
+        const confirmed = window.confirm(
+          "You are already in a meeting room. Do you want to leave it and join this one?"
+        )
+        if (confirmed) {
+          replace = true
+        } else {
+          setIsLoading(false)
+          return
+        }
+      }
+
+      await joinRoom(roomCode.trim(), previewStream ?? undefined, replace)
       onJoined()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to join room")

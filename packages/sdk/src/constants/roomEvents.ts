@@ -18,6 +18,7 @@ export const ROOM_EVENTS = {
   PARTICIPANT_RECONNECTED: 'participantReconnected',
   PARTICIPANT_REMOVED_BY_HOST: 'participantRemovedByHost',
   PERMISSION_UPDATED: 'permissionUpdated',
+  REPLACED: 'replaced',
 
   // Media status events
   LOCAL_STREAM_READY: 'localStreamReady',

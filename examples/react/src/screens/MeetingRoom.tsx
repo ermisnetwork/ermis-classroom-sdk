@@ -14,7 +14,7 @@ import {
 } from "@tabler/icons-react"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { cn } from "@/lib/utils"
-import { log } from "@ermisnetwork/ermis-classroom-sdk"
+import { log, PinType } from "@ermisnetwork/ermis-classroom-sdk"
 
 interface MeetingRoomProps {
   onLeft: () => void
@@ -537,6 +537,7 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     startRecording,
     stopRecording,
     isRecordingActive,
+    onReplaced,
   } = useErmisClassroom()
 
   const {
@@ -555,6 +556,28 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     })
     return unsubscribe
   }, [onRoomEnded, onLeft])
+
+  // Listen for replaced event
+  useEffect(() => {
+    const unsubscribe = onReplaced((data) => {
+      log('[MeetingRoom] Replaced by new session:', data)
+      setReplacedState({
+        timestamp: data.timestamp
+      })
+
+      // Auto leave after 3s
+      setTimeout(async () => {
+        try {
+          await leaveRoom()
+        } catch (e) {
+          console.error('[MeetingRoom] Error leaving after replaced:', e)
+        } finally {
+          onLeft()
+        }
+      }, 3000)
+    })
+    return unsubscribe
+  }, [onReplaced, onLeft, leaveRoom])
 
   // Get local participant ban status
   const localParticipant = useMemo(() => {
@@ -579,6 +602,11 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
   // Kick notification state
   const [kickedState, setKickedState] = useState<{
     reason: string
+  } | null>(null)
+
+  // Replaced notification state
+  const [replacedState, setReplacedState] = useState<{
+    timestamp: string
   } | null>(null)
 
   // Helper function to generate request ID
@@ -606,12 +634,24 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
       }
 
       // Member receives approval
-      if (eventData?.type === 'permission_approved' && !isRoomOwner) {
-        if (eventData.permissionType === 'screenShare' && eventData.requestId === pendingRequestId) {
+      if (eventData?.type === 'permission_approved') {
+        // If we are the requester (member)
+        if (!isRoomOwner && eventData.permissionType === 'screenShare' && eventData.requestId === pendingRequestId) {
           setScreenShareApproved(true)
           setPendingScreenShareRequest(false)
           setPendingRequestId(null)
           log('[MeetingRoom] Screen share permission approved!')
+        }
+        
+        // If we are a host (checking for sync with other host tabs)
+        if (isRoomOwner && eventData.permissionType === 'screenShare') {
+           setIncomingPermissionRequest((prev) => {
+             if (prev && prev.requestId === eventData.requestId) {
+               // log('[MeetingRoom] Permission accepted by another host session, dismissing popup');
+               return null;
+             }
+             return prev;
+           });
         }
       }
     })
@@ -772,9 +812,10 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
   const remotePinnedPinType = currentRoom?.pinnedPinType || null
 
   // Generate the correct tile ID based on pinType
-  // pinType 2 = ScreenShare, so tile ID should be "screen-{userId}"
+  // pinType 2 = ScreenShare, so tile ID should be "screen-{streamId}"
+  // Tiles use streamId as their ID, so we must use streamId here too
   const remotePinnedTileId = remotePinnedParticipant
-    ? (remotePinnedPinType === 2 ? `screen-${remotePinnedParticipant.userId}` : remotePinnedParticipant.userId)
+    ? (remotePinnedPinType === PinType.ScreenShare ? `screen-${remotePinnedParticipant.streamId}` : remotePinnedParticipant.streamId)
     : null
 
   // Sync "everyone" pin state from server
@@ -830,8 +871,9 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
   }, [participants])
 
   const totalParticipants = useMemo(() => {
-    return 1 + participantList.filter(p => p.userId !== userId).length
-  }, [participantList, userId])
+    // Count local (1) + remote participants (using isLocal flag for multi-stream support)
+    return 1 + participantList.filter(p => !p.isLocal).length
+  }, [participantList])
 
   const canPin = totalParticipants > 1
 
@@ -893,25 +935,37 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         })
       })
 
+    // Find local participant from the list (using isLocal flag for multi-stream support)
+    const localParticipant = participantList.find(p => p.isLocal)
+    
+    // Display name format: userId (streamId) for multi-stream clarity
+    const localDisplayName = localParticipant 
+      ? `${localParticipant.userId} (${localParticipant.streamId || 'local'})`
+      : (userId || 'You')
+    
     tiles.push({
-      id: userId || 'local',
+      id: localParticipant?.streamId || userId || 'local',
       stream: localStream,
-      name: userId || 'You',
+      name: localDisplayName,
       type: 'participant',
       isLocal: true,
       isMuted: !micEnabled,
       isVideoOff: !videoEnabled,
-      isHandRaised: false,
+      isHandRaised: localParticipant?.isHandRaised || false,
       isPinned: false, // Will be calculated in render
     })
 
+    // Filter remote participants using isLocal flag (not userId) for multi-stream support
     participantList
-      .filter((p) => p.userId !== userId)
+      .filter((p) => !p.isLocal)
       .forEach((participant) => {
+        // Display name format: userId (streamId) for multi-stream clarity
+        const displayName = `${participant.userId} (${participant.streamId || 'unknown'})`
+        
         tiles.push({
-          id: participant.userId,
-          stream: remoteStreams.get(participant.userId) || null,
-          name: participant.userId,
+          id: participant.streamId,
+          stream: remoteStreams.get(participant.streamId) || null,
+          name: displayName,
           type: 'participant',
           isLocal: false,
           isMuted: !participant.isAudioEnabled,
@@ -1313,6 +1367,39 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
               </p>
               <Button
                 variant="destructive"
+                className="w-full"
+                onClick={handleLeave}
+              >
+                Leave Now
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Replaced Notification Modal */}
+      {replacedState && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-in fade-in duration-200">
+          <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl border border-orange-500/50">
+            <div className="flex flex-col items-center text-center">
+              <div className="h-12 w-12 rounded-full bg-orange-900/50 flex items-center justify-center mb-4">
+                <IconDoorExit className="h-6 w-6 text-orange-500" />
+              </div>
+              <h3 className="text-xl font-semibold text-white mb-2">
+                Session Replaced
+              </h3>
+              <p className="text-slate-300 mb-6">
+                You have joined this meeting from another tab or device.
+                <br />
+                <span className="text-sm text-slate-500 mt-2 block">
+                  ({replacedState.timestamp})
+                </span>
+              </p>
+              <p className="text-sm text-slate-500 mb-6">
+                Leaving automatically in a few seconds...
+              </p>
+              <Button
+                variant="secondary"
                 className="w-full"
                 onClick={handleLeave}
               >

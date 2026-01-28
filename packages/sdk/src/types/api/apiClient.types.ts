@@ -174,6 +174,8 @@ export interface JoinRoomRequest {
   parent_room_id?: string;
   /** Sub room ID */
   sub_room_id?: string;
+  /** Replace existing session */
+  replace?: boolean;
 }
 
 /**
@@ -192,6 +194,22 @@ export interface JoinRoomResponse {
   role?: string;
   /** Joined timestamp */
   joined_at?: string;
+}
+
+/**
+ * Connect room request
+ */
+export interface ConnectRoomRequest {
+  /** Room code */
+  room_code?: string;
+}
+
+/**
+ * Connect room response
+ */
+export interface ConnectRoomResponse {
+  /** Whether user is already in room */
+  is_in_room: boolean;
 }
 
 /**

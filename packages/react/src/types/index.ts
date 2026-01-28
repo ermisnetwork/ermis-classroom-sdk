@@ -169,7 +169,8 @@ export interface ErmisClassroomContextValue {
 
   // Actions
   authenticate: (userId: string) => Promise<void>;
-  joinRoom: (code: string, customStream?: MediaStream) => Promise<void>;
+  joinRoom: (code: string, customStream?: MediaStream, replace?: boolean) => Promise<void>;
+  connectRoom: (roomCode: string) => Promise<{ is_in_room: boolean }>;
   leaveRoom: () => Promise<void>;
   /** End the meeting room (only available for room owner) */
   endRoom: () => Promise<void>;
@@ -220,6 +221,7 @@ export interface ErmisClassroomContextValue {
 
   /** Register callback for when a participant is removed by host (including self) */
   onParticipantRemoved: (callback: (data: { participant: Participant; reason: string; isLocal: boolean }) => void) => () => void;
+  onReplaced: (callback: (data: { room: any, timestamp: string }) => void) => () => void;
   // Recording actions
   /** Start recording - captures current tab and sends to server */
   startRecording: () => Promise<void>;
