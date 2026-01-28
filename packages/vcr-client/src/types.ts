@@ -282,59 +282,133 @@ export interface RatingList {
 // Event Document Types
 // ============================================================================
 
+/**
+ * Document type categories
+ */
+export enum DocumentType {
+  PDF = 'pdf',
+  DOC = 'doc',
+  DOCX = 'docx',
+  XLS = 'xls',
+  XLSX = 'xlsx',
+  PPT = 'ppt',
+  PPTX = 'pptx',
+  IMAGE = 'image',
+  VIDEO = 'video',
+  AUDIO = 'audio',
+  OTHER = 'other'
+}
+
+/**
+ * Event Document response object
+ */
 export interface EventDocument {
+  /** Unique document ID */
   _id: string;
+
+  /** Event ID that this document belongs to */
   eventId: string;
+
+  /** Document title/name */
   title: string;
+
+  /** Document description (optional) */
   description?: string;
-  fileName: string;
+
+  /** Original file name */
+  originalFileName: string;
+
+  /** File size in bytes */
   fileSize: number;
+
+  /** MIME type of the file */
   mimeType: string;
-  s3Key: string;
+
+  /** Document type category */
+  documentType: DocumentType;
+
+  /** Whether the document is active/visible */
   isActive: boolean;
-  displayOrder: number;
-  uploadedBy: string;
+
+  /** Temporary signed download URL (valid for 24 hours) */
+  downloadUrl?: string;
+
+  /** Created at timestamp */
   createdAt: string;
+
+  /** Updated at timestamp */
   updatedAt: string;
 }
 
+/**
+ * Upload document request
+ */
 export interface UploadDocumentOptions {
-  /** File object (browser) or Buffer (Node.js) */
-  file: File | Blob;
   /** Document title (required) */
   title: string;
-  /** Document description (optional) */
+
+  /** Document description */
   description?: string;
-  /** Active status (optional, default: true) */
+
+  /** Whether the document is active/visible (default: true) */
   isActive?: boolean;
-  /** Display order (optional) */
-  displayOrder?: number;
+
+  /** File to upload (File, Blob, or Buffer) */
+  file: File | Blob;
 }
 
+/**
+ * Update document request
+ */
 export interface UpdateDocumentParams {
-  /** New title (optional) */
+  /** New document title */
   title?: string;
-  /** New description (optional) */
+
+  /** New document description */
   description?: string;
-  /** Active status (optional) */
+
+  /** Active/visible status */
   isActive?: boolean;
-  /** Display order (optional) */
-  displayOrder?: number;
 }
 
+/**
+ * Query parameters for listing documents
+ */
 export interface ListDocumentsOptions {
+  /** Page number (1-indexed, default: 1) */
+  page?: number;
+
+  /** Number of items per page (default: 10) */
+  limit?: number;
+
   /** Include inactive documents (default: false) */
   includeInactive?: boolean;
 }
 
+/**
+ * Document list response with pagination
+ */
 export interface DocumentListResponse {
-  documents: EventDocument[];
-  total: number;
-}
+  /** Success message */
+  message: string;
 
-export interface DocumentReorderItem {
-  documentId: string;
-  displayOrder: number;
+  /** Array of documents */
+  data: EventDocument[];
+
+  /** Pagination metadata */
+  meta: {
+    /** Total count of documents */
+    total: number;
+
+    /** Current page number (1-indexed) */
+    page: number;
+
+    /** Number of items per page */
+    limit: number;
+
+    /** Total number of pages */
+    totalPages: number;
+  };
 }
 
 export interface ProgressEvent {

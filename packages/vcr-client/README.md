@@ -1,6 +1,6 @@
 # VCR Integration SDK (API Key) – `@ermisnetwork/vcr-client`
 
-**Version:** 1.0.0  
+**Version:** 1.1.0  
 **Last Updated:** 2026-01-27
 
 TypeScript SDK cho VCR API dùng **API Key** (header `x-api-key`). Hỗ trợ quản lý **Events**, **Registrants** (kèm moderation), **Rewards**, **Ratings** (read-only), và **Documents**.
@@ -185,17 +185,45 @@ Quản lý tài liệu/file đính kèm cho events.
 | Method | Endpoint | Mô tả |
 |--------|----------|-------|
 | `upload(eventId, options, onProgress?)` | `POST /events/:eventId/documents` | Upload tài liệu |
-| `list(eventId, options?)` | `GET /events/:eventId/documents` | Danh sách tài liệu |
-| `getById(eventId, documentId)` | `GET /events/:eventId/documents/:id` | Lấy tài liệu theo ID |
-| `getDownloadUrl(eventId, documentId)` | `GET .../download` | Lấy URL download (hết hạn sau 1 giờ) |
+| `list(eventId, options?)` | `GET /events/:eventId/documents` | Danh sách tài liệu (phân trang) |
+| `getById(eventId, documentId)` | `GET /events/:eventId/documents/:id` | Lấy tài liệu theo ID (bao gồm signed download URL) |
 | `update(eventId, documentId, updates)` | `PATCH /events/:eventId/documents/:id` | Cập nhật metadata |
 | `delete(eventId, documentId)` | `DELETE /events/:eventId/documents/:id` | Xóa tài liệu |
-| `reorder(eventId, orders)` | `PATCH .../reorder` | Sắp xếp lại thứ tự |
+
+#### Document Types
+
+```typescript
+enum DocumentType {
+  PDF = 'pdf',
+  DOC = 'doc',
+  DOCX = 'docx',
+  XLS = 'xls',
+  XLSX = 'xlsx',
+  PPT = 'ppt',
+  PPTX = 'pptx',
+  IMAGE = 'image',
+  VIDEO = 'video',
+  AUDIO = 'audio',
+  OTHER = 'other'
+}
+```
+
+#### Supported File Types
+
+| Type | Extensions | MIME Types |
+|------|------------|------------|
+| PDF | `.pdf` | `application/pdf` |
+| Word | `.doc`, `.docx` | `application/msword`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document` |
+| Excel | `.xls`, `.xlsx` | `application/vnd.ms-excel`, `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
+| PowerPoint | `.ppt`, `.pptx` | `application/vnd.ms-powerpoint`, `application/vnd.openxmlformats-officedocument.presentationml.presentation` |
+| Images | `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp` | `image/*` |
+| Video | `.mp4`, `.webm`, `.mov` | `video/*` |
+| Audio | `.mp3`, `.wav`, `.ogg` | `audio/*` |
 
 **Ví dụ:**
 
 ```typescript
-import type { UploadDocumentOptions, EventDocument } from '@ermisnetwork/vcr-client';
+import type { UploadDocumentOptions, EventDocument, DocumentType } from '@ermisnetwork/vcr-client';
 
 // Upload (Browser)
 const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -214,30 +242,63 @@ const document = await client.documents.upload(
   }
 );
 
-// Danh sách tài liệu
-const { documents, total } = await client.documents.list(eventId);
+// Danh sách tài liệu với phân trang
+const response = await client.documents.list(eventId, {
+  page: 1,
+  limit: 10,
+});
+
+console.log('Message:', response.message);
+console.log('Documents:', response.data);
+console.log('Total:', response.meta.total);
+console.log('Total Pages:', response.meta.totalPages);
+
+// Lặp qua tất cả các trang
+let currentPage = 1;
+let hasMore = true;
+
+while (hasMore) {
+  const res = await client.documents.list(eventId, {
+    page: currentPage,
+    limit: 20
+  });
+  
+  // Process documents
+  res.data.forEach(doc => {
+    console.log(`${doc.title} (${doc.documentType})`);
+  });
+  
+  hasMore = currentPage < res.meta.totalPages;
+  currentPage++;
+}
 
 // Bao gồm cả tài liệu đã ẩn
-const { documents: allDocs } = await client.documents.list(eventId, {
+const { data: allDocs } = await client.documents.list(eventId, {
   includeInactive: true,
 });
 
-// Download
-const downloadUrl = await client.documents.getDownloadUrl(eventId, document._id);
-window.open(downloadUrl, '_blank');
+// Lấy tài liệu với signed download URL
+const doc = await client.documents.getById(eventId, document._id);
+console.log('Title:', doc.title);
+console.log('Download URL:', doc.downloadUrl); // Valid for 24 hours
+
+// Download file
+window.open(doc.downloadUrl, '_blank');
+
+// Hoặc programmatic download
+const response = await fetch(doc.downloadUrl!);
+const blob = await response.blob();
+const url = window.URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = doc.originalFileName;
+a.click();
 
 // Cập nhật
 await client.documents.update(eventId, document._id, {
   title: 'Tiêu đề mới',
   isActive: false, // Ẩn tài liệu
 });
-
-// Sắp xếp lại
-await client.documents.reorder(eventId, [
-  { documentId: 'doc1', displayOrder: 1 },
-  { documentId: 'doc2', displayOrder: 2 },
-  { documentId: 'doc3', displayOrder: 3 },
-]);
 
 // Xóa
 await client.documents.delete(eventId, document._id);
@@ -318,11 +379,11 @@ import type {
   
   // Documents
   EventDocument,
+  DocumentType,
   UploadDocumentOptions,
   UpdateDocumentParams,
   ListDocumentsOptions,
   DocumentListResponse,
-  DocumentReorderItem,
   ProgressEvent,
   
   // Rewards
@@ -383,12 +444,23 @@ try {
 }
 ```
 
+### Common Errors
+
+| Status Code | Error | Description |
+|-------------|-------|-------------|
+| 400 | Bad Request | Invalid request body or parameters |
+| 401 | Unauthorized | Missing or invalid authentication |
+| 403 | Forbidden | Insufficient permissions |
+| 404 | Not Found | Event or document not found |
+| 413 | Payload Too Large | File size exceeds limit (2MB default) |
+| 415 | Unsupported Media Type | File type not supported |
+
 ---
 
 ## 📊 Ví dụ End-to-End
 
 ```typescript
-import { createVCRClient } from '@ermisnetwork/vcr-client';
+import { createVCRClient, VCRError } from '@ermisnetwork/vcr-client';
 import type { CreateEventParams, CreateRegistrantParams } from '@ermisnetwork/vcr-client';
 
 async function main() {
@@ -425,22 +497,39 @@ async function main() {
   // 4. Upload tài liệu
   const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
   if (fileInput.files?.length) {
-    const document = await client.documents.upload(event._id, {
-      file: fileInput.files[0],
-      title: 'Bài giảng',
-    });
-    console.log('Uploaded document:', document._id);
+    try {
+      const document = await client.documents.upload(event._id, {
+        file: fileInput.files[0],
+        title: 'Bài giảng',
+      });
+      console.log('Uploaded document:', document._id);
+    } catch (error) {
+      if (error instanceof VCRError && error.statusCode === 413) {
+        console.error('File is too large. Max size: 2MB');
+      } else {
+        throw error;
+      }
+    }
   }
 
-  // 5. Lấy danh sách tài liệu
-  const { documents, total } = await client.documents.list(event._id);
-  console.log(`Total documents: ${total}`);
+  // 5. Lấy danh sách tài liệu với phân trang
+  const { data: documents, meta } = await client.documents.list(event._id, {
+    page: 1,
+    limit: 10,
+  });
+  console.log(`Documents: ${documents.length} of ${meta.total}`);
 
-  // 6. Moderation
+  // 6. Lấy document với download URL
+  if (documents.length > 0) {
+    const doc = await client.documents.getById(event._id, documents[0]._id);
+    console.log('Download URL:', doc.downloadUrl);
+  }
+
+  // 7. Moderation
   await client.registrants.toggleChat(event._id, registrant._id, true);
   console.log('Blocked chat for registrant');
 
-  // 7. Xem thống kê
+  // 8. Xem thống kê
   const stats = await client.events.getParticipantStats(event._id);
   console.log('Participant stats:', stats);
 }
@@ -461,6 +550,31 @@ main().catch(console.error);
 - In-room actions (phát thưởng trong phòng, timer, whiteboard...)
 - Thay đổi quyền realtime
 - Các endpoint cần user session context
+
+---
+
+## 📝 Best Practices
+
+1. **File Size**: Keep files under 2MB for optimal upload performance
+2. **Pagination**: Always use pagination for large document lists
+3. **Error Handling**: Implement proper error handling for network issues
+4. **Download URLs**: Download URLs are valid for 24 hours - get fresh URL if expired
+5. **Inactive Documents**: Use `isActive: false` instead of deleting for soft-delete
+
+---
+
+## 📜 Changelog
+
+### v1.1.0 (Current)
+- Simplified API: Removed `reorder` endpoint and `order` field
+- Signed download URL now included in `getById` response
+- Removed separate `download` endpoint
+- Added pagination support for document listing (`page`, `limit`)
+- Response format: `{ message, data, meta }`
+
+### v1.0.0
+- Initial release with upload, list, get, update, delete
+- Pagination support with `page`, `limit`, `includeInactive`
 
 ---
 
