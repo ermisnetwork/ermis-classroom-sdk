@@ -10,7 +10,7 @@ import { SubRoom } from "./SubRoom";
 import { Publisher } from "../media/publisher/Publisher";
 import { Subscriber } from "../media/subscriber/Subscriber";
 import { AudioMixer } from "../media/audioMixer/AudioMixer";
-import { StreamTypes, PinType } from "../types/media/publisher.types";
+import { StreamTypes, PinType, ChannelName } from "../types/media/publisher.types";
 import type {
   RoomConfig,
   RoomType,
@@ -42,6 +42,8 @@ export class Room extends EventEmitter {
   // Configuration
   private apiClient: any; // TODO: Type this properly when ApiClient is converted
   private mediaConfig: MediaConfig;
+  private videoResolutions?: ChannelName[];
+  private subscriberInitQuality?: "video_360p" | "video_720p" | "video_1080p";
 
   // Participants management
   participants = new Map<string, Participant>(); // streamId -> Participant
@@ -80,6 +82,8 @@ export class Room extends EventEmitter {
     this.ownerId = config.ownerId;
     this.apiClient = config.apiClient;
     this.mediaConfig = config.mediaConfig;
+    this.videoResolutions = config.videoResolutions;
+    this.subscriberInitQuality = config.subscriberInitQuality;
   }
 
   /**
@@ -759,7 +763,7 @@ export class Room extends EventEmitter {
     const participantByStream = this.getParticipantByStreamId(targetId);
     if (participantByStream) {
       return this.updateParticipantPermission(participantByStream.streamId, {
-        can_publish_sources: [["video_360p", false], ["video_720p", false]],
+        can_publish_sources: [["video_360p", false], ["video_720p", false], ["video_1080p", false]],
       });
     }
 
@@ -768,7 +772,7 @@ export class Room extends EventEmitter {
     if (participants.length > 0) {
       return Promise.all(participants.map(p => 
         this.updateParticipantPermission(p.streamId, {
-          can_publish_sources: [["video_360p", false], ["video_720p", false]],
+          can_publish_sources: [["video_360p", false], ["video_720p", false], ["video_1080p", false]],
         })
       ));
     }
@@ -785,7 +789,7 @@ export class Room extends EventEmitter {
     const participantByStream = this.getParticipantByStreamId(targetId);
     if (participantByStream) {
       return this.updateParticipantPermission(participantByStream.streamId, {
-        can_publish_sources: [["video_360p", true], ["video_720p", true]],
+        can_publish_sources: [["video_360p", true], ["video_720p", true], ["video_1080p", true]],
       });
     }
 
@@ -794,7 +798,7 @@ export class Room extends EventEmitter {
     if (participants.length > 0) {
       return Promise.all(participants.map(p => 
         this.updateParticipantPermission(p.streamId, {
-          can_publish_sources: [["video_360p", true], ["video_720p", true]],
+          can_publish_sources: [["video_360p", true], ["video_720p", true], ["video_1080p", true]],
         })
       ));
     }
@@ -1603,6 +1607,7 @@ export class Room extends EventEmitter {
       useWebRTC: useWebRTC,
       webRtcHost: this.mediaConfig.hostNode,
       permissions: this.localParticipant.permissions,
+      videoResolutions: this.videoResolutions,
       onStatusUpdate: (_message: string, isError?: boolean) => {
         this.localParticipant?.setConnectionStatus(
           isError ? "failed" : "connected",
@@ -1651,6 +1656,7 @@ export class Room extends EventEmitter {
       },
       audioWorkletUrl: "/workers/audio-worklet.js",
       mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
+      initialQuality: this.subscriberInitQuality,
     });
 
     // Add to audio mixer

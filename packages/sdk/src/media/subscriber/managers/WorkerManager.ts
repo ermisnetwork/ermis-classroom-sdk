@@ -50,7 +50,8 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   async init(
     channelPort: MessagePort,
     subscribeType: SubscribeType = "camera",
-    audioEnabled: boolean = true
+    audioEnabled: boolean = true,
+    initialQuality?: QualityLevel
   ): Promise<void> {
     try {
       // Create worker with cache busting
@@ -79,6 +80,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
           subscriberId: this.subscriberId,
           subscribeType: subscribeType,
           audioEnabled: audioEnabled, // Pass audio enabled state to worker
+          initialQuality: initialQuality,
           port: channelPort,
         },
         [channelPort]

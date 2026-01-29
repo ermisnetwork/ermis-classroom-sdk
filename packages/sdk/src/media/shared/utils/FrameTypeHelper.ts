@@ -40,6 +40,9 @@ export class FrameTypeHelper {
       case ChannelName.VIDEO_720P:
         return isKeyFrame ? FrameType.CAM_720P_KEY : FrameType.CAM_720P_DELTA;
 
+      case ChannelName.VIDEO_1080P:
+        return isKeyFrame ? FrameType.CAM_1080P_KEY : FrameType.CAM_1080P_DELTA;
+
       case ChannelName.SCREEN_SHARE_720P:
       case ChannelName.SCREEN_SHARE_1080P:
         return isKeyFrame
@@ -115,6 +118,7 @@ export class FrameTypeHelper {
     return (
       frameType === FrameType.CAM_360P_KEY ||
       frameType === FrameType.CAM_720P_KEY ||
+      frameType === FrameType.CAM_1080P_KEY ||
       frameType === FrameType.SCREEN_SHARE_KEY ||
       frameType === FrameType.LIVESTREAM_KEY
     );
