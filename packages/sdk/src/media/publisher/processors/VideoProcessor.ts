@@ -1,7 +1,7 @@
 import EventEmitter from "../../../events/EventEmitter";
+import { ChannelName } from "../../../types/media/publisher.types";
 import type {
   VideoEncoderConfig,
-  ChannelName,
   SubStream,
 } from "../../../types/media/publisher.types";
 import { VideoEncoderManager } from "../managers/VideoEncoderManager";

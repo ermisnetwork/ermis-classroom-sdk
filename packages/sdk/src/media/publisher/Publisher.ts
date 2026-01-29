@@ -131,7 +131,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.subStreams = getSubStreams(config.streamType || "camera", {
       can_publish: this.options.permissions.can_publish,
       can_publish_sources: this.options.permissions.can_publish_sources,
-    });
+    }, config.videoResolutions);
     this.permissions = this.options.permissions;
 
     if (config.onStatusUpdate) {
@@ -379,11 +379,17 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.streamManager = new StreamManager(false, this.options.streamId);
 
     // Set publisher state before initializing streams so correct state is sent to server
+    // Include publish_channels to notify server about which channels we will publish
+    const publishChannels = this.subStreams
+      .map(s => s.channelName as string)
+      .filter(ch => ch !== ChannelName.MEETING_CONTROL);
+
     this.streamManager.setPublisherState({
       hasMic: this.hasAudio,
       hasCamera: this.hasVideo,
       isMicOn: this.audioEnabled,
       isCameraOn: this.videoEnabled,
+      publishChannels,
     });
 
     // StreamManager now emits to globalEventBus directly - no need to re-emit
@@ -396,7 +402,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         // MICROPHONE only if we have audio
         if (channelName === ChannelName.MICROPHONE) return this.hasAudio;
         // Video channels only if we have video
-        if (channelName === ChannelName.VIDEO_360P || channelName === ChannelName.VIDEO_720P) return this.hasVideo;
+        if (channelName === ChannelName.VIDEO_360P || channelName === ChannelName.VIDEO_720P || channelName === ChannelName.VIDEO_1080P) return this.hasVideo;
         // Allow other channels by default
         return true;
       });
@@ -427,11 +433,17 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     this.streamManager = new StreamManager(true, this.options.streamId);
 
     // Set publisher state before initializing streams so correct state is sent to server
+    // Include publish_channels to notify server about which channels we will publish
+    const publishChannels = this.subStreams
+      .map(s => s.channelName as string)
+      .filter(ch => ch !== ChannelName.MEETING_CONTROL);
+
     this.streamManager.setPublisherState({
       hasMic: this.hasAudio,
       hasCamera: this.hasVideo,
       isMicOn: this.audioEnabled,
       isCameraOn: this.videoEnabled,
+      publishChannels,
     });
 
     // StreamManager now emits to globalEventBus directly - no need to re-emit
@@ -455,7 +467,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         // MICROPHONE only if we have audio
         if (channelName === ChannelName.MICROPHONE) return this.hasAudio;
         // Video channels only if we have video
-        if (channelName === ChannelName.VIDEO_360P || channelName === ChannelName.VIDEO_720P) return this.hasVideo;
+        if (channelName === ChannelName.VIDEO_360P || channelName === ChannelName.VIDEO_720P || channelName === ChannelName.VIDEO_1080P) return this.hasVideo;
         // Allow other channels by default
         return true;
       });
