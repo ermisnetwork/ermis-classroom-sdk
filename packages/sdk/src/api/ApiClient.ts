@@ -97,6 +97,8 @@ export class ApiClient {
             ["mic_48k", true],
             ["video_360p", true],
             ["video_720p", true],
+            ["video_1080p", true],
+            ['video_1440p', true],
             ["screen_share_720p", true],
             ["screen_share_1080p", true],
             ["screen_share_audio", true],

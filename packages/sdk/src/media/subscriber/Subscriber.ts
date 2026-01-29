@@ -102,6 +102,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     streamOutputEnabled: boolean;
     streamMode: StreamMode;
     audioEnabled: boolean;
+    initialQuality: "video_360p" | "video_720p" | "video_1080p" | "video_1440p";
     onStatus?: (msg: string, isError: boolean) => void;
   };
   private subscriberId: string;
@@ -156,6 +157,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
           : true,
       streamMode: config.streamMode || "single",
       audioEnabled: config.audioEnabled ?? true,
+      initialQuality: config.initialQuality || "video_360p",
       onStatus: config.onStatus,
     };
 
@@ -358,7 +360,12 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       if (!this.workerManager) {
         throw new Error("Worker manager not initialized");
       }
-      await this.workerManager.init(channel.port2, this.subscribeType, this.config.audioEnabled);
+      await this.workerManager.init(
+        channel.port2,
+        this.subscribeType,
+        this.config.audioEnabled,
+        this.config.initialQuality
+      );
 
       // Initialize audio system only if audio is enabled for this subscription
       // For screen share without audio, skip audio initialization to avoid "Audio mixer not set" error
@@ -381,6 +388,16 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
       // Attach streams to worker (WebTransport, WebRTC, or WebSocket) with retry
       await this.attachStreamsWithRetry();
+
+      // Switch to initial quality if not default (video_360p)
+      // Moved to worker init: initialQuality is now passed to worker during initialization
+      // so it sends the correct quality in init_channel_stream command
+      /*
+      if (this.config.initialQuality !== "video_360p") {
+        log(`[Subscriber] Switching to initial quality: ${this.config.initialQuality}`);
+        this.workerManager.switchBitrate(this.config.initialQuality);
+      }
+      */
 
       this.isStarted = true;
       this.updateConnectionStatus("connected");
@@ -464,7 +481,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   /**
    * Switch video quality/bitrate
    */
-  switchBitrate(quality: "360p" | "720p"): void {
+  switchBitrate(quality: "video_360p" | "video_720p" | "video_1080p" | "video_1440p"): void {
     if (!this.workerManager) {
       return;
     }

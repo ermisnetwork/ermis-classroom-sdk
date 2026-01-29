@@ -24,6 +24,10 @@ export function getFrameType(channelName: string, chunkType: 'key' | 'delta'): n
       return chunkType === 'key' ? FrameType.CAM_360P_KEY : FrameType.CAM_360P_DELTA;
     case ChannelName.VIDEO_720P:
       return chunkType === 'key' ? FrameType.CAM_720P_KEY : FrameType.CAM_720P_DELTA;
+    case ChannelName.VIDEO_1080P:
+      return chunkType === 'key' ? FrameType.CAM_1080P_KEY : FrameType.CAM_1080P_DELTA;
+    case ChannelName.VIDEO_1440P:
+      return chunkType === 'key' ? FrameType.CAM_1440P_KEY : FrameType.CAM_1440P_DELTA;
     case ChannelName.SCREEN_SHARE_720P:
       return chunkType === 'key' ? FrameType.SCREEN_SHARE_KEY : FrameType.SCREEN_SHARE_DELTA;
     case ChannelName.SCREEN_SHARE_1080P:
@@ -48,6 +52,8 @@ export function getDataChannelId(
       [ChannelName.MICROPHONE]: 1,
       [ChannelName.VIDEO_360P]: 2,
       [ChannelName.VIDEO_720P]: 3,
+      [ChannelName.VIDEO_1080P]: 9,
+      [ChannelName.VIDEO_1440P]: 10,
     },
     screenShare: {
       [ChannelName.SCREEN_SHARE_720P]: 5,
@@ -86,6 +92,22 @@ export const SUB_STREAMS: Record<string, SubStream> = {
     bitrate: 800_000,
     framerate: 30,
     channelName: ChannelName.VIDEO_720P,
+  },
+  VIDEO_1080P: {
+    name: 'video_1080p',
+    width: 1920,
+    height: 1080,
+    bitrate: 2_500_000,
+    framerate: 30,
+    channelName: ChannelName.VIDEO_1080P,
+  },
+  VIDEO_1440P: {
+    name: 'video_1440p',
+    width: 2560,
+    height: 1440,
+    bitrate: 5_000_000,
+    framerate: 30,
+    channelName: ChannelName.VIDEO_1440P,
   },
   SCREEN_SHARE_AUDIO: {
     name: 'screen_share_audio',
@@ -127,6 +149,7 @@ export function getSubStreams(
     can_publish: boolean;
     can_publish_sources: [string, boolean][];
   },
+  videoResolutions?: ChannelName[],
 ): SubStream[] {
   if (!permissions.can_publish) {
     return [];
@@ -134,16 +157,27 @@ export function getSubStreams(
 
   const allowedSources = new Map(permissions.can_publish_sources);
 
+  // Video channels that can be filtered by videoResolutions
+  const videoChannels = new Set([
+    ChannelName.VIDEO_360P,
+    ChannelName.VIDEO_720P,
+    ChannelName.VIDEO_1080P,
+    ChannelName.VIDEO_1440P,
+  ]);
+
   let baseSubStreams: SubStream[];
 
   if (streamType === StreamTypes.SCREEN_SHARE) {
     baseSubStreams = [SUB_STREAMS.SCREEN_SHARE_AUDIO, SUB_STREAMS.SCREEN_SHARE_720P];
   } else if (streamType === StreamTypes.CAMERA) {
+    // Include all possible video resolutions, filter will select which ones to use
     baseSubStreams = [
       SUB_STREAMS.MEETING_CONTROL,
       SUB_STREAMS.MIC_AUDIO,
       SUB_STREAMS.VIDEO_360P,
       SUB_STREAMS.VIDEO_720P,
+      SUB_STREAMS.VIDEO_1080P,
+      SUB_STREAMS.VIDEO_1440P,
     ];
   } else {
     throw new Error(`Invalid publisher type, cannot get sub streams for type: ${streamType}`);
@@ -156,7 +190,21 @@ export function getSubStreams(
 
     const key = sub.channelName;
     const allowed = allowedSources.get(key);
-    return allowed === true;
+    if (allowed !== true) {
+      return false;
+    }
+
+    // If videoResolutions filter is specified and this is a video channel, only include specified resolutions
+    if (videoResolutions && videoResolutions.length > 0 && videoChannels.has(sub.channelName)) {
+      return videoResolutions.includes(sub.channelName);
+    }
+
+    // Default behavior: when videoResolutions is NOT specified, exclude 1080p and 1440p (only 360p + 720p)
+    if (!videoResolutions && (sub.channelName === ChannelName.VIDEO_1080P || sub.channelName === ChannelName.VIDEO_1440P)) {
+      return false;
+    }
+
+    return true;
   });
 }
 

@@ -27,7 +27,7 @@ import { BrowserDetection, log } from '../utils';
 
 export class ErmisClient extends EventEmitter {
   // Configuration
-  private config: Required<ErmisClientConfig>;
+  private config: Required<Omit<ErmisClientConfig, 'videoResolutions' | 'subscriberInitQuality'>> & Pick<ErmisClientConfig, 'videoResolutions' | 'subscriberInitQuality'>;
 
   // API client (will be typed when ApiClient is converted)
   private apiClient: any;
@@ -162,6 +162,8 @@ export class ErmisClient extends EventEmitter {
       reconnectAttempts: config.reconnectAttempts ?? 3,
       reconnectDelay: config.reconnectDelay ?? 2000,
       debug: config.debug ?? false,
+      videoResolutions: config.videoResolutions,
+      subscriberInitQuality: config.subscriberInitQuality,
     };
     // Initialize API client
     this.apiClient = new ApiClient({
@@ -474,6 +476,8 @@ export class ErmisClient extends EventEmitter {
           ownerId: '',
           apiClient: this.apiClient,
           mediaConfig: this.mediaConfig,
+          videoResolutions: this.config.videoResolutions,
+          subscriberInitQuality: this.config.subscriberInitQuality,
         });
 
         this._setupRoomEvents(room);
