@@ -54,6 +54,8 @@ const FRAME_TYPE = {
   LIVESTREAM_720P_KEY: 10,
   LIVESTREAM_720P_DELTA: 11,
   LIVESTREAM_AUDIO: 12,
+  CAM_1080P_KEY: 13,
+  CAM_1080P_DELTA: 14,
   CONFIG: 0xfd,
   EVENT: 0xfe,
   PING: 0xff,
@@ -67,6 +69,8 @@ function getFrameType(channelName, chunkType) {
       return chunkType === "key" ? FRAME_TYPE.CAM_360P_KEY : FRAME_TYPE.CAM_360P_DELTA;
     case CHANNEL_NAME.VIDEO_720P:
       return chunkType === "key" ? FRAME_TYPE.CAM_720P_KEY : FRAME_TYPE.CAM_720P_DELTA;
+    case CHANNEL_NAME.VIDEO_1080P:
+      return chunkType === "key" ? FRAME_TYPE.CAM_1080P_KEY : FRAME_TYPE.CAM_1080P_DELTA;
     case CHANNEL_NAME.SCREEN_SHARE_720P:
       return chunkType === "key" ? FRAME_TYPE.SS_720P_KEY : FRAME_TYPE.SS_720P_DELTA;
     case CHANNEL_NAME.SCREEN_SHARE_1080P:
@@ -102,6 +106,7 @@ const CHANNEL_NAME = {
   MIC_AUDIO: "mic_48k",
   VIDEO_360P: "video_360p",
   VIDEO_720P: "video_720p",
+  VIDEO_1080P: "video_1080p",
   SCREEN_SHARE_720P: "screen_share_720p",
   SCREEN_SHARE_1080P: "screen_share_1080p",
   SCREEN_SHARE_AUDIO: "screen_share_audio",
@@ -119,6 +124,7 @@ function getDataChannelId(channelName, type = "camera") {
       [CHANNEL_NAME.MIC_AUDIO]: 1,
       [CHANNEL_NAME.VIDEO_360P]: 2,
       [CHANNEL_NAME.VIDEO_720P]: 3,
+      [CHANNEL_NAME.VIDEO_1080P]: 9,
     },
     screenShare: {
       [CHANNEL_NAME.SCREEN_SHARE_720P]: 5,
@@ -155,6 +161,14 @@ const SUB_STREAMS = {
     framerate: 30,
     channelName: CHANNEL_NAME.VIDEO_720P,
   },
+  VIDEO_1080P: {
+    name: "video_1080p",
+    width: 1920,
+    height: 1080,
+    bitrate: 2_500_000,
+    framerate: 30,
+    channelName: CHANNEL_NAME.VIDEO_1080P,
+  },
   SCREEN_SHARE_AUDIO: {
     name: "screen_share_audio",
     channelName: CHANNEL_NAME.SCREEN_SHARE_AUDIO,
@@ -181,6 +195,7 @@ function getSubStreams(streamType) {
   if (streamType === STREAM_TYPE.SCREEN_SHARE) {
     return [SUB_STREAMS.SCREEN_SHARE_AUDIO, SUB_STREAMS.SCREEN_SHARE_720P]; //, SUB_STREAMS.SCREEN_SHARE_1080P];
   } else if (streamType === STREAM_TYPE.CAMERA) {
+    // Default: 360p and 720p. 1080p only when explicitly specified
     return [SUB_STREAMS.MIC_AUDIO, SUB_STREAMS.VIDEO_360P, SUB_STREAMS.VIDEO_720P, SUB_STREAMS.MEETING_CONTROL];
   } else {
     return new Error("Invalid publisher type, cannot get sub streams for type:", streamType);

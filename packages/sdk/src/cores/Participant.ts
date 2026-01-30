@@ -66,7 +66,7 @@ export class Participant extends EventEmitter {
       can_subscribe: true,
       can_publish: true,
       can_publish_data: true,
-      can_publish_sources: [["mic_48k", true], ["video_360p", true], ["video_720p", true], ["screen_share_720p", true], ["screen_share_1080p", true], ["screen_share_audio", true]],
+      can_publish_sources: [["mic_48k", true], ["video_360p", true], ["video_720p", true], ["video_1080p", true], ["screen_share_720p", true], ["screen_share_1080p", true], ["screen_share_audio", true]],
       hidden: false,
       can_update_metadata: false,
     };
@@ -165,10 +165,10 @@ export class Participant extends EventEmitter {
   togglePin(): void {
     if (!this.isLocal) {
       if (this.isPinned) {
-        this.subscriber?.switchBitrate("360p");
+        this.subscriber?.switchBitrate("video_360p");
         console.warn("Unpin participant, switch to low quality");
       } else {
-        this.subscriber?.switchBitrate("720p");
+        this.subscriber?.switchBitrate("video_720p");
         console.warn("Pin participant, switch to high quality");
       }
     }
@@ -504,7 +504,7 @@ export class Participant extends EventEmitter {
   get isCameraBanned(): boolean {
     if (!this.permissions.can_publish_sources) return false;
     for (const [channel, allowed] of this.permissions.can_publish_sources) {
-      if ((channel === "video_360p" || channel === "video_720p") && allowed === false) {
+      if ((channel === "video_360p" || channel === "video_720p" || channel === "video_1080p") && allowed === false) {
         return true;
       }
     }

@@ -38,6 +38,7 @@ let commandSender = null;
 let webSocketConnection = null;
 let webTPStreamReader = null;
 let webTPStreamWriter = null;
+let initialQuality = null;
 
 // WebSocket specific
 let isWebSocket = false;
@@ -119,7 +120,8 @@ self.onmessage = async function (e) {
       subscribeType = e.data.subscribeType || STREAM_TYPE.CAMERA;
       // Get audioEnabled from init message - for screen share, this determines if we should subscribe to audio
       subscriptionAudioEnabled = e.data.audioEnabled !== undefined ? e.data.audioEnabled : true;
-      console.log(`[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}`);
+      initialQuality = e.data.initialQuality;
+      console.log(`[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}, initialQuality=${initialQuality}`);
       await initializeDecoders();
       break;
 
@@ -190,6 +192,7 @@ function attachWebSocket(wsUrl) {
     const options = {
       audio: subscribeType === STREAM_TYPE.CAMERA ? true : subscriptionAudioEnabled,
       video: true,
+      initialQuality: initialQuality,
     };
     proxyConsole.log(`[WebSocket] Connected to ${wsUrl}, options:`, options);
     commandSender.initSubscribeChannelStream(subscribeType, options);
@@ -411,6 +414,7 @@ async function attachWebTransportStream(readable, writable) {
   const options = {
     audio: subscribeType === STREAM_TYPE.CAMERA ? true : subscriptionAudioEnabled,
     video: true,
+    initialQuality: initialQuality,
   };
   proxyConsole.warn(`[WebTransport] Attached stream, options:`, options);
 
@@ -574,6 +578,41 @@ function handleBinaryPacket(dataBuffer) {
       }
     }
     return;
+  } else if (frameType === 13 || frameType === 14) {
+    // 1080p video frames (CAM_1080P_KEY=13, CAM_1080P_DELTA=14)
+    const type = frameType === 13 ? "key" : "delta";
+    if (type === "key") {
+      keyFrameReceived = true;
+    }
+
+    if (keyFrameReceived) {
+      let decoder1080p = mediaDecoders.get(CHANNEL_NAME.VIDEO_1080P);
+      const decoderState = decoder1080p ? decoder1080p.state : null;
+
+      // Recreate decoder if closed or in error state
+      if (!decoder1080p || decoderState === "closed" || decoderState === "unconfigured") {
+        decoder1080p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P));
+        mediaDecoders.set(CHANNEL_NAME.VIDEO_1080P, decoder1080p);
+        const config1080p = mediaConfigs.get(CHANNEL_NAME.VIDEO_1080P);
+        if (config1080p) {
+          proxyConsole.log("Configuring 1080p decoder with config:", config1080p);
+          decoder1080p.configure(config1080p);
+        }
+      }
+
+      try {
+        const encodedChunk = new EncodedVideoChunk({
+          timestamp: timestamp * 1000,
+          type,
+          data,
+        });
+        decoder1080p.decode(encodedChunk);
+      } catch (err) {
+        proxyConsole.error("1080p decode error:", err);
+        keyFrameReceived = false; // Wait for next keyframe
+      }
+    }
+    return;
   } else if (frameType === 4 || frameType === 5) {
     // DEBUG: Screen share packet received
     // console.warn(`[Worker] 📺 Screen share packet received! frameType=${frameType}, size=${data.byteLength}`);
@@ -638,6 +677,7 @@ async function initializeDecoders() {
     case STREAM_TYPE.CAMERA:
       mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P)));
       mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
+      mediaDecoders.set(CHANNEL_NAME.VIDEO_1080P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P)));
       mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, new OpusAudioDecoder(audioInit));
       break;
 
@@ -660,6 +700,7 @@ async function initializeDecoders() {
     default:
       mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P)));
       mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
+      mediaDecoders.set(CHANNEL_NAME.VIDEO_1080P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P)));
       mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, new OpusAudioDecoder(audioInit));
       break;
   }

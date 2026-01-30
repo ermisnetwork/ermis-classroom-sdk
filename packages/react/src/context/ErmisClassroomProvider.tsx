@@ -39,7 +39,9 @@ export function ErmisClassroomProvider({
     apiUrl: config.apiUrl,
     reconnectAttempts: config.reconnectAttempts,
     reconnectDelay: config.reconnectDelay,
-  }), [config.host, config.hostNode, config.debug, config.webtpUrl, config.apiUrl, config.reconnectAttempts, config.reconnectDelay]);
+    videoResolutions: config.videoResolutions,
+    subscriberInitQuality: config.subscriberInitQuality,
+  }), [config.host, config.hostNode, config.debug, config.webtpUrl, config.apiUrl, config.reconnectAttempts, config.reconnectDelay, config.videoResolutions, config.subscriberInitQuality]);
   const cfgKey = useMemo(() => JSON.stringify(cfg), [cfg]);
 
   // Room state

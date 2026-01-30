@@ -8,7 +8,7 @@ import type { ConnectionStatus } from '../core/ermisClient.types';
 export type { ConnectionStatus } from '../core/ermisClient.types';
 
 // Quality levels for bitrate switching
-export type QualityLevel = '360p' | '720p' | '1080p';
+export type QualityLevel = 'video_360p' | 'video_720p' | 'video_1080p';
 
 // Protocol types for subscriber
 export type SubscriberProtocol = 'webtransport' | 'webrtc' | 'websocket';
@@ -47,6 +47,11 @@ export interface SubscriberConfig {
    * @default true
    */
   audioEnabled?: boolean;
+  /**
+   * Initial video quality to subscribe to
+   * @default '360p'
+   */
+  initialQuality?: QualityLevel;
   /**
    * Status callback (for compatibility with original API)
    */

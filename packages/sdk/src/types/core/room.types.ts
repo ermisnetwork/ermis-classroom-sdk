@@ -4,7 +4,8 @@
  */
 
 import type { Participant } from '../../cores/Participant';
-import { ParticipantPermissions, PinType } from '../media/publisher.types';
+import { ParticipantPermissions, PinType, ChannelName } from '../media/publisher.types';
+import type { QualityLevel } from '../media/subscriber.types';
 
 /**
  * Room type constants
@@ -41,6 +42,18 @@ export interface RoomConfig {
   mediaConfig: MediaConfig;
   /** Parent room ID for sub-rooms */
   parentRoomId?: string;
+  /**
+   * Video resolutions to publish.
+   * If not specified, publishes 360p and 720p by default.
+   * To enable 1080p: [ChannelName.VIDEO_1080P]
+   */
+  videoResolutions?: ChannelName[];
+  /**
+   * Initial video quality for subscribers.
+   * If not specified, defaults to '360p'.
+   * To subscribe 1080p from start: '1080p'
+   */
+  subscriberInitQuality?: QualityLevel;
 }
 
 /**
@@ -305,6 +318,7 @@ export type MediaChannel =
   | 'meeting_control'
   | 'video_360p'
   | 'video_720p'
+  | 'video_1080p'
   | 'screen_share_720p'
   | 'screen_share_1080p'
   | 'mic_48k'

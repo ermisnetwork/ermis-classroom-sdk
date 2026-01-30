@@ -22,6 +22,7 @@ export const DATA_CHANNEL_IDS: Record<ChannelName, number> = {
   [ChannelName.MICROPHONE]: 1,
   [ChannelName.VIDEO_360P]: 2,
   [ChannelName.VIDEO_720P]: 3,
+  [ChannelName.VIDEO_1080P]: 9,
   [ChannelName.SCREEN_SHARE_720P]: 4,
   [ChannelName.SCREEN_SHARE_1080P]: 5,
   [ChannelName.SCREEN_SHARE_AUDIO]: 6,
