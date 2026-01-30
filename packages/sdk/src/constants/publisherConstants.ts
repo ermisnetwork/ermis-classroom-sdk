@@ -76,9 +76,9 @@ export const SUB_STREAMS: Record<string, SubStream> = {
   },
   VIDEO_360P: {
     name: 'video_360p',
-    width: 640,
-    height: 360,
-    bitrate: 400_000,
+    width: 1920,
+    height: 1080,
+    bitrate: 2_500_000,
     framerate: 30,
     channelName: ChannelName.VIDEO_360P,
   },
