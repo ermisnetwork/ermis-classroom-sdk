@@ -561,7 +561,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
           log("[Publisher] Actual video track dimensions:", `${actualWidth}x${actualHeight}`);
 
           // Calculate proportional resolutions for 360p and 720p
-          const { video360p, video720p } = calculateSubStreamResolutions(actualWidth, actualHeight);
+          const { video360p, video720p, video1080p, video1440p } = calculateSubStreamResolutions(actualWidth, actualHeight);
 
           // Update subStreams with calculated dimensions
           this.subStreams = this.subStreams.map(subStream => {
@@ -577,6 +577,20 @@ export class Publisher extends EventEmitter<PublisherEvents> {
                 ...subStream,
                 width: video720p.width,
                 height: video720p.height
+              };
+            }
+            if (subStream.channelName === ChannelName.VIDEO_1080P) {
+              return {
+                ...subStream,
+                width: video1080p.width,
+                height: video1080p.height
+              };
+            }
+            if (subStream.channelName === ChannelName.VIDEO_1440P) {
+              return {
+                ...subStream,
+                width: video1440p.width,
+                height: video1440p.height
               };
             }
             return subStream;
