@@ -40,6 +40,12 @@ export class FrameTypeHelper {
       case ChannelName.VIDEO_720P:
         return isKeyFrame ? FrameType.CAM_720P_KEY : FrameType.CAM_720P_DELTA;
 
+      case ChannelName.VIDEO_1080P:
+        return isKeyFrame ? FrameType.CAM_1080P_KEY : FrameType.CAM_1080P_DELTA;
+
+      case ChannelName.VIDEO_1440P:
+        return isKeyFrame ? FrameType.CAM_1440P_KEY : FrameType.CAM_1440P_DELTA;
+
       case ChannelName.SCREEN_SHARE_720P:
       case ChannelName.SCREEN_SHARE_1080P:
         return isKeyFrame
@@ -115,6 +121,8 @@ export class FrameTypeHelper {
     return (
       frameType === FrameType.CAM_360P_KEY ||
       frameType === FrameType.CAM_720P_KEY ||
+      frameType === FrameType.CAM_1080P_KEY ||
+      frameType === FrameType.CAM_1440P_KEY ||
       frameType === FrameType.SCREEN_SHARE_KEY ||
       frameType === FrameType.LIVESTREAM_KEY
     );
@@ -130,7 +138,11 @@ export class FrameTypeHelper {
       (frameType >= FrameType.CAM_360P_KEY &&
         frameType <= FrameType.SCREEN_SHARE_DELTA) ||
       frameType === FrameType.LIVESTREAM_KEY ||
-      frameType === FrameType.LIVESTREAM_DELTA
+      frameType === FrameType.LIVESTREAM_DELTA ||
+      frameType === FrameType.CAM_1080P_KEY ||
+      frameType === FrameType.CAM_1080P_DELTA ||
+      frameType === FrameType.CAM_1440P_KEY ||
+      frameType === FrameType.CAM_1440P_DELTA
     );
   }
 
@@ -171,6 +183,14 @@ export class FrameTypeHelper {
         return "Camera 720p Keyframe";
       case FrameType.CAM_720P_DELTA:
         return "Camera 720p Delta frame";
+      case FrameType.CAM_1080P_KEY:
+        return "Camera 1080p Keyframe";
+      case FrameType.CAM_1080P_DELTA:
+        return "Camera 1080p Delta frame";
+      case FrameType.CAM_1440P_KEY:
+        return "Camera 1440p Keyframe";
+      case FrameType.CAM_1440P_DELTA:
+        return "Camera 1440p Delta frame";
       case FrameType.SCREEN_SHARE_KEY:
         return "Screen Share Keyframe";
       case FrameType.SCREEN_SHARE_DELTA:

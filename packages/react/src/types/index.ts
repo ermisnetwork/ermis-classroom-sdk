@@ -10,6 +10,8 @@ import type {
   MediaDevices,
   SelectedDevices,
   ErmisClient,
+  ChannelName,
+  QualityLevel,
 } from '@ermisnetwork/ermis-classroom-sdk';
 
 /**
@@ -24,6 +26,17 @@ export interface ErmisClassroomConfig extends ErmisClientConfig {
   publishProtocol?: string;
   /** Subscribe protocol (websocket or webtransport) */
   subscribeProtocol?: string;
+  /**
+   * Video resolutions to publish. Default: 360p + 720p.
+   * To enable 1080p: [ChannelName.VIDEO_1080P]
+   * To publish only one: [ChannelName.VIDEO_720P]
+   */
+  videoResolutions?: ChannelName[];
+  /**
+   * Initial video quality for subscribers. Default: '360p'.
+   * To subscribe 1080p from start: '1080p'
+   */
+  subscriberInitQuality?: QualityLevel;
 }
 
 /**

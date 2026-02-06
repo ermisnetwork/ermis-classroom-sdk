@@ -2,7 +2,7 @@ import { useState } from "react"
 import { AuthScreen } from "./screens/AuthScreen"
 import { PreJoinScreen } from "./screens/PreJoinScreen"
 import { MeetingRoom } from "./screens/MeetingRoom"
-import { ErmisClassroomProvider } from '@ermisnetwork/ermis-classroom-react';
+import { ErmisClassroomProvider, ChannelName as _ } from '@ermisnetwork/ermis-classroom-react';
 import { CustomEventModal } from "./components/CustomEventModal"
 import { IconBolt } from "@tabler/icons-react"
 import { useAppContext } from "@/components/AppContext.tsx";
@@ -50,6 +50,8 @@ function App() {
         host: apiHost,
         hostNode: node,
         webtpUrl: `https://${node}/meeting/wt`,
+        // videoResolutions: [ChannelName.VIDEO_1440P], // Default [video_360p, video_720p]
+        // subscriberInitQuality: 'video_1440p', // Default video_360p
       }}
     >
       <AppContent />
@@ -58,4 +60,3 @@ function App() {
 }
 
 export default App
-

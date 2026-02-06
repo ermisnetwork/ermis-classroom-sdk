@@ -25,6 +25,10 @@ export enum FrameType {
   AUDIO = 6,
   LIVESTREAM_KEY = 10,
   LIVESTREAM_DELTA = 11,
+  CAM_1080P_KEY = 13,
+  CAM_1080P_DELTA = 14,
+  CAM_1440P_KEY = 15,
+  CAM_1440P_DELTA = 16,
   CONFIG = 0xfd,
   EVENT = 0xfe,
   PUBLISHER_COMMAND = 0xff,
@@ -50,6 +54,8 @@ export enum ChannelName {
   SCREEN_SHARE_AUDIO = "screen_share_audio",
   LIVESTREAM_720P = "livestream_720p",
   LIVESTREAM_AUDIO = "livestream_audio",
+  VIDEO_1080P = "video_1080p",
+  VIDEO_1440P = "video_1440p",
 }
 
 // Publisher configuration
@@ -69,6 +75,13 @@ export interface PublisherConfig {
   hasMic?: boolean;
   webRtcHost?: string;
   permissions: ParticipantPermissions;
+  /**
+   * Specific video resolutions to publish.
+   * If not specified, publishes all permitted video resolutions.
+   * Example: [ChannelName.VIDEO_1080P] - only publish 1080p
+   * Example: [ChannelName.VIDEO_720P, ChannelName.VIDEO_360P] - publish 720p and 360p
+   */
+  videoResolutions?: ChannelName[];
   onStatusUpdate?: (message: string, isError?: boolean) => void;
   onStreamStart?: () => void;
   onStreamStop?: () => void;

@@ -31,15 +31,37 @@ export function ErmisClassroomProvider({
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
 
   // Memoize config to prevent unnecessary re-renders
-  const cfg = useMemo(() => ({
-    host: config.host,
-    hostNode: config.hostNode,
-    debug: config.debug,
-    webtpUrl: config.webtpUrl,
-    apiUrl: config.apiUrl,
-    reconnectAttempts: config.reconnectAttempts,
-    reconnectDelay: config.reconnectDelay,
-  }), [config.host, config.hostNode, config.debug, config.webtpUrl, config.apiUrl, config.reconnectAttempts, config.reconnectDelay]);
+  const cfg = useMemo(() => {
+    // Validate: subscriberInitQuality must be in videoResolutions if both are provided
+    if (config.subscriberInitQuality && config.videoResolutions?.length) {
+      const qualityToChannel: Record<string, string> = {
+        'video_360p': 'video_360p',
+        'video_720p': 'video_720p',
+        'video_1080p': 'video_1080p',
+        'video_1440p': 'video_1440p',
+      };
+      const channelForQuality = qualityToChannel[config.subscriberInitQuality];
+      const videoResolutionStrings = config.videoResolutions.map(r => r as string);
+      if (channelForQuality && !videoResolutionStrings.includes(channelForQuality)) {
+        throw new Error(
+          `subscriberInitQuality "${config.subscriberInitQuality}" is not in videoResolutions [${config.videoResolutions.join(', ')}]. ` +
+          `Please add "${channelForQuality}" to videoResolutions or change subscriberInitQuality.`
+        );
+      }
+    }
+
+    return {
+      host: config.host,
+      hostNode: config.hostNode,
+      debug: config.debug,
+      webtpUrl: config.webtpUrl,
+      apiUrl: config.apiUrl,
+      reconnectAttempts: config.reconnectAttempts,
+      reconnectDelay: config.reconnectDelay,
+      videoResolutions: config.videoResolutions,
+      subscriberInitQuality: config.subscriberInitQuality,
+    };
+  }, [config.host, config.hostNode, config.debug, config.webtpUrl, config.apiUrl, config.reconnectAttempts, config.reconnectDelay, config.videoResolutions, config.subscriberInitQuality]);
   const cfgKey = useMemo(() => JSON.stringify(cfg), [cfg]);
 
   // Room state

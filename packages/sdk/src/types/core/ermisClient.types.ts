@@ -5,6 +5,8 @@
 
 import type { Room } from '../../cores/Room';
 import type { RoomType } from './room.types';
+import { ChannelName } from '../media/publisher.types';
+import type { QualityLevel } from '../media/subscriber.types';
 
 /**
  * Connection status
@@ -33,6 +35,17 @@ export interface ErmisClientConfig {
   reconnectDelay?: number;
   /** Enable debug logging */
   debug?: boolean;
+  /**
+   * Video resolutions to publish. Default: 360p + 720p.
+   * To enable 1080p: [ChannelName.VIDEO_1080P]
+   * To publish only one: [ChannelName.VIDEO_720P]
+   */
+  videoResolutions?: ChannelName[];
+  /**
+   * Initial video quality for subscribers. Default: '360p'.
+   * To subscribe 1080p from start: '1080p'
+   */
+  subscriberInitQuality?: QualityLevel;
 }
 
 /**

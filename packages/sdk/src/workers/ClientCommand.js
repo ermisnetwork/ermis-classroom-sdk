@@ -69,8 +69,10 @@ class CommandSender {
    *                  For screen share, options.audio is determined by whether publisher has screen share audio
    */
   async initSubscribeChannelStream(subscriberType, options = {}) {
-    const initQuality =
+    const defaultQuality =
       subscriberType === STREAM_TYPE.SCREEN_SHARE ? CHANNEL_NAME.SCREEN_SHARE_720P : CHANNEL_NAME.VIDEO_360P;
+
+    const initQuality = options.initialQuality || defaultQuality;
 
     // Use options.audio directly - this is now dynamically determined based on publisher's screen share audio
     const audioEnabled = options.audio !== undefined ? options.audio : true;
