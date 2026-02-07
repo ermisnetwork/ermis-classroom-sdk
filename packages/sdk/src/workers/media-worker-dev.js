@@ -2,6 +2,7 @@ import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
 import { CHANNEL_NAME, STREAM_TYPE } from "./publisherConstants.js";
+import raptorqInit, { WasmFecManager } from '../raptorQ/raptorq_wasm.js';
 
 import CommandSender from "./ClientCommand.js";
 
@@ -39,9 +40,19 @@ let webSocketConnection = null;
 let webTPStreamReader = null;
 let webTPStreamWriter = null;
 let initialQuality = null;
+let protocol = null;
 
 // WebSocket specific
 let isWebSocket = false;
+
+let fecManager = null;
+let isRaptorQInitialized = false;
+
+async function initRaptorQWasm() {
+  await raptorqInit();
+  fecManager = new WasmFecManager();
+  isRaptorQInitialized = true;
+}
 
 const proxyConsole = {
   log: () => { },
@@ -56,12 +67,12 @@ const proxyConsole = {
 
 const createVideoInit = (channelName) => ({
   output: (frame) => {
-    self.postMessage({ type: "videoData", frame, quality: channelName }, [frame]);
+    self.postMessage({ type: 'videoData', frame, quality: channelName }, [frame]);
   },
   error: (e) => {
     proxyConsole.error(`Video decoder error (${channelName}):`, e);
     self.postMessage({
-      type: "error",
+      type: 'error',
       message: `${channelName} decoder: ${e.message}`,
     });
     // Attempt to recover by resetting keyframe flag - next keyframe will reinitialize decoder
@@ -79,10 +90,18 @@ const audioInit = {
       channelData.push(monoChannel);
       channelData.push(new Float32Array(monoChannel));
     } else {
-      for (let i = 0; i < audioData.numberOfChannels; i++) {
-        const channel = new Float32Array(audioData.numberOfFrames);
-        audioData.copyTo(channel, { planeIndex: i });
-        channelData.push(channel);
+      // if mono, duplicate to create stereo
+      if (audioData.numberOfChannels === 1) {
+        const monoChannel = new Float32Array(audioData.numberOfFrames);
+        audioData.copyTo(monoChannel, { planeIndex: 0 });
+        channelData.push(monoChannel);
+        channelData.push(new Float32Array(monoChannel));
+      } else {
+        for (let i = 0; i < audioData.numberOfChannels; i++) {
+          const channel = new Float32Array(audioData.numberOfFrames);
+          audioData.copyTo(channel, { planeIndex: i });
+          channelData.push(channel);
+        }
       }
     }
 
@@ -96,14 +115,14 @@ const audioInit = {
           numberOfFrames: audioData.numberOfFrames,
           numberOfChannels: audioData.numberOfChannels,
         },
-        channelData.map((c) => c.buffer)
+        channelData.map((c) => c.buffer),
       );
     }
 
     audioData.close();
   },
   error: (e) => {
-    self.postMessage({ type: "error", message: e.message });
+    self.postMessage({ type: 'error', message: e.message });
   },
 };
 
@@ -116,6 +135,17 @@ self.onmessage = async function (e) {
 
   switch (type) {
     case "init":
+      protocol = e.data.protocol;
+      if (protocol === 'webrtc') {
+        await initRaptorQWasm();
+        this.postMessage({ type: 'raptorq-initialized' });
+      }
+      if (e.data.enableLogging) {
+        const methods = ['log', 'error', 'warn', 'debug', 'info', 'trace', 'group', 'groupEnd'];
+        for (const m of methods) {
+          if (console[m]) proxyConsole[m] = console[m].bind(console);
+        }
+      }
       if (port instanceof MessagePort) workletPort = port;
       subscribeType = e.data.subscribeType || STREAM_TYPE.CAMERA;
       // Get audioEnabled from init message - for screen share, this determines if we should subscribe to audio
@@ -148,7 +178,7 @@ self.onmessage = async function (e) {
           commandType: "subscriber_command",
         });
         proxyConsole.warn(`[Publisher worker]: Attaching WebTransport stream!`);
-        attachWebTransportStream(readable, writable);
+        attachWebTransportStream(readable, writable, channelName);
       }
       break;
 
@@ -260,44 +290,200 @@ function attachWebRTCDataChannel(channelName, channel) {
   };
 }
 
-function handleWebRtcMessage(channelName, message) {
-  try {
-    let text = null;
-    if (typeof message === "string") {
-      text = message;
-    } else if (message instanceof Uint8Array || message instanceof ArrayBuffer) {
-      const dec = new TextDecoder();
-      const maybeText = dec.decode(message);
-      if (maybeText.startsWith("{")) text = maybeText;
-    }
-
-    if (text) {
-      try {
-        const json = JSON.parse(text);
-        if (json.type === "DecoderConfigs") {
-          handleStreamConfigs(channelName, json.config);
-          return;
-        }
-      } catch (e) {
-        proxyConsole.warn(`[${channelName}] Non-JSON text:`, text);
-        return;
-      }
-    }
-  } catch (err) {
-    proxyConsole.error(`[processIncomingMessage] error for ${channelName}:`, err);
+// ======================================
+// Jitter Buffer for WebRTC packet reordering
+// ======================================
+class JitterBuffer {
+  constructor(options = {}) {
+    this.buffer = new Map(); // sequenceNumber -> { data, timestamp }
+    this.lastProcessedSeq = -1;
+    this.maxBufferSize = options.maxBufferSize || 50;
+    this.maxWaitMs = options.maxWaitMs || 100; // Max time to wait for missing packet
+    this.flushIntervalMs = options.flushIntervalMs || 50;
+    this.onPacketReady = options.onPacketReady || (() => {});
+    
+    // Start periodic flush timer
+    this.flushTimer = setInterval(() => this.flushStalePackets(), this.flushIntervalMs);
   }
-  const { sequenceNumber, isFec, packetType, payload } = parseWebRTCPacket(new Uint8Array(message));
-  if (isFec) {
-    const result = fecManager.process_fec_packet(payload, sequenceNumber);
-    if (result) {
-      const decodedData = result[0][1];
-      processIncomingMessage(channelName, decodedData.buffer);
 
+  /**
+   * Add a packet to the buffer
+   * @param {number} sequenceNumber 
+   * @param {Uint8Array} data 
+   */
+  addPacket(sequenceNumber, data) {
+    const now = Date.now();
+    
+    // If this is the first packet or the expected next packet
+    if (this.lastProcessedSeq === -1) {
+      this.lastProcessedSeq = sequenceNumber - 1;
+    }
+
+    // If packet is too old (already processed or too far behind), drop it
+    if (sequenceNumber <= this.lastProcessedSeq) {
+      // console.log(`[JitterBuffer] Dropping old packet seq=${sequenceNumber}, lastProcessed=${this.lastProcessedSeq}`);
       return;
     }
-  } else {
-    processIncomingMessage(channelName, payload.buffer);
+
+    // If it's the next expected packet, process immediately
+    if (sequenceNumber === this.lastProcessedSeq + 1) {
+      this.lastProcessedSeq = sequenceNumber;
+      this.onPacketReady(data);
+      
+      // Try to flush any buffered packets that are now in order
+      this.flushBufferedPackets();
+      return;
+    }
+
+    // Otherwise, buffer the packet for reordering
+    this.buffer.set(sequenceNumber, { data, timestamp: now });
+
+    // If buffer is too large, force flush oldest packets
+    if (this.buffer.size > this.maxBufferSize) {
+      this.forceFlushOldest();
+    }
   }
+
+  /**
+   * Flush buffered packets that are now in order
+   */
+  flushBufferedPackets() {
+    let nextSeq = this.lastProcessedSeq + 1;
+    
+    while (this.buffer.has(nextSeq)) {
+      const packet = this.buffer.get(nextSeq);
+      this.buffer.delete(nextSeq);
+      this.lastProcessedSeq = nextSeq;
+      this.onPacketReady(packet.data);
+      nextSeq++;
+    }
+  }
+
+  /**
+   * Flush packets that have been waiting too long
+   */
+  flushStalePackets() {
+    if (this.buffer.size === 0) return;
+    
+    const now = Date.now();
+    const staleThreshold = now - this.maxWaitMs;
+    
+    // Find the minimum sequence number in buffer
+    let minSeq = Infinity;
+    for (const seq of this.buffer.keys()) {
+      if (seq < minSeq) minSeq = seq;
+    }
+    
+    // Check if the oldest packet is stale
+    if (minSeq !== Infinity) {
+      const packet = this.buffer.get(minSeq);
+      if (packet && packet.timestamp < staleThreshold) {
+        // Skip the missing packets and process from minSeq
+        console.warn(`[JitterBuffer] Skipping missing packets ${this.lastProcessedSeq + 1} to ${minSeq - 1}, forcing flush`);
+        this.lastProcessedSeq = minSeq - 1;
+        this.flushBufferedPackets();
+      }
+    }
+  }
+
+  /**
+   * Force flush the oldest packets when buffer is full
+   */
+  forceFlushOldest() {
+    // Sort sequence numbers and get the oldest
+    const seqNumbers = Array.from(this.buffer.keys()).sort((a, b) => a - b);
+    
+    // Flush half of the buffer
+    const flushCount = Math.floor(seqNumbers.length / 2);
+    for (let i = 0; i < flushCount; i++) {
+      const seq = seqNumbers[i];
+      const packet = this.buffer.get(seq);
+      this.buffer.delete(seq);
+      
+      if (seq > this.lastProcessedSeq) {
+        this.lastProcessedSeq = seq;
+        this.onPacketReady(packet.data);
+      }
+    }
+    console.warn(`[JitterBuffer] Buffer overflow, force flushed ${flushCount} packets`);
+  }
+
+  /**
+   * Get buffer stats for debugging
+   */
+  getStats() {
+    return {
+      bufferSize: this.buffer.size,
+      lastProcessedSeq: this.lastProcessedSeq,
+      pendingSeqs: Array.from(this.buffer.keys()).sort((a, b) => a - b),
+    };
+  }
+
+  /**
+   * Clear the buffer and reset state
+   */
+  reset() {
+    this.buffer.clear();
+    this.lastProcessedSeq = -1;
+  }
+
+  /**
+   * Stop the flush timer
+   */
+  destroy() {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = null;
+    }
+    this.buffer.clear();
+  }
+}
+
+// Create jitter buffer for video packets
+let videoJitterBuffer = null;
+
+function initVideoJitterBuffer() {
+  if (videoJitterBuffer) {
+    videoJitterBuffer.destroy();
+  }
+  videoJitterBuffer = new JitterBuffer({
+    maxBufferSize: 30,
+    maxWaitMs: 100,
+    flushIntervalMs: 50,
+    onPacketReady: (data) => {
+      processIncomingMessage(data);
+    },
+  });
+}
+
+function handleWebRtcMessage(channelName, message) {
+    const { sequenceNumber, isFec, packetType, payload } = parseWebRTCPacket(new Uint8Array(message));
+    
+    // Initialize jitter buffer if needed
+    if (!videoJitterBuffer && channelName.startsWith('video_')) {
+      initVideoJitterBuffer();
+    }
+
+    if (isFec) {
+      const result = fecManager.process_fec_packet(payload, sequenceNumber);
+      if (result) {
+        const decodedData = result[0][1];
+        // Use jitter buffer for video FEC packets
+        if (channelName.startsWith('video_') && videoJitterBuffer) {
+          videoJitterBuffer.addPacket(sequenceNumber, decodedData);
+        } else {
+          processIncomingMessage(decodedData);
+        }
+        return;
+      }
+    } else {
+      // Use jitter buffer for video non-FEC packets
+      if (channelName.startsWith('video_') && videoJitterBuffer) {
+        videoJitterBuffer.addPacket(sequenceNumber, payload);
+      } else {
+        processIncomingMessage(payload);
+      }
+    }
 }
 
 function parseWebRTCPacket(packet) {
@@ -332,8 +518,8 @@ function handleStreamConfigs(json) {
     if (key === "type") continue;
 
     try {
-      const stream = JSON.parse(value);
-      if (stream.type !== "StreamConfig") continue;
+      const stream = (typeof value === "string") ? JSON.parse(value) : value;
+      if (!stream || stream.type !== "StreamConfig") continue;
 
       const channelName = stream.channelName;
       const cfg = stream.config;
@@ -407,14 +593,14 @@ function handleStreamConfigs(json) {
 // Stream handling (WebTransport)
 // ------------------------------
 
-async function attachWebTransportStream(readable, writable) {
+async function attachWebTransportStream(readable, writable, channelName) {
   webTPStreamReader = readable.getReader();
   webTPStreamWriter = writable.getWriter();
   // Use subscriptionAudioEnabled for audio option - dynamically determined based on publisher's screen share audio
   const options = {
     audio: subscribeType === STREAM_TYPE.CAMERA ? true : subscriptionAudioEnabled,
     video: true,
-    initialQuality: initialQuality,
+    initialQuality: channelName,
   };
   proxyConsole.warn(`[WebTransport] Attached stream, options:`, options);
 
@@ -447,37 +633,37 @@ async function sendOverStream(frameBytes) {
 
 async function readStream(reader) {
   const delimitedReader = new LengthDelimitedReader(reader);
+  let messageCount = 0;
   try {
     while (true) {
       const message = await delimitedReader.readMessage();
-      if (message === null) break;
+      if (message === null) {
+        console.warn(`[readStream] Stream ended after ${messageCount} messages`);
+        break;
+      }
+      messageCount++;
       await processIncomingMessage(message);
     }
   } catch (err) {
-    proxyConsole.error(`[readStream] error:`, err);
+    proxyConsole.error(`[readStream] error after ${messageCount} messages:`, err);
   }
 }
 
 async function processIncomingMessage(message) {
   try {
-    let text = null;
-    if (typeof message === "string") {
-      text = message;
-    } else if (message instanceof Uint8Array || message instanceof ArrayBuffer) {
-      const dec = new TextDecoder();
-      const maybeText = dec.decode(message);
-      if (maybeText.startsWith("{")) text = maybeText;
-    }
-
-    if (text) {
+    const dec = new TextDecoder();
+    const maybeText = dec.decode(message).trimStart();
+    
+    if (maybeText.startsWith('{')) {
       try {
-        const json = JSON.parse(text);
-        if (json.type === "DecoderConfigs") {
+        const json = JSON.parse(maybeText);
+        console.warn(`[processIncomingMessage] Received JSON message:`, json);
+        if (json.type === 'DecoderConfigs') {
           handleStreamConfigs(json);
           return;
         }
       } catch (e) {
-        proxyConsole.warn(`[processIncomingMessage] Non-JSON text:`, text);
+        proxyConsole.warn(`[processIncomingMessage] Non-JSON text:`, maybeText);
         return;
       }
     }
@@ -491,12 +677,6 @@ async function processIncomingMessage(message) {
   }
 }
 
-// let videoCounterTest = 0;
-// setInterval(() => {
-//   proxyConsole.log("Receive frame rate:", videoCounterTest / 5);
-//   videoCounterTest = 0;
-// }, 5000);
-
 function handleBinaryPacket(dataBuffer) {
   const dataView = new DataView(dataBuffer);
   const sequenceNumber = dataView.getUint32(0, false);
@@ -508,7 +688,6 @@ function handleBinaryPacket(dataBuffer) {
   // if (frameType === 4 || frameType === 5) {
   //   console.warn(`[Worker] 📺 SCREEN_SHARE packet: frameType=${frameType}, seq=${sequenceNumber}, size=${data.byteLength}`);
   // }
-
 
   if (frameType === 0 || frameType === 1) {
     const type = frameType === 0 ? "key" : "delta";
@@ -665,13 +844,20 @@ function handleBinaryPacket(dataBuffer) {
     }
 
     if (keyFrameReceived) {
-      try {
-        if (mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).state === "closed") {
-          videoDecoderScreenShare720p = new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P));
-          const screenShare720pConfig = mediaConfigs.get(CHANNEL_NAME.SCREEN_SHARE_720P);
-          proxyConsole.log("Decoder error, Configuring screen share 720p decoder with config:", screenShare720pConfig);
-          mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).configure(screenShare720pConfig);
+      const decoderState = videoDecoderScreenShare720p ? videoDecoderScreenShare720p.state : null;
+
+      // Recreate decoder if closed or in error state
+      if (!videoDecoderScreenShare720p || decoderState === "closed" || decoderState === "unconfigured") {
+        videoDecoderScreenShare720p = new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P));
+        mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_720P, videoDecoderScreenShare720p);
+        const screenShare720pConfig = mediaConfigs.get(CHANNEL_NAME.SCREEN_SHARE_720P);
+        if (screenShare720pConfig) {
+          proxyConsole.log("Recreating screen share 720p decoder with config:", screenShare720pConfig);
+          videoDecoderScreenShare720p.configure(screenShare720pConfig);
         }
+      }
+
+      try {
         const encodedChunk = new EncodedVideoChunk({
           timestamp: timestamp * 1000,
           type,
@@ -681,6 +867,7 @@ function handleBinaryPacket(dataBuffer) {
         videoDecoderScreenShare720p.decode(encodedChunk);
       } catch (error) {
         proxyConsole.error("Screen share video decode error:", error);
+        keyFrameReceived = false; // Wait for next keyframe to recover
       }
     }
     return;

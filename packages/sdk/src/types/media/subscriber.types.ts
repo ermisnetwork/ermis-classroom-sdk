@@ -103,7 +103,8 @@ export type WorkerMessageType =
   | 'error'
   | 'audio-toggled'
   | 'skipping'
-  | 'resuming';
+  | 'resuming'
+  | 'raptorq-initialized';
 
 // Remote stream ready event data
 export interface RemoteStreamReadyEvent {
