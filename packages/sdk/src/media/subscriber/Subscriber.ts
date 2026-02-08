@@ -578,6 +578,9 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
           this.attachDataChannel(ChannelName.MICROPHONE);
         } else if (this.subscribeType === "screen_share") {
           this.attachDataChannel(ChannelName.SCREEN_SHARE_720P);
+          if (this.config.audioEnabled) {
+            this.attachDataChannel(ChannelName.SCREEN_SHARE_AUDIO);
+          }
         }
       }
     } catch (error) {

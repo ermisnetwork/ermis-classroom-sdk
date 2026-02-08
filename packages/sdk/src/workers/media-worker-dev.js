@@ -24,7 +24,20 @@ let mediaDecoders = new Map();
 let videoIntervalID;
 let audioIntervalID;
 
-let keyFrameReceived = false;
+// Per-channel keyframe tracking - each channel tracks its own keyframe state
+const keyFrameReceivedMap = new Map();
+
+function isKeyFrameReceived(channelName) {
+  return keyFrameReceivedMap.get(channelName) || false;
+}
+
+function setKeyFrameReceived(channelName, value) {
+  keyFrameReceivedMap.set(channelName, value);
+}
+
+function resetAllKeyFrameFlags() {
+  keyFrameReceivedMap.clear();
+}
 
 const channelStreams = new Map();
 
@@ -76,7 +89,7 @@ const createVideoInit = (channelName) => ({
       message: `${channelName} decoder: ${e.message}`,
     });
     // Attempt to recover by resetting keyframe flag - next keyframe will reinitialize decoder
-    keyFrameReceived = false;
+    setKeyFrameReceived(channelName, false);
     proxyConsole.warn(`[Recovery] Reset keyframe flag for ${channelName} decoder, waiting for next keyframe`);
   },
 });
@@ -224,7 +237,7 @@ function attachWebSocket(wsUrl) {
       video: true,
       initialQuality: initialQuality,
     };
-    proxyConsole.log(`[WebSocket] Connected to ${wsUrl}, options:`, options);
+    console.warn(`[Worker] 🔊 WebSocket subscribe options:`, JSON.stringify(options), `subscribeType=${subscribeType}, subscriptionAudioEnabled=${subscriptionAudioEnabled}`);
     commandSender.initSubscribeChannelStream(subscribeType, options);
 
     commandSender.startStream();
@@ -693,10 +706,10 @@ function handleBinaryPacket(dataBuffer) {
     const type = frameType === 0 ? "key" : "delta";
 
     if (type === "key") {
-      keyFrameReceived = true;
+      setKeyFrameReceived(CHANNEL_NAME.VIDEO_360P, true);
     }
 
-    if (keyFrameReceived) {
+    if (isKeyFrameReceived(CHANNEL_NAME.VIDEO_360P)) {
       let decoder360p = mediaDecoders.get(CHANNEL_NAME.VIDEO_360P);
       const decoderState = decoder360p ? decoder360p.state : null;
 
@@ -719,17 +732,17 @@ function handleBinaryPacket(dataBuffer) {
         decoder360p.decode(encodedChunk);
       } catch (err) {
         proxyConsole.error("360p decode error:", err);
-        keyFrameReceived = false; // Wait for next keyframe
+        setKeyFrameReceived(CHANNEL_NAME.VIDEO_360P, false); // Wait for next keyframe
       }
     }
     return;
   } else if (frameType === 2 || frameType === 3) {
     const type = frameType === 2 ? "key" : "delta";
     if (type === "key") {
-      keyFrameReceived = true;
+      setKeyFrameReceived(CHANNEL_NAME.VIDEO_720P, true);
     }
 
-    if (keyFrameReceived) {
+    if (isKeyFrameReceived(CHANNEL_NAME.VIDEO_720P)) {
       let decoder720p = mediaDecoders.get(CHANNEL_NAME.VIDEO_720P);
       const decoderState = decoder720p ? decoder720p.state : null;
 
@@ -753,7 +766,7 @@ function handleBinaryPacket(dataBuffer) {
         decoder720p.decode(encodedChunk);
       } catch (err) {
         proxyConsole.error("720p decode error:", err);
-        keyFrameReceived = false; // Wait for next keyframe
+        setKeyFrameReceived(CHANNEL_NAME.VIDEO_720P, false); // Wait for next keyframe
       }
     }
     return;
@@ -761,10 +774,10 @@ function handleBinaryPacket(dataBuffer) {
     // 1080p video frames (CAM_1080P_KEY=13, CAM_1080P_DELTA=14)
     const type = frameType === 13 ? "key" : "delta";
     if (type === "key") {
-      keyFrameReceived = true;
+      setKeyFrameReceived(CHANNEL_NAME.VIDEO_1080P, true);
     }
 
-    if (keyFrameReceived) {
+    if (isKeyFrameReceived(CHANNEL_NAME.VIDEO_1080P)) {
       let decoder1080p = mediaDecoders.get(CHANNEL_NAME.VIDEO_1080P);
       const decoderState = decoder1080p ? decoder1080p.state : null;
 
@@ -788,7 +801,7 @@ function handleBinaryPacket(dataBuffer) {
         decoder1080p.decode(encodedChunk);
       } catch (err) {
         proxyConsole.error("1080p decode error:", err);
-        keyFrameReceived = false; // Wait for next keyframe
+        setKeyFrameReceived(CHANNEL_NAME.VIDEO_1080P, false); // Wait for next keyframe
       }
     }
     return;
@@ -796,10 +809,10 @@ function handleBinaryPacket(dataBuffer) {
     // 1440p video frames (CAM_1440P_KEY=15, CAM_1440P_DELTA=16)
     const type = frameType === 15 ? "key" : "delta";
     if (type === "key") {
-      keyFrameReceived = true;
+      setKeyFrameReceived(CHANNEL_NAME.VIDEO_1440P, true);
     }
 
-    if (keyFrameReceived) {
+    if (isKeyFrameReceived(CHANNEL_NAME.VIDEO_1440P)) {
       let decoder1440p = mediaDecoders.get(CHANNEL_NAME.VIDEO_1440P);
       const decoderState = decoder1440p ? decoder1440p.state : null;
 
@@ -823,7 +836,7 @@ function handleBinaryPacket(dataBuffer) {
         decoder1440p.decode(encodedChunk);
       } catch (err) {
         proxyConsole.error("1440p decode error:", err);
-        keyFrameReceived = false; // Wait for next keyframe
+        setKeyFrameReceived(CHANNEL_NAME.VIDEO_1440P, false); // Wait for next keyframe
       }
     }
     return;
@@ -840,10 +853,10 @@ function handleBinaryPacket(dataBuffer) {
 
 
     if (type === "key") {
-      keyFrameReceived = true;
+      setKeyFrameReceived(CHANNEL_NAME.SCREEN_SHARE_720P, true);
     }
 
-    if (keyFrameReceived) {
+    if (isKeyFrameReceived(CHANNEL_NAME.SCREEN_SHARE_720P)) {
       const decoderState = videoDecoderScreenShare720p ? videoDecoderScreenShare720p.state : null;
 
       // Recreate decoder if closed or in error state
@@ -867,7 +880,7 @@ function handleBinaryPacket(dataBuffer) {
         videoDecoderScreenShare720p.decode(encodedChunk);
       } catch (error) {
         proxyConsole.error("Screen share video decode error:", error);
-        keyFrameReceived = false; // Wait for next keyframe to recover
+        setKeyFrameReceived(CHANNEL_NAME.SCREEN_SHARE_720P, false); // Wait for next keyframe to recover
       }
     }
     return;
@@ -998,7 +1011,7 @@ async function handleWebRTCBitrateSwitch(targetChannelName) {
     }
 
     currentVideoChannel = targetChannelName;
-    keyFrameReceived = false;
+    setKeyFrameReceived(targetChannelName, false);
 
     self.postMessage({
       type: "bitrateChanged",
@@ -1038,7 +1051,7 @@ async function handleWebTransportBitrateSwitch(targetChannelName) {
     }
 
     currentVideoChannel = quality;
-    keyFrameReceived = false;
+    setKeyFrameReceived(quality, false);
 
     self.postMessage({
       type: "bitrateChanged",
@@ -1066,7 +1079,7 @@ function resetDecoders() {
 
   // videoCodecReceived = false;
   // audioCodecReceived = false;
-  keyFrameReceived = false;
+  resetAllKeyFrameFlags();
 
   clearInterval(videoIntervalID);
   clearInterval(audioIntervalID);

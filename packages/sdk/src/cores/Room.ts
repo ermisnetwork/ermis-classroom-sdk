@@ -1476,14 +1476,14 @@ export class Room extends EventEmitter {
         return;
       }
 
-      log(`[Room] Initializing Subscriber for screen share for participant:`, participantUserId, "hasAudio:", hasAudio);
+      console.warn(`[Room] 🔊 handleRemoteScreenShare: participantUserId=${participantUserId}, hasAudio param=${hasAudio}, participant.hasScreenShareAudio BEFORE=${participant.hasScreenShareAudio}`);
       
       // Update participant's screen share audio state if provided
       if (hasAudio !== undefined) {
         participant.hasScreenShareAudio = hasAudio;
       }
 
-      log(`[Room] Subscribing to screen share from ${participantUserId}, hasAudio: ${participant.hasScreenShareAudio}`);
+      console.warn(`[Room] 🔊 participant.hasScreenShareAudio AFTER=${participant.hasScreenShareAudio}`);
 
       const screenSubscriber = new Subscriber({
         subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
