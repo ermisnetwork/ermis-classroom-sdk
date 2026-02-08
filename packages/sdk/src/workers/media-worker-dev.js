@@ -58,12 +58,21 @@ let protocol = null;
 // WebSocket specific
 let isWebSocket = false;
 
-let fecManager = null;
+/** @type {Map<string, WasmFecManager>} Per-channel FEC managers to prevent data mixing */
+const fecManagers = new Map();
 let isRaptorQInitialized = false;
 
+function getOrCreateFecManager(channelName) {
+  if (!fecManagers.has(channelName)) {
+    fecManagers.set(channelName, new WasmFecManager());
+  }
+  return fecManagers.get(channelName);
+}
+
 async function initRaptorQWasm() {
-  await raptorqInit();
-  fecManager = new WasmFecManager();
+  // Load RaptorQ WASM from local path (served via Service Worker cache)
+  const wasmUrl = "../raptorQ/raptorq_wasm_bg.wasm";
+  await raptorqInit(wasmUrl);
   isRaptorQInitialized = true;
 }
 
@@ -478,7 +487,8 @@ function handleWebRtcMessage(channelName, message) {
     }
 
     if (isFec) {
-      const result = fecManager.process_fec_packet(payload, sequenceNumber);
+      const channelFecManager = getOrCreateFecManager(channelName);
+      const result = channelFecManager.process_fec_packet(payload, sequenceNumber);
       if (result) {
         const decodedData = result[0][1];
         // Use jitter buffer for video FEC packets
@@ -573,7 +583,11 @@ function handleStreamConfigs(json) {
         const decoder = mediaDecoders.get(channelName);
         if (decoder) {
           try {
-            decoder.configure(audioConfig);
+            decoder.configure(audioConfig).then((configResult) => {
+              console.log(`[Audio] configured successfully for ${channelName}, result:`, configResult, "state:", decoder.state);
+            }).catch((err) => {
+              console.error(`[Audio] configure() REJECTED for ${channelName}:`, err);
+            });
 
             try {
               const dataView = new DataView(desc.buffer);
@@ -587,13 +601,13 @@ function handleStreamConfigs(json) {
               });
               decoder.decode(chunk);
             } catch (err) {
-              proxyConsole.warn(`Error decoding first audio frame (${channelName}):`, err);
+              console.warn(`[Audio] Error decoding first audio frame (${channelName}):`, err);
             }
           } catch (err) {
-            proxyConsole.warn(`Configure decoder fail ${channelName}:`, err);
+            console.error(`[Audio] Configure decoder FAIL ${channelName}:`, err);
           }
         } else {
-          proxyConsole.warn(`No decoder for audio channel ${channelName}`);
+          console.warn(`[Audio] No decoder for audio channel ${channelName}`);
         }
       }
     } catch (err) {
@@ -670,7 +684,7 @@ async function processIncomingMessage(message) {
     if (maybeText.startsWith('{')) {
       try {
         const json = JSON.parse(maybeText);
-        console.warn(`[processIncomingMessage] Received JSON message:`, json);
+        console.log(`[processIncomingMessage] Received JSON message:`, json);
         if (json.type === 'DecoderConfigs') {
           handleStreamConfigs(json);
           return;
@@ -914,7 +928,7 @@ async function initializeDecoders() {
       mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
       mediaDecoders.set(CHANNEL_NAME.VIDEO_1080P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P)));
       mediaDecoders.set(CHANNEL_NAME.VIDEO_1440P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1440P)));
-      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, new OpusAudioDecoder(audioInit));
+      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, new OpusAudioDecoder({ ...audioInit }));
       break;
 
     case STREAM_TYPE.SCREEN_SHARE:
@@ -922,7 +936,7 @@ async function initializeDecoders() {
         CHANNEL_NAME.SCREEN_SHARE_720P,
         new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P))
       );
-      mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_AUDIO, new OpusAudioDecoder(audioInit));
+      mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_AUDIO, new OpusAudioDecoder({ ...audioInit }));
       proxyConsole.warn(
         "Initialized screen share decoders:",
         mediaDecoders,
@@ -938,7 +952,7 @@ async function initializeDecoders() {
       mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
       mediaDecoders.set(CHANNEL_NAME.VIDEO_1080P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P)));
       mediaDecoders.set(CHANNEL_NAME.VIDEO_1440P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1440P)));
-      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, new OpusAudioDecoder(audioInit));
+      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, new OpusAudioDecoder({ ...audioInit }));
       break;
   }
 

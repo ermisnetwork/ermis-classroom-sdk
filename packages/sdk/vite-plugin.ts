@@ -9,6 +9,7 @@ export interface CopySDKFilesOptions {
 }
 
 const DEFAULT_DIRECTORIES = ['workers', 'raptorQ', 'polyfills', 'opus_decoder'];
+const SDK_ROOT_FILES = ['sdk-sw.js'];
 
 export function copySDKStaticFiles(options: CopySDKFilesOptions = {}): Plugin {
   const {
@@ -68,6 +69,15 @@ export function copySDKStaticFiles(options: CopySDKFilesOptions = {}): Plugin {
       const src = join(sdkPath, dir);
       const dest = join(publicDir, dir);
       if (copyDirectory(src, dest, dir)) copied++;
+    }
+    // Copy root-level SDK files (e.g. sdk-sw.js)
+    for (const file of SDK_ROOT_FILES) {
+      const src = join(sdkPath, file);
+      if (existsSync(src)) {
+        const dest = join(publicDir, file);
+        cpSync(src, dest, {force: true});
+        log(`Copied ${file}`);
+      }
     }
     const source = isMonorepo ? 'local monorepo' : 'node_modules';
     log(`Copied ${copied}/${directories.length} directories from ${source}`);

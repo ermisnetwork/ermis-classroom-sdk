@@ -1666,7 +1666,39 @@ export class Room extends EventEmitter {
 
     // Reconnection events are now handled via GlobalEventBus in _setupGlobalEventListeners()
 
-    await subscriber.start();
+    try {
+      await subscriber.start();
+    } catch (startError) {
+      console.warn("[Room] Subscriber start failed, retrying in 2s:", startError);
+      // Cleanup failed subscriber
+      try { subscriber.stop(); } catch (_) { /* ignore */ }
+      // Wait for resources to release
+      await new Promise(r => setTimeout(r, 2000));
+      // Create fresh subscriber and retry once
+      const retrySubscriber = new Subscriber({
+        localStreamId: this.localParticipant?.streamId!,
+        subcribeUrl: `${this.mediaConfig.webtpUrl}/subscribe/${this.id}/${participant.streamId}`,
+        streamId: participant.streamId,
+        roomId: this.id,
+        streamOutputEnabled: true,
+        host: this.mediaConfig.hostNode,
+        protocol: this.mediaConfig.subscribeProtocol as any,
+        subscribeType: StreamTypes.CAMERA,
+        onStatus: (_msg: string, isError: boolean) => {
+          log("[Room] Subscriber status for", participant.userId, ":", isError ? "FAILED" : "CONNECTED");
+          participant.setConnectionStatus(isError ? "failed" : "connected");
+        },
+        audioWorkletUrl: "/workers/audio-worklet.js",
+        mstgPolyfillUrl: "/polyfills/MSTG_polyfill.js",
+        initialQuality: this.subscriberInitQuality,
+      });
+      if (this.audioMixer) {
+        retrySubscriber.setAudioMixer(this.audioMixer);
+      }
+      await retrySubscriber.start();
+      participant.setSubscriber(retrySubscriber);
+      return;
+    }
     participant.setSubscriber(subscriber);
 
     if (participant.isScreenSharing) {
@@ -1766,17 +1798,20 @@ export class Room extends EventEmitter {
       if (isLocalRemoved) {
         log("[Room] Local participant was removed from the room");
 
-        // Emit event before cleanup so UI can show appropriate message
+        // Immediately stop media connections to prevent reconnect loop
+        // The server will close the connection, and if isPublishing is still true,
+        // the Publisher would try to reconnect indefinitely.
+        this._cleanupMediaConnections().catch((err) => {
+          console.warn("[Room] Error cleaning up media after kick:", err);
+        });
+
+        // Emit event after cleanup so UI can show appropriate message
         this.emit("participantRemovedByHost", {
           room: this,
           participant: this.localParticipant,
           reason,
           isLocal: true,
         });
-
-        // Auto leave the room
-        // Don't auto leave yet - let UI handle the notification and cleanup
-        // We keep isActive = true so that leave() can properly run cleanup later
       } else {
         // Remote participant was removed - use stream_id for lookup
         const streamId = removedEvent.participant?.stream_id;

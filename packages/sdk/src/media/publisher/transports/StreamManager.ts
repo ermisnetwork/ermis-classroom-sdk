@@ -282,7 +282,6 @@ export class StreamManager extends EventEmitter<{
         const streamData = this.streams.get(channelName);
         // Use the publisher state set by Publisher
         if (streamData) {
-
           this.commandSender?.sendPublisherState(streamData, this.publisherState);
           log("[StreamManager] Sent initial publisher state (WebTransport):", this.publisherState);
           this.commandSender?.startHeartbeat(streamData);
@@ -492,41 +491,33 @@ export class StreamManager extends EventEmitter<{
         // Use the publisher state set by Publisher
         const streamData = this.streams.get(channelName);
         if (streamData) {
-          await this.commandSender?.sendPublisherState(streamData, this.publisherState);
-          log("[StreamManager] Sent initial publisher state (WebRTC):", this.publisherState);
+          try {
+            await this.commandSender?.sendPublisherState(streamData, this.publisherState);
+            log("[StreamManager] Sent initial publisher state (WebRTC):", this.publisherState);
+          } catch (err) {
+            console.error("[StreamManager] Failed to send publisher state in onopen:", err);
+          }
 
-          //       {
-          //   "type": "event",
-          //   "data": {
-          //     "type": "custom",
-          //     "target": {
-          //       "group": { "ids": ["u1", "u2"] }
-          //     },
-          //     "value": {
-          //       "action": "play_sound",
-          //       "volume": 0.7
-          //     }
-          //   }
-          // }
+          try {
+            const dummyEvent = {
+              type: "custom",
+              sender_stream_id: this.streamId,
+              target: {
+                type: "room"
+              },
+              value: {
+                action: "play_sound",
+                volume: 0.7
+              }
+            };
+            await this.commandSender?.sendEvent(streamData, dummyEvent);
+          } catch (err) {
+            console.error("[StreamManager] Failed to send dummy event in onopen:", err);
+          }
 
-          const dummyEvent = {
-            type: "custom",
-            sender_stream_id: this.streamId,
-            // target is one of types: room or group, with group having array of user's streamId
-            target: {
-              type: "room"
-              // type: "group",
-              // ids: ["u1", "u2"]
-            },
-            value: {
-              action: "play_sound",
-              volume: 0.7
-            }
-          };
-
-          // console.warn(`[StreamManager] Sending dummy event after data channel open:`, dummyEvent);
-          await this.commandSender?.sendEvent(streamData, dummyEvent);
-          //send dummy custome event
+          // Start heartbeat for WebRTC meeting_control channel
+          console.log("[StreamManager] Starting heartbeat for WebRTC meeting_control channel");
+          this.commandSender?.startHeartbeat(streamData);
         }
 
         // Setup event listener using channel name from streams map
@@ -536,8 +527,6 @@ export class StreamManager extends EventEmitter<{
       log(`WebRTC data channel (${channelName}) established`);
     };
 
-
-
     // Monitor ICE connection state for debugging
     peerConnection.oniceconnectionstatechange = () => {
       log(`[StreamManager] ${channelName} ICE connection state: ${peerConnection.iceConnectionState}`);
@@ -546,8 +535,6 @@ export class StreamManager extends EventEmitter<{
       }
     };
   }
-
-
 
   async sendCustomEvent(targets: string[], value: any,): Promise<void> {
     let target: any;
