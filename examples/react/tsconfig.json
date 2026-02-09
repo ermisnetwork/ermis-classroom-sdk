@@ -19,7 +19,8 @@
     "noUncheckedSideEffectImports": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@ermisnetwork/ermis-classroom-react": ["../../packages/react/dist/index.d.ts"]
     }
   },
   "include": ["src"]
