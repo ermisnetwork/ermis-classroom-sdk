@@ -1,6 +1,8 @@
 import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
+import CommandSender from "./ClientCommand.js";
+import { CHANNEL_NAME } from "./publisherConstants.js";
 
 let videoDecoder360p;
 let videoDecoder720p;
@@ -29,6 +31,9 @@ let audioCodecReceived = false;
 let keyFrameReceived = false;
 
 const channelStreams = new Map();
+
+// command sender
+let commandSender = null;
 
 
 const proxyConsole = {
@@ -118,6 +123,22 @@ self.onmessage = async function (e) {
       handleBitrateSwitch(quality);
       break;
 
+    case "startStream":
+      if (commandSender) commandSender.startStream();
+      break;
+
+    case "stopStream":
+      if (commandSender) commandSender.stopStream();
+      break;
+
+    case "pauseStream":
+      if (commandSender) commandSender.pauseStream();
+      break;
+
+    case "resumeStream":
+      if (commandSender) commandSender.resumeStream();
+      break;
+
     case "reset":
       resetDecoders();
       break;
@@ -132,12 +153,42 @@ self.onmessage = async function (e) {
 // Stream handling
 // ------------------------------
 
+/// Send data over a WebTransport stream, with length prefix
+async function sendOverStream(channelName, frameBytes) {
+  const stream = channelStreams.get(channelName);
+  if (!stream || !stream.writer) {
+    proxyConsole.error(`Stream ${channelName} not found`);
+    return;
+  }
+
+  try {
+    const len = frameBytes.length;
+    const out = new Uint8Array(4 + len);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, len, false);
+    out.set(frameBytes, 4);
+    await stream.writer.write(out);
+  } catch (error) {
+    proxyConsole.error(`Failed to send over stream ${channelName}:`, error);
+    throw error;
+  }
+}
+
 async function attachWebTransportStream(channelName, readable, writable) {
   const reader = readable.getReader();
   const writer = writable.getWriter();
 
   channelStreams.set(channelName, { reader, writer });
   proxyConsole.log(`Attached WebTransport stream for ${channelName}`);
+
+  if (!commandSender) {
+    commandSender = new CommandSender({
+      sendDataFn: sendOverStream,
+      protocol: "webtransport",
+      commandType: "subscriber_command",
+    });
+  }
+
   const initText = `subscribe:${channelName}`;
   proxyConsole.log(`Sending init message for ${channelName}:`, initText);
 

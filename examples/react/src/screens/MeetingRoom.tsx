@@ -10,7 +10,7 @@ import {
 } from "@ermisnetwork/ermis-classroom-react"
 import { Button } from "@/components/ui/button"
 import {
-  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers, IconDoorExit, IconPlayerStop, IconUserMinus, IconBan, IconBroadcast, IconBroadcastOff, IconPlayerRecord, IconPlayerRecordFilled
+  IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers, IconDoorExit, IconPlayerStop, IconUserMinus, IconBan, IconBroadcast, IconBroadcastOff, IconPlayerRecord, IconPlayerRecordFilled, IconPlayerPause, IconPlayerPlay
 } from "@tabler/icons-react"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { cn } from "@/lib/utils"
@@ -39,6 +39,9 @@ function CustomParticipantTile({
   onDisableScreenShare,
   onEnableScreenShare,
   onRemoveParticipant,
+  onPauseStream,
+  onResumeStream,
+  isVideoPaused,
 }: {
   participant: ParticipantData
   size: { width: number; height: number }
@@ -58,6 +61,9 @@ function CustomParticipantTile({
   onDisableScreenShare?: (id: string) => void
   onEnableScreenShare?: (id: string) => void
   onRemoveParticipant?: (id: string, reason?: string) => void
+  onPauseStream?: (id: string) => void
+  onResumeStream?: (id: string) => void
+  isVideoPaused?: boolean
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [showRemoveModal, setShowRemoveModal] = useState(false)
@@ -72,6 +78,7 @@ function CustomParticipantTile({
 
   const isPinned = isPinnedLocal || isPinnedForEveryone
   const showHostActions = isHost && !participant.isLocal
+  const showStreamControls = !participant.isLocal
 
   return (
     <div
@@ -98,7 +105,7 @@ function CustomParticipantTile({
           </div>
         </div>
       )}
-      {(canPin || showHostActions) && (
+      {(canPin || showHostActions || showStreamControls) && (
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
             <button
@@ -277,6 +284,36 @@ function CustomParticipantTile({
                   </DropdownMenu.Item>
                 </>
               )}
+
+              {/* Stream Controls (for any remote participant) */}
+              {showStreamControls && (
+                <>
+                  {(canPin || showHostActions) && <DropdownMenu.Separator className="h-px bg-slate-600 my-1" />}
+                  {isVideoPaused ? (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onResumeStream?.(participant.id)
+                      }}
+                    >
+                      <IconPlayerPlay className="h-4 w-4 text-green-400" />
+                      Resume video
+                    </DropdownMenu.Item>
+                  ) : (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onPauseStream?.(participant.id)
+                      }}
+                    >
+                      <IconPlayerPause className="h-4 w-4 text-yellow-400" />
+                      Pause video
+                    </DropdownMenu.Item>
+                  )}
+                </>
+              )}
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
@@ -381,6 +418,10 @@ function CustomTile({
   onPinForEveryone,
   onUnpinForEveryone,
   canPin,
+  onPauseStream,
+  onResumeStream,
+  isVideoPaused,
+  participantId,
 }: {
   tile: TileData
   size: { width: number; height: number }
@@ -391,6 +432,10 @@ function CustomTile({
   onPinForEveryone?: (id: string) => void
   onUnpinForEveryone?: (id: string) => void
   canPin: boolean
+  onPauseStream?: (id: string) => void
+  onResumeStream?: (id: string) => void
+  isVideoPaused?: boolean
+  participantId?: string
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
 
@@ -402,6 +447,7 @@ function CustomTile({
 
   const isScreenShare = tile.type === 'screenShare'
   const isPinned = isPinnedLocal || isPinnedForEveryone
+  const showStreamControls = isScreenShare && !tile.isLocal && participantId && (onPauseStream || onResumeStream)
 
   return (
     <div
@@ -432,7 +478,7 @@ function CustomTile({
           </div>
         </div>
       )}
-      {canPin && (
+      {(canPin || showStreamControls) && (
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
             <button
@@ -507,6 +553,36 @@ function CustomTile({
                   <IconUsers className="h-4 w-4 text-blue-400" />
                   Pin for everyone
                 </DropdownMenu.Item>
+              )}
+
+              {/* Stream Controls (pause/resume for screen share) */}
+              {showStreamControls && (
+                <>
+                  {canPin && <DropdownMenu.Separator className="h-px bg-slate-600 my-1" />}
+                  {isVideoPaused ? (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onResumeStream?.(participantId!)
+                      }}
+                    >
+                      <IconPlayerPlay className="h-4 w-4 text-green-400" />
+                      Resume video
+                    </DropdownMenu.Item>
+                  ) : (
+                    <DropdownMenu.Item
+                      className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-slate-700 focus:bg-slate-700 flex items-center gap-2"
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        onPauseStream?.(participantId!)
+                      }}
+                    >
+                      <IconPlayerPause className="h-4 w-4 text-yellow-400" />
+                      Pause video
+                    </DropdownMenu.Item>
+                  )}
+                </>
               )}
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
@@ -926,6 +1002,65 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
 
   const canPin = totalParticipants > 1
 
+  // Paused stream state
+  const [pausedParticipants, setPausedParticipants] = useState<Set<string>>(new Set())
+
+  const handlePauseStream = useCallback(async (participantId: string, type: 'camera' | 'screenShare' = 'camera') => {
+    const participant = participants.get(participantId)
+    if (participant) {
+      try {
+        if (type === 'screenShare') {
+          const screenSub = (participant as any).screenSubscriber
+          if (screenSub) {
+            screenSub.pauseStream()
+            setPausedParticipants(prev => new Set(prev).add(`screen-${participantId}`))
+            log('[MeetingRoom] Paused screen share for:', participantId)
+          } else {
+            console.warn('[MeetingRoom] No screenSubscriber found for:', participantId)
+          }
+        } else {
+          await (participant as any).pauseStream()
+          setPausedParticipants(prev => new Set(prev).add(participantId))
+          log('[MeetingRoom] Paused video for:', participantId)
+        }
+      } catch (e) {
+        console.error('[MeetingRoom] Failed to pause stream:', e)
+      }
+    }
+  }, [participants])
+
+  const handleResumeStream = useCallback(async (participantId: string, type: 'camera' | 'screenShare' = 'camera') => {
+    const participant = participants.get(participantId)
+    if (participant) {
+      try {
+        if (type === 'screenShare') {
+          const screenSub = (participant as any).screenSubscriber
+          if (screenSub) {
+            screenSub.resumeStream()
+            setPausedParticipants(prev => {
+              const next = new Set(prev)
+              next.delete(`screen-${participantId}`)
+              return next
+            })
+            log('[MeetingRoom] Resumed screen share for:', participantId)
+          } else {
+            console.warn('[MeetingRoom] No screenSubscriber found for:', participantId)
+          }
+        } else {
+          await (participant as any).resumeStream()
+          setPausedParticipants(prev => {
+            const next = new Set(prev)
+            next.delete(participantId)
+            return next
+          })
+          log('[MeetingRoom] Resumed video for:', participantId)
+        }
+      } catch (e) {
+        console.error('[MeetingRoom] Failed to resume stream:', e)
+      }
+    }
+  }, [participants])
+
   // Local pin handlers
   const handlePinLocal = useCallback((participantId: string) => {
     log('[MeetingRoom] handlePinLocal:', { participantId })
@@ -1082,9 +1217,13 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         onDisableScreenShare={disableParticipantScreenShare}
         onEnableScreenShare={enableParticipantScreenShare}
         onRemoveParticipant={removeParticipant}
+        // Stream controls
+        onPauseStream={handlePauseStream}
+        onResumeStream={handleResumeStream}
+        isVideoPaused={pausedParticipants.has(participant.id)}
       />
     ),
-    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId, isRoomOwner, muteParticipant, unmuteParticipant, disableParticipantCamera, enableParticipantCamera, disableParticipantScreenShare, enableParticipantScreenShare, removeParticipant]
+    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId, isRoomOwner, muteParticipant, unmuteParticipant, disableParticipantCamera, enableParticipantCamera, disableParticipantScreenShare, enableParticipantScreenShare, removeParticipant, handlePauseStream, handleResumeStream, pausedParticipants]
   )
 
   const renderScreenShare = useCallback(
@@ -1107,10 +1246,14 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
           onPinForEveryone={handlePinForEveryone}
           onUnpinForEveryone={handleUnpinForEveryone}
           canPin={canPin}
+          onPauseStream={(id) => handlePauseStream(id, 'screenShare')}
+          onResumeStream={(id) => handleResumeStream(id, 'screenShare')}
+          isVideoPaused={pausedParticipants.has(`screen-${screenShare.id}`)}
+          participantId={screenShare.id}
         />
       )
     },
-    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId]
+    [handlePinLocal, handleUnpinLocal, handlePinForEveryone, handleUnpinForEveryone, canPin, localPinnedUserId, everyonePinnedUserId, handlePauseStream, handleResumeStream, pausedParticipants]
   )
 
   return (

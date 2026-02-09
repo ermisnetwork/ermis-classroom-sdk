@@ -208,6 +208,16 @@ self.onmessage = async function (e) {
       if (channelName && dataChannel) {
         proxyConsole.warn(`[Publisher worker]: Attaching WebRTC data channel for ${channelName}`);
         attachWebRTCDataChannel(channelName, dataChannel);
+
+        // Initialize commandSender for WebRTC if not already done
+        if (!commandSender) {
+          commandSender = new CommandSender({
+            localStreamId,
+            sendDataFn: sendOverDataChannel,
+            protocol: "websocket", // uses string JSON format (non-webtransport path)
+            commandType: "subscriber_command",
+          });
+        }
       }
       break;
 
@@ -218,6 +228,23 @@ self.onmessage = async function (e) {
 
     case "switchBitrate":
       handleBitrateSwitch(quality);
+      break;
+    
+    case "startStream":
+      if (commandSender) commandSender.startStream();
+      break;
+
+    case "stopStream":
+      if (commandSender) commandSender.stopStream();
+      break;
+
+    case "pauseStream":
+      resetAllKeyFrameFlags(); // Reset so decoder waits for keyframe on resume
+      if (commandSender) commandSender.pauseStream();
+      break;
+
+    case "resumeStream":
+      if (commandSender) commandSender.resumeStream();
       break;
 
     case "reset":
@@ -310,6 +337,21 @@ function attachWebRTCDataChannel(channelName, channel) {
   channel.onmessage = (event) => {
     handleWebRtcMessage(channelName, event.data);
   };
+}
+
+// Send subscriber commands over WebRTC DataChannel
+async function sendOverDataChannel(json) {
+  // Send to all video/screen-share DataChannels (pause/resume affects video)
+  for (const [name, channel] of webRtcDataChannels) {
+    if ((name.startsWith('video_') || (name.startsWith('screen_share_') && !name.includes('audio'))) && channel.readyState === 'open') {
+      try {
+        channel.send(json);
+        proxyConsole.warn(`[WebRTC] Sent command to ${name}: ${json}`);
+      } catch (error) {
+        proxyConsole.error(`[WebRTC] Failed to send command to ${name}:`, error);
+      }
+    }
+  }
 }
 
 // ======================================
@@ -641,7 +683,7 @@ async function attachWebTransportStream(readable, writable, channelName) {
 
 async function sendOverStream(frameBytes) {
   if (!webTPStreamWriter) {
-    proxyConsole.error(`WebTransport stream not found`);
+    console.error(`[sendOverStream] WebTransport stream writer not found!`);
     return;
   }
 
@@ -653,7 +695,7 @@ async function sendOverStream(frameBytes) {
     out.set(frameBytes, 4);
     await webTPStreamWriter.write(out);
   } catch (error) {
-    proxyConsole.error(`Failed to send over stream:`, error);
+    console.error(`[sendOverStream] ❌ Failed to send over stream:`, error);
     throw error;
   }
 }

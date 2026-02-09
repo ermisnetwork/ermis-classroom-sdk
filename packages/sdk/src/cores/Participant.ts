@@ -66,7 +66,7 @@ export class Participant extends EventEmitter {
       can_subscribe: true,
       can_publish: true,
       can_publish_data: true,
-      can_publish_sources: [["mic_48k", true], ["video_360p", true], ["video_720p", true], ["video_1080p", true], ["screen_share_720p", true], ["screen_share_1080p", true], ["screen_share_audio", true]],
+      can_publish_sources: [["mic_48k", true], ["video_360p", true], ["video_720p", true], ["video_1080p", true], ["video_1440p", true], ["screen_share_720p", true], ["screen_share_1080p", true], ["screen_share_audio", true]],
       hidden: false,
       can_update_metadata: false,
     };
@@ -317,6 +317,80 @@ export class Participant extends EventEmitter {
       await this.stopScreenShare();
     } else {
       return await this.startScreenShare();
+    }
+  }
+
+  /**
+   * Start receiving stream from server
+   */
+  async startStream(): Promise<void> {
+    if (!this.subscriber) return;
+
+    try {
+      this.subscriber.startStream();
+      this.emit("streamStarted", { participant: this });
+    } catch (error) {
+      this.emit("error", {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "startStream",
+      });
+    }
+  }
+
+  /**
+   * Stop receiving stream from server
+   */
+  async stopStream(): Promise<void> {
+    if (!this.subscriber) return;
+
+    try {
+      this.subscriber.stopStream();
+      this.emit("streamStopped", { participant: this });
+    } catch (error) {
+      this.emit("error", {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "stopStream",
+      });
+    }
+  }
+
+  /**
+   * Pause receiving stream from server
+   */
+  async pauseStream(): Promise<void> {
+    console.warn(`[Participant.pauseStream] subscriber=${!!this.subscriber}`);
+    if (!this.subscriber) return;
+
+    try {
+      this.subscriber.pauseStream();
+      this.emit("streamPaused", { participant: this });
+    } catch (error) {
+      console.error(`[Participant.pauseStream] ERROR:`, error);
+      this.emit("error", {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "pauseStream",
+      });
+    }
+  }
+
+  /**
+   * Resume receiving stream from server
+   */
+  async resumeStream(): Promise<void> {
+    if (!this.subscriber) return;
+
+    try {
+      this.subscriber.resumeStream();
+      this.emit("streamResumed", { participant: this });
+    } catch (error) {
+      this.emit("error", {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "resumeStream",
+      });
     }
   }
 
