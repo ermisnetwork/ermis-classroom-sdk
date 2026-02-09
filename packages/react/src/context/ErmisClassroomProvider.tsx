@@ -60,8 +60,9 @@ export function ErmisClassroomProvider({
       reconnectDelay: config.reconnectDelay,
       videoResolutions: config.videoResolutions,
       subscriberInitQuality: config.subscriberInitQuality,
+      sdkAssetsUrl: config.sdkAssetsUrl,
     };
-  }, [config.host, config.hostNode, config.debug, config.webtpUrl, config.apiUrl, config.reconnectAttempts, config.reconnectDelay, config.videoResolutions, config.subscriberInitQuality]);
+  }, [config.host, config.hostNode, config.debug, config.webtpUrl, config.apiUrl, config.reconnectAttempts, config.reconnectDelay, config.videoResolutions, config.subscriberInitQuality, config.sdkAssetsUrl]);
   const cfgKey = useMemo(() => JSON.stringify(cfg), [cfg]);
 
   // Room state

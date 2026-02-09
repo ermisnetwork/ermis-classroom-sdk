@@ -174,11 +174,12 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     // Only load MSTP polyfill (same as original JS version)
     // MSTG polyfill is loaded by Subscriber when needed
     log("[Publisher] 🔧 loadPolyfills() v2.0 - TypeScript version");
-    if (!document.querySelector('script[src*="MSTP_polyfill.js"]')) {
-      log("[Publisher] Loading MSTP polyfill from /polyfills/MSTP_polyfill.js");
+    const polyfillUrl = "/polyfills/MSTP_polyfill.js";
+    if (!document.querySelector(`script[src*="MSTP_polyfill.js"]`)) {
+      log(`[Publisher] Loading MSTP polyfill from ${polyfillUrl}`);
       await new Promise<void>((resolve, reject) => {
         const script = document.createElement("script");
-        script.src = "/polyfills/MSTP_polyfill.js";
+        script.src = polyfillUrl;
         script.onload = () => {
           log("[Publisher] Polyfill loaded successfully");
           resolve();

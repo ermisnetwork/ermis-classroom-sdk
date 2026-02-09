@@ -269,14 +269,14 @@ export class MediaDeviceManager extends EventEmitter {
     if (constraints.video && this.selectedDevices.camera) {
       finalConstraints.video = {
         ...(typeof constraints.video === "object" ? constraints.video : {}),
-        deviceId: {exact: this.selectedDevices.camera},
+        deviceId: {ideal: this.selectedDevices.camera},
       };
     }
 
     if (constraints.audio && this.selectedDevices.microphone) {
       finalConstraints.audio = {
         ...(typeof constraints.audio === "object" ? constraints.audio : {}),
-        deviceId: {exact: this.selectedDevices.microphone},
+        deviceId: {ideal: this.selectedDevices.microphone},
       };
     }
 
@@ -287,6 +287,31 @@ export class MediaDeviceManager extends EventEmitter {
       await this.refreshDevices();
       return stream;
     } catch (error) {
+      // On Safari, device IDs can become invalid after tracks are stopped
+      // (e.g. after being kicked from a room). Retry without deviceId constraints.
+      if (error instanceof OverconstrainedError || (error as any)?.name === 'OverconstrainedError') {
+        console.warn("getUserMedia OverconstrainedError — retrying without deviceId:", error);
+        const fallbackConstraints: MediaStreamConstraints = {...constraints};
+        if (typeof fallbackConstraints.video === "object") {
+          const {deviceId, ...rest} = fallbackConstraints.video as MediaTrackConstraints;
+          fallbackConstraints.video = Object.keys(rest).length > 0 ? rest : true;
+        }
+        if (typeof fallbackConstraints.audio === "object") {
+          const {deviceId, ...rest} = fallbackConstraints.audio as MediaTrackConstraints;
+          fallbackConstraints.audio = Object.keys(rest).length > 0 ? rest : true;
+        }
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+          // Reset selected devices since old IDs are invalid
+          this.selectedDevices.camera = null;
+          this.selectedDevices.microphone = null;
+          await this.refreshDevices();
+          return stream;
+        } catch (fallbackError) {
+          console.error("getUserMedia fallback also failed:", fallbackError);
+          throw fallbackError;
+        }
+      }
       console.error("getUserMedia failed:", error);
       throw error;
     }

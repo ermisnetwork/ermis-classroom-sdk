@@ -42,10 +42,13 @@ export interface PublisherState {
 
 // todo: add change participant permissions command
 export class CommandSender {
+  private static readonly WEBRTC_HEARTBEAT_INTERVAL_MS = 1000;
+  private static readonly WEBTRANSPORT_HEARTBEAT_INTERVAL_MS = 2000;
+
   private sendData: CommandSenderConfig['sendDataFn'];
   private protocol: CommandSenderConfig['protocol'];
   private commandType: string;
-  private HEARTBEAT_INTERVAL_MS = 2000; // 2 seconds
+  private HEARTBEAT_INTERVAL_MS: number;
   private heartbeatInterval: ReturnType<typeof setInterval> | null;
 
   constructor(config: CommandSenderConfig) {
@@ -53,6 +56,9 @@ export class CommandSender {
     this.protocol = config.protocol;
     this.commandType = config.commandType || 'publisher_command';
     this.heartbeatInterval = null;
+    this.HEARTBEAT_INTERVAL_MS = this.protocol === 'webrtc'
+      ? CommandSender.WEBRTC_HEARTBEAT_INTERVAL_MS
+      : CommandSender.WEBTRANSPORT_HEARTBEAT_INTERVAL_MS;
   }
 
   private async _sendPublisherCommand(

@@ -212,7 +212,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     this.workerManager = new WorkerManager(
       this.config.mediaWorkerUrl,
       this.subscriberId,
-      this.protocol
+      this.protocol,
     );
 
     // Polyfill manager
@@ -391,8 +391,13 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
       if (this.protocol === "webrtc" && this.workerManager) {
         log("[Subscriber] Waiting for WASM ready from WorkerManager...");
-        await this.workerManager.waitForWasmReady(5000);
-        console.log("[Subscriber] WASM ready");
+        try {
+          await this.workerManager.waitForWasmReady(5000);
+          console.log("[Subscriber] WASM ready");
+        } catch (wasmError) {
+          // Don't fail the entire subscriber start — WASM may still init in background
+          console.warn("[Subscriber] WASM ready timeout, continuing anyway:", wasmError);
+        }
       }
 
       // Attach streams to worker (WebTransport, WebRTC, or WebSocket) with retry
@@ -578,6 +583,9 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
           this.attachDataChannel(ChannelName.MICROPHONE);
         } else if (this.subscribeType === "screen_share") {
           this.attachDataChannel(ChannelName.SCREEN_SHARE_720P);
+          if (this.config.audioEnabled) {
+            this.attachDataChannel(ChannelName.SCREEN_SHARE_AUDIO);
+          }
         }
       }
     } catch (error) {

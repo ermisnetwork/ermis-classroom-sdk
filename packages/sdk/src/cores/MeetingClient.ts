@@ -24,10 +24,11 @@ import { MediaDeviceManager } from '../media/devices/MediaDeviceManager';
 import { ConnectionStatus as ConnectionStatusConst } from '../constants/connectionStatus';
 import { ParticipantRoles, VERSION } from '../constants';
 import { BrowserDetection, log } from '../utils';
+import { initSdkAssets } from '../utils/SdkAssetLoader';
 
 export class ErmisClient extends EventEmitter {
   // Configuration
-  private config: Required<Omit<ErmisClientConfig, 'videoResolutions' | 'subscriberInitQuality'>> & Pick<ErmisClientConfig, 'videoResolutions' | 'subscriberInitQuality'>;
+  private config: Required<Omit<ErmisClientConfig, 'videoResolutions' | 'subscriberInitQuality' | 'sdkAssetsUrl'>> & Pick<ErmisClientConfig, 'videoResolutions' | 'subscriberInitQuality' | 'sdkAssetsUrl'>;
 
   // API client (will be typed when ApiClient is converted)
   private apiClient: any;
@@ -46,6 +47,9 @@ export class ErmisClient extends EventEmitter {
 
   // Global event subscriptions cleanup
   private globalEventCleanups: Array<() => void> = [];
+
+  // Promise that resolves when SDK assets are cached and ready
+  private _assetsReady: Promise<void> = Promise.resolve();
 
   /**
    * Static factory method for backward compatibility
@@ -164,6 +168,7 @@ export class ErmisClient extends EventEmitter {
       debug: config.debug ?? false,
       videoResolutions: config.videoResolutions,
       subscriberInitQuality: config.subscriberInitQuality,
+      sdkAssetsUrl: config.sdkAssetsUrl,
     };
     // Initialize API client
     this.apiClient = new ApiClient({
@@ -198,6 +203,23 @@ export class ErmisClient extends EventEmitter {
 
     this._setupEventHandlers();
     this._setupGlobalEventListeners();
+
+    // Pre-fetch SDK assets if sdkAssetsUrl is configured
+    // Store promise so joinRoom() can await it before creating workers
+    if (this.config.sdkAssetsUrl) {
+      this._assetsReady = this.initAssets().catch((err) => {
+        console.warn('[ErmisClient] Asset pre-fetch failed:', err);
+      });
+    }
+  }
+
+  /**
+   * Pre-fetch all SDK assets from the server and cache them locally via Service Worker.
+   * This is called automatically if sdkAssetsUrl is set in the config.
+   * Can also be called manually to ensure assets are ready before joining a room.
+   */
+  async initAssets(): Promise<void> {
+    return initSdkAssets(this.config.sdkAssetsUrl);
   }
 
   /**
@@ -458,6 +480,9 @@ export class ErmisClient extends EventEmitter {
 
     try {
       this.emit('joiningRoom', { roomCode });
+
+      // Ensure SDK assets are cached before creating workers
+      await this._assetsReady;
 
       // Leave current room if any
       if (this.state.currentRoom) {

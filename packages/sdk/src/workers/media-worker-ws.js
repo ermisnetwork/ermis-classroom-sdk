@@ -38,12 +38,20 @@ let webRtcDataChannels = new Map();
 // command sender
 let commandSender = null;
 
-// let fecManager = null;
+/** @type {Map<string, WasmFecManager>} Per-channel FEC managers to prevent data mixing */
+// const fecManagers = new Map();
 
 // raptorqInit().then(() => {
 //   proxyConsole.log("Raptorq WASM module initialized");
 //   fecManager = new WasmFecManager();
 // });
+
+// function getOrCreateFecManager(channelName) {
+//   if (!fecManagers.has(channelName)) {
+//     fecManagers.set(channelName, new WasmFecManager());
+//   }
+//   return fecManagers.get(channelName);
+// }
 
 // WebSocket specific
 let isWebSocket = false;
@@ -294,7 +302,9 @@ function handleWebRtcMessage(channelName, message) {
   }
   const { sequenceNumber, isFec, packetType, payload } = parseWebRTCPacket(new Uint8Array(message));
   if (isFec) {
-    const result = fecManager.process_fec_packet(payload, sequenceNumber);
+    // const channelFecManager = getOrCreateFecManager(channelName);
+    // const result = channelFecManager.process_fec_packet(payload, sequenceNumber);
+    const result = null; // FEC disabled in ws worker
     if (result) {
       const decodedData = result[0][1];
       processIncomingMessage(channelName, decodedData.buffer);

@@ -60,6 +60,9 @@ function CustomParticipantTile({
   onRemoveParticipant?: (id: string, reason?: string) => void
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const [showRemoveModal, setShowRemoveModal] = useState(false)
+  const [removeReason, setRemoveReason] = useState('')
+  const removeInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (videoRef.current && participant.stream) {
@@ -263,10 +266,10 @@ function CustomParticipantTile({
                     className="px-3 py-2 text-sm text-white rounded cursor-pointer outline-none hover:bg-red-600 focus:bg-red-600 flex items-center gap-2"
                     onSelect={(e) => {
                       e.preventDefault()
-                      const reason = prompt(`Enter reason to remove ${participant.name} (optional):`)
-                      if (reason !== null) {
-                        onRemoveParticipant?.(participant.id, reason)
-                      }
+                      setRemoveReason('')
+                      setShowRemoveModal(true)
+                      // Focus the input after render
+                      setTimeout(() => removeInputRef.current?.focus(), 100)
                     }}
                   >
                     <IconUserMinus className="h-4 w-4 text-red-400" />
@@ -277,6 +280,52 @@ function CustomParticipantTile({
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
+      )}
+      {/* Non-blocking remove participant modal */}
+      {showRemoveModal && (
+        <div
+          className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="bg-slate-800 rounded-lg p-4 mx-4 w-full max-w-xs shadow-xl border border-slate-600">
+            <p className="text-white text-sm font-medium mb-3">
+              Remove <span className="text-red-400">{participant.name}</span>?
+            </p>
+            <input
+              ref={removeInputRef}
+              type="text"
+              value={removeReason}
+              onChange={(e) => setRemoveReason(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  onRemoveParticipant?.(participant.id, removeReason || undefined)
+                  setShowRemoveModal(false)
+                } else if (e.key === 'Escape') {
+                  setShowRemoveModal(false)
+                }
+              }}
+              placeholder="Reason (optional)"
+              className="w-full px-3 py-2 text-sm text-white bg-slate-700 border border-slate-600 rounded-md outline-none focus:border-blue-500 placeholder-slate-400 mb-3"
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowRemoveModal(false)}
+                className="px-3 py-1.5 text-sm text-slate-300 hover:text-white rounded-md hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  onRemoveParticipant?.(participant.id, removeReason || undefined)
+                  setShowRemoveModal(false)
+                }}
+                className="px-3 py-1.5 text-sm text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/70 to-transparent">
         <div className="flex items-center justify-between">

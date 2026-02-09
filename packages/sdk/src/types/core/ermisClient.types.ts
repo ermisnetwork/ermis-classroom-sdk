@@ -46,6 +46,13 @@ export interface ErmisClientConfig {
    * To subscribe 1080p from start: '1080p'
    */
   subscriberInitQuality?: QualityLevel;
+  /**
+   * Base URL for SDK assets on the meeting server.
+   * When set, SDK will pre-fetch all assets from this URL and cache locally via Service Worker.
+   * When not set, assets are loaded from local paths (Vite plugin must copy them to public/).
+   * Example: "https://meeting-server/meeting/sdk-assets"
+   */
+  sdkAssetsUrl?: string;
 }
 
 /**
