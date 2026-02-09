@@ -184,6 +184,22 @@ self.onmessage = async function (e) {
       handleBitrateSwitch(quality);
       break;
 
+    case "startStream":
+      if (commandSender) commandSender.startStream();
+      break;
+
+    case "stopStream":
+      if (commandSender) commandSender.stopStream();
+      break;
+
+    case "pauseStream":
+      if (commandSender) commandSender.pauseStream();
+      break;
+
+    case "resumeStream":
+      if (commandSender) commandSender.resumeStream();
+      break;
+
     case "reset":
       resetDecoders();
       break;

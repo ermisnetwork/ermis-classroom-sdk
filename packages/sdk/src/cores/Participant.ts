@@ -321,6 +321,78 @@ export class Participant extends EventEmitter {
   }
 
   /**
+   * Start receiving stream from server
+   */
+  async startStream(): Promise<void> {
+    if (!this.subscriber) return;
+
+    try {
+      this.subscriber.startStream();
+      this.emit("streamStarted", { participant: this });
+    } catch (error) {
+      this.emit("error", {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "startStream",
+      });
+    }
+  }
+
+  /**
+   * Stop receiving stream from server
+   */
+  async stopStream(): Promise<void> {
+    if (!this.subscriber) return;
+
+    try {
+      this.subscriber.stopStream();
+      this.emit("streamStopped", { participant: this });
+    } catch (error) {
+      this.emit("error", {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "stopStream",
+      });
+    }
+  }
+
+  /**
+   * Pause receiving stream from server
+   */
+  async pauseStream(): Promise<void> {
+    if (!this.subscriber) return;
+
+    try {
+      this.subscriber.pauseStream();
+      this.emit("streamPaused", { participant: this });
+    } catch (error) {
+      this.emit("error", {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "pauseStream",
+      });
+    }
+  }
+
+  /**
+   * Resume receiving stream from server
+   */
+  async resumeStream(): Promise<void> {
+    if (!this.subscriber) return;
+
+    try {
+      this.subscriber.resumeStream();
+      this.emit("streamResumed", { participant: this });
+    } catch (error) {
+      this.emit("error", {
+        participant: this,
+        error: error instanceof Error ? error : new Error(String(error)),
+        action: "resumeStream",
+      });
+    }
+  }
+
+  /**
    * Update connection status
    */
   setConnectionStatus(status: ParticipantConnectionStatus): void {

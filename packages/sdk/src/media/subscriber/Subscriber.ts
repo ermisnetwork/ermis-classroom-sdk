@@ -511,6 +511,78 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   }
 
   /**
+   * Send start stream command to server
+   */
+  startStream(): void {
+    if (!this.workerManager) {
+      return;
+    }
+
+    try {
+      this.workerManager.startStream();
+    } catch (error) {
+      this.handleError(
+        error instanceof Error ? error : new Error("Start stream failed"),
+        "start"
+      );
+    }
+  }
+
+  /**
+   * Send stop stream command to server
+   */
+  stopStream(): void {
+    if (!this.workerManager) {
+      return;
+    }
+
+    try {
+      this.workerManager.stopStream();
+    } catch (error) {
+      this.handleError(
+        error instanceof Error ? error : new Error("Stop stream failed"),
+        "stop"
+      );
+    }
+  }
+
+  /**
+   * Send pause stream command to server
+   */
+  pauseStream(): void {
+    if (!this.workerManager) {
+      return;
+    }
+
+    try {
+      this.workerManager.pauseStream();
+    } catch (error) {
+      this.handleError(
+        error instanceof Error ? error : new Error("Pause stream failed"),
+        "stop"
+      );
+    }
+  }
+
+  /**
+   * Send resume stream command to server
+   */
+  resumeStream(): void {
+    if (!this.workerManager) {
+      return;
+    }
+
+    try {
+      this.workerManager.resumeStream();
+    } catch (error) {
+      this.handleError(
+        error instanceof Error ? error : new Error("Resume stream failed"),
+        "start"
+      );
+    }
+  }
+
+  /**
    * Set audio mixer for audio output
    */
   setAudioMixer(audioMixer: unknown): void {
@@ -703,9 +775,9 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       const offer = await rtc.createOffer();
       await rtc.setLocalDescription(offer);
 
-    
+
       const channel = `${this.config.streamId}:${mediaChannel}`;
-      
+
       console.log(`[WebRTC subscriber] Created offer for ${mediaChannel}, sending to server...`);
 
       const response = await fetch(`https://${this.config.host}/meeting/sdp/answer`, {

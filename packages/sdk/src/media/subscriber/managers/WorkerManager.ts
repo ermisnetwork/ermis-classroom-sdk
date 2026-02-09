@@ -224,6 +224,46 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   }
 
   /**
+   * Send start stream command to server
+   */
+  startStream(): void {
+    if (!this.worker || !this.isInitialized) {
+      throw new Error("Worker not initialized");
+    }
+    this.worker.postMessage({ type: "startStream" });
+  }
+
+  /**
+   * Send stop stream command to server
+   */
+  stopStream(): void {
+    if (!this.worker || !this.isInitialized) {
+      throw new Error("Worker not initialized");
+    }
+    this.worker.postMessage({ type: "stopStream" });
+  }
+
+  /**
+   * Send pause stream command to server
+   */
+  pauseStream(): void {
+    if (!this.worker || !this.isInitialized) {
+      throw new Error("Worker not initialized");
+    }
+    this.worker.postMessage({ type: "pauseStream" });
+  }
+
+  /**
+   * Send resume stream command to server
+   */
+  resumeStream(): void {
+    if (!this.worker || !this.isInitialized) {
+      throw new Error("Worker not initialized");
+    }
+    this.worker.postMessage({ type: "resumeStream" });
+  }
+
+  /**
    * Terminate the worker
    */
   terminate(): void {
@@ -284,11 +324,11 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       case "resuming":
         this.emit("frameResumed", undefined);
         break;
-      
+
       case "raptorq-initialized":
         log("[WorkerManager] RaptorQ WASM module initialized in worker");
         this.emit("wasmReady", undefined);
-        break;  
+        break;
 
       default:
         log(`Unknown worker message type: ${type}`, data);
