@@ -100,7 +100,6 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       this.isInitialized = true;
       this.emit("workerReady", undefined);
 
-      log(`Media worker initialized successfully (audioEnabled: ${audioEnabled})`);
     } catch (error) {
       const err = error instanceof Error ? error : new Error("Worker initialization failed");
       this.emit("error", { error: err, context: "init" });
@@ -284,13 +283,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
     switch (type) {
       case "videoData":
         if (frame) {
-          // this.videoFrameCount++;
-          // if (this.videoFrameCount <= 5 || this.videoFrameCount % 100 === 0) {
-          //   log(`[WorkerManager] 📹 Video frame ${this.videoFrameCount} received from worker`);
-          // }
           this.emit("videoData", { frame });
-        } else {
-          console.warn("[WorkerManager] ⚠️ videoData event received but frame is null/undefined");
         }
         break;
 
@@ -324,11 +317,11 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       case "resuming":
         this.emit("frameResumed", undefined);
         break;
-      
+
       case "raptorq-initialized":
         log("[WorkerManager] RaptorQ WASM module initialized in worker");
         this.emit("wasmReady", undefined);
-        break;  
+        break;
 
       default:
         log(`Unknown worker message type: ${type}`, data);

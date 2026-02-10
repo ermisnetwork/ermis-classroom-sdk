@@ -565,14 +565,15 @@ export class StreamManager extends EventEmitter<{
     };
     await this.commandSender?.sendEvent(streamData, event);
   }
-
-
   /**
    * Send video chunk (EXACT copy from JS handleVideoChunk logic)
+   * Handles both native EncodedVideoChunk (with copyTo method) and 
+   * WASM encoder chunks (with data property as ArrayBuffer/Uint8Array)
    */
   async sendVideoChunk(
     channelName: ChannelName,
-    chunk: EncodedVideoChunk,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    chunk: EncodedVideoChunk | any,
     _metadata?: EncodedVideoChunkMetadata,
   ): Promise<void> {
     const streamData = this.streams.get(channelName);
@@ -588,8 +589,36 @@ export class StreamManager extends EventEmitter<{
     const chunkType: "key" | "delta" = chunk.type === "key" ? "key" : "delta";
     const frameType = FrameTypeHelper.getFrameType(channelName, chunkType);
 
-    const arrayBuffer = new ArrayBuffer(chunk.byteLength);
-    chunk.copyTo(arrayBuffer);
+    let arrayBuffer: ArrayBuffer;
+    
+    // Handle both native EncodedVideoChunk and WASM encoder chunks
+    // Prioritize chunk.data (WASM) as it is direct access and avoids potential copyTo issues
+    if (chunk.data) {
+       // WASM encoder chunk - data is already ArrayBuffer or Uint8Array
+       if (chunk.data instanceof ArrayBuffer) {
+         arrayBuffer = chunk.data;
+       } else if (chunk.data instanceof Uint8Array) {
+         arrayBuffer = chunk.data.buffer.slice(
+           chunk.data.byteOffset,
+           chunk.data.byteOffset + chunk.data.byteLength
+         );
+       } else {
+         console.error('[StreamManager] Unknown chunk data type:', typeof chunk.data);
+         return;
+       }
+    } else if (typeof chunk.copyTo === 'function') {
+      // Native EncodedVideoChunk - use copyTo method
+      try {
+        arrayBuffer = new ArrayBuffer(chunk.byteLength);
+        chunk.copyTo(arrayBuffer);
+      } catch (err) {
+        console.error('[StreamManager] chunk.copyTo failed:', err);
+        return;
+      }
+    } else {
+      console.error('[StreamManager] Unknown chunk format - no copyTo or data property');
+      return;
+    }
 
     const sequenceNumber = this.getAndIncrementSequence(channelName);
     const packet = PacketBuilder.createPacket(

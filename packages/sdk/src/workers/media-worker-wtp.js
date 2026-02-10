@@ -47,13 +47,78 @@ const proxyConsole = {
   groupEnd: () => {},
 };
 
+// Helper: Convert YUV420 to RGBA for transfer to main thread
+function convertYUV420toRGBA(yPlane, uPlane, vPlane, width, height) {
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  const uvWidth = width >> 1;
+  
+  for (let j = 0; j < height; j++) {
+    for (let i = 0; i < width; i++) {
+      const yIndex = j * width + i;
+      const uvIndex = (j >> 1) * uvWidth + (i >> 1);
+      
+      const y = yPlane[yIndex];
+      const u = uPlane[uvIndex] - 128;
+      const v = vPlane[uvIndex] - 128;
+      
+      let r = y + 1.402 * v;
+      let g = y - 0.344136 * u - 0.714136 * v;
+      let b = y + 1.772 * u;
+      
+      r = Math.max(0, Math.min(255, r));
+      g = Math.max(0, Math.min(255, g));
+      b = Math.max(0, Math.min(255, b));
+      
+      const rgbaIndex = yIndex * 4;
+      rgba[rgbaIndex] = r;
+      rgba[rgbaIndex + 1] = g;
+      rgba[rgbaIndex + 2] = b;
+      rgba[rgbaIndex + 3] = 255;
+    }
+  }
+  
+  return rgba;
+}
+
+// Helper: Create polyfill decoder
+async function createPolyfillDecoder(quality) {
+  const decoder = new H264Decoder();
+  const init = createVideoInit(quality);
+  decoder.onOutput = init.output;
+  decoder.onError = init.error;
+  await decoder.configure({ codec: 'avc1.42001f' });
+  return decoder;
+}
+
+// Helper: Create decoder with fallback
+async function createVideoDecoderWithFallback(quality) {
+  try {
+    const nativeSupported = await isNativeH264DecoderSupported();
+    if (nativeSupported) {
+      return new VideoDecoder(createVideoInit(quality));
+    }
+  } catch (e) {
+    proxyConsole.warn("Native VideoDecoder not available, using polyfill");
+  }
+  return createPolyfillDecoder(quality);
+}
+
 // ------------------------------
 // Decoder setup
 // ------------------------------
 
 const createVideoInit = (quality) => ({
   output: (frame) => {
-    self.postMessage({ type: "videoData", frame, quality }, [frame]);
+    if (typeof VideoFrame !== 'undefined' && frame instanceof VideoFrame) {
+      self.postMessage({ type: "videoData", frame, quality }, [frame]);
+    } else if (frame.format === 'yuv420') {
+      const rgba = convertYUV420toRGBA(frame.yPlane, frame.uPlane, frame.vPlane, frame.width, frame.height);
+      self.postMessage({ 
+        type: "videoData", 
+        frame: { format: 'rgba', data: rgba, width: frame.width, height: frame.height },
+        quality 
+      }, [rgba.buffer]);
+    }
   },
   error: (e) => {
     proxyConsole.error(`Video decoder error (${quality}):`, e);
@@ -260,7 +325,7 @@ async function readVideoStream(channelName, reader) {
   }
 }
 
-function handleVideoBinaryPacket(dataBuffer, quality) {
+async function handleVideoBinaryPacket(dataBuffer, quality) {
   const dataView = new DataView(dataBuffer);
   const timestamp = dataView.getUint32(0, false);
   const frameType = dataView.getUint8(4);
@@ -287,7 +352,7 @@ function handleVideoBinaryPacket(dataBuffer, quality) {
 
     if (keyFrameReceived) {
       if (videoDecoder360p.state === "closed") {
-        videoDecoder360p = new VideoDecoder(createVideoInit("360p"));
+        videoDecoder360p = await createVideoDecoderWithFallback("360p");
         videoDecoder360p.configure(video360pConfig);
       }
       const encodedChunk = new EncodedVideoChunk({
@@ -309,7 +374,7 @@ function handleVideoBinaryPacket(dataBuffer, quality) {
 
     if (keyFrameReceived) {
       if (videoDecoder720p.state === "closed") {
-        videoDecoder720p = new VideoDecoder(createVideoInit("720p"));
+        videoDecoder720p = await createVideoDecoderWithFallback("720p");
         videoDecoder720p.configure(video720pConfig);
       }
       const encodedChunk = new EncodedVideoChunk({
@@ -419,8 +484,8 @@ function handleAudioBinaryPacket(dataBuffer) {
 
 async function initializeDecoders() {
   proxyConsole.log("Initializing decoders...");
-  videoDecoder360p = new VideoDecoder(createVideoInit("360p"));
-  videoDecoder720p = new VideoDecoder(createVideoInit("720p"));
+  videoDecoder360p = await createVideoDecoderWithFallback("360p");
+  videoDecoder720p = await createVideoDecoderWithFallback("720p");
   currentVideoDecoder = videoDecoder360p;
 
   try {
