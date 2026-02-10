@@ -33,7 +33,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   private workerUrl: string;
   private isInitialized = false;
   private subscriberId: string;
-  // private videoFrameCount = 0; // DEBUG: Count video frames
+  private _mainFrameCount = 0;
 
   constructor(workerUrl: string, subscriberId: string) {
     super();
@@ -87,7 +87,6 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       this.isInitialized = true;
       this.emit("workerReady", undefined);
 
-      log(`Media worker initialized successfully (audioEnabled: ${audioEnabled})`);
     } catch (error) {
       const err = error instanceof Error ? error : new Error("Worker initialization failed");
       this.emit("error", { error: err, context: "init" });
@@ -206,13 +205,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
     switch (type) {
       case "videoData":
         if (frame) {
-          // this.videoFrameCount++;
-          // if (this.videoFrameCount <= 5 || this.videoFrameCount % 100 === 0) {
-          //   log(`[WorkerManager] 📹 Video frame ${this.videoFrameCount} received from worker`);
-          // }
           this.emit("videoData", { frame });
-        } else {
-          console.warn("[WorkerManager] ⚠️ videoData event received but frame is null/undefined");
         }
         break;
 

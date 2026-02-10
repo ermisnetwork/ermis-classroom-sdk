@@ -250,6 +250,7 @@ export interface AudioRecorder {
 export type InitAudioRecorder = (
   stream: MediaStream,
   options: AudioRecorderOptions,
+  audioContext?: AudioContext,
 ) => Promise<AudioRecorder>;
 
 export enum PinType {

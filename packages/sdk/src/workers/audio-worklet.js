@@ -1,13 +1,15 @@
+// iOS 15 Debug: Use real console for debugging
 const proxyConsole = {
-  log: () => {},
-  error: () => {},
-  warn: () => {},
-  debug: () => {},
-  info: () => {},
+  log: (...args) => console.log('[AudioWorklet]', ...args),
+  error: (...args) => console.error('[AudioWorklet]', ...args),
+  warn: (...args) => console.warn('[AudioWorklet]', ...args),
+  debug: (...args) => console.debug('[AudioWorklet]', ...args),
+  info: (...args) => console.info('[AudioWorklet]', ...args),
   trace: () => {},
   group: () => {},
   groupEnd: () => {},
 };
+
 
 class JitterResistantProcessor extends AudioWorkletProcessor {
   constructor() {

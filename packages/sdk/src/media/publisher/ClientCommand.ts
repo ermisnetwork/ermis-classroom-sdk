@@ -37,6 +37,7 @@ export interface PublisherState {
   hasCamera: boolean;
   isMicOn: boolean;
   isCameraOn: boolean;
+  publishChannels?: string[];  // Optional list of channels being published (e.g., ["video_360p", "mic_48k"])
 }
 
 // todo: add change participant permissions command
@@ -125,12 +126,19 @@ export class CommandSender {
   }
 
   async sendPublisherState(streamData: StreamData, state: PublisherState): Promise<void> {
-    await this._sendPublisherCommand(ChannelName.MEETING_CONTROL, streamData, 'publisher_state', {
+    const payload: any = {
       has_mic: state.hasMic,
       has_camera: state.hasCamera,
       is_mic_on: state.isMicOn,
       is_camera_on: state.isCameraOn,
-    });
+    };
+    
+    // Add publish_channels if specified
+    if (state.publishChannels && state.publishChannels.length > 0) {
+      payload.publish_channels = state.publishChannels;
+    }
+    
+    await this._sendPublisherCommand(ChannelName.MEETING_CONTROL, streamData, 'publisher_state', payload);
   }
 
   async sendMediaConfig(channelName: string, streamData: StreamData, config: any): Promise<void> {
@@ -205,7 +213,7 @@ export class CommandSender {
     this.heartbeatInterval = setInterval(async () => {
       try {
         await this.sendHeartbeat(streamData);
-        log('[CommandSender] Heartbeat sent');
+        // log('[CommandSender] Heartbeat sent');
       } catch (error) {
         console.error('[CommandSender] Failed to send heartbeat:', error);
       }

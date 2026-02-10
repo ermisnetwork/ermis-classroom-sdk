@@ -2,6 +2,7 @@ import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
 import { CHANNEL_NAME, SUBSCRIBE_TYPE } from "./publisherConstants.js";
+import { H264Decoder, isNativeH264DecoderSupported } from "../codec-polyfill/video-codec-polyfill.js";
 // import { CHANNEL_NAME, SUBSCRIBE_TYPE } from new URL("./publisherConstants.js", import.meta.url);
 
 import CommandSender from "./ClientCommand.js";
@@ -60,9 +61,80 @@ const proxyConsole = {
   groupEnd: () => {},
 };
 
+// Helper: Convert YUV420 to RGBA for transfer to main thread
+function convertYUV420toRGBA(yPlane, uPlane, vPlane, width, height) {
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  const uvWidth = width >> 1;
+  
+  for (let j = 0; j < height; j++) {
+    for (let i = 0; i < width; i++) {
+      const yIndex = j * width + i;
+      const uvIndex = (j >> 1) * uvWidth + (i >> 1);
+      
+      const y = yPlane[yIndex];
+      const u = uPlane[uvIndex] - 128;
+      const v = vPlane[uvIndex] - 128;
+      
+      // BT.601 conversion
+      let r = y + 1.402 * v;
+      let g = y - 0.344136 * u - 0.714136 * v;
+      let b = y + 1.772 * u;
+      
+      // Clamp
+      r = Math.max(0, Math.min(255, r));
+      g = Math.max(0, Math.min(255, g));
+      b = Math.max(0, Math.min(255, b));
+      
+      const rgbaIndex = yIndex * 4;
+      rgba[rgbaIndex] = r;
+      rgba[rgbaIndex + 1] = g;
+      rgba[rgbaIndex + 2] = b;
+      rgba[rgbaIndex + 3] = 255;
+    }
+  }
+  
+  return rgba;
+}
+
+// Helper: Create polyfill decoder (auto-selects native or WASM)
+async function createPolyfillDecoder(channelName) {
+  const decoder = new H264Decoder();
+  const init = createVideoInit(channelName);
+  decoder.onOutput = init.output;
+  decoder.onError = init.error;
+  await decoder.configure({ codec: 'avc1.42001f' });
+  return decoder;
+}
+
+// Helper: Create decoder with fallback
+async function createVideoDecoderWithFallback(channelName) {
+  try {
+    const nativeSupported = await isNativeH264DecoderSupported();
+    if (nativeSupported) {
+      // Use native VideoDecoder if available
+      return new VideoDecoder(createVideoInit(channelName));
+    }
+  } catch (e) {
+    proxyConsole.warn("Native VideoDecoder not available, using polyfill");
+  }
+  // Fall back to polyfill
+  return createPolyfillDecoder(channelName);
+}
+
 const createVideoInit = (channelName) => ({
   output: (frame) => {
-    self.postMessage({ type: "videoData", frame, quality: channelName }, [frame]);
+    // Handle both VideoFrame (native) and YUV420 (WASM) output
+    if (typeof VideoFrame !== 'undefined' && frame instanceof VideoFrame) {
+      self.postMessage({ type: "videoData", frame, quality: channelName }, [frame]);
+    } else if (frame.format === 'yuv420') {
+      // WASM decoder outputs YUV420 - convert to ImageData for transfer
+      const rgba = convertYUV420toRGBA(frame.yPlane, frame.uPlane, frame.vPlane, frame.width, frame.height);
+      self.postMessage({ 
+        type: "videoData", 
+        frame: { format: 'rgba', data: rgba, width: frame.width, height: frame.height },
+        quality: channelName 
+      }, [rgba.buffer]);
+    }
   },
   error: (e) => {
     proxyConsole.error(`Video decoder error (${channelName}):`, e);
@@ -482,7 +554,7 @@ setInterval(() => {
   videoCounterTest = 0;
 }, 5000);
 
-function handleBinaryPacket(dataBuffer) {
+async function handleBinaryPacket(dataBuffer) {
   // const dataView = new DataView(dataBuffer);
   // const timestamp = dataView.getUint32(0, false);
   // const frameType = dataView.getUint8(4);
@@ -502,7 +574,8 @@ function handleBinaryPacket(dataBuffer) {
 
     if (keyFrameReceived) {
       if (videoDecoders.get(CHANNEL_NAME.VIDEO_360P).state === "closed") {
-        videoDecoder360p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P));
+        const newDecoder = await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_360P);
+        videoDecoders.set(CHANNEL_NAME.VIDEO_360P, newDecoder);
         const video360pConfig = videoConfigs.get(CHANNEL_NAME.VIDEO_360P);
         proxyConsole.log("Decoder error, Configuring 360p decoder with config:", video360pConfig);
         videoDecoders.get(CHANNEL_NAME.VIDEO_360P).configure(video360pConfig);
@@ -534,7 +607,8 @@ function handleBinaryPacket(dataBuffer) {
 
     if (keyFrameReceived) {
       if (videoDecoders.get(CHANNEL_NAME.VIDEO_720P).state === "closed") {
-        videoDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
+        const newDecoder = await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P);
+        videoDecoders.set(CHANNEL_NAME.VIDEO_720P, newDecoder);
         const config720p = videoConfigs.get(CHANNEL_NAME.VIDEO_720P);
         proxyConsole.log("Decoder error, Configuring 720p decoder with config:", config720p);
         videoDecoders.get(CHANNEL_NAME.VIDEO_720P).configure(config720p);
@@ -557,7 +631,8 @@ function handleBinaryPacket(dataBuffer) {
 
     if (keyFrameReceived) {
       if (videoDecoders.get(CHANNEL_NAME.VIDEO_1080P).state === "closed") {
-        videoDecoder360p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P));
+        const newDecoder = await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_1080P);
+        videoDecoders.set(CHANNEL_NAME.VIDEO_1080P, newDecoder);
         videoDecoders.get(CHANNEL_NAME.VIDEO_1080P).configure(videoConfigs.get(CHANNEL_NAME.VIDEO_1080P));
       }
       const encodedChunk = new EncodedVideoChunk({
@@ -590,20 +665,22 @@ function handleBinaryPacket(dataBuffer) {
 
 async function initializeDecoders() {
   proxyConsole.log("Initializing camera decoders for subscribe type:", subscribeType);
+  
+  // Use polyfill decoders that auto-select native or WASM
   switch (subscribeType) {
     case SUBSCRIBE_TYPE.CAMERA:
-      videoDecoders.set(CHANNEL_NAME.VIDEO_360P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P)));
-      videoDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
+      videoDecoders.set(CHANNEL_NAME.VIDEO_360P, await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_360P));
+      videoDecoders.set(CHANNEL_NAME.VIDEO_720P, await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P));
       break;
 
     case SUBSCRIBE_TYPE.SCREEN:
-      videoDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
-      videoDecoders.set(CHANNEL_NAME.VIDEO_1080P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P)));
+      videoDecoders.set(CHANNEL_NAME.VIDEO_720P, await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P));
+      videoDecoders.set(CHANNEL_NAME.VIDEO_1080P, await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_1080P));
       break;
 
     default:
-      videoDecoders.set(CHANNEL_NAME.VIDEO_360P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P)));
-      videoDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
+      videoDecoders.set(CHANNEL_NAME.VIDEO_360P, await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_360P));
+      videoDecoders.set(CHANNEL_NAME.VIDEO_720P, await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P));
       break;
   }
 

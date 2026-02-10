@@ -2,6 +2,7 @@ import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
 import { CHANNEL_NAME, STREAM_TYPE } from "./publisherConstants.js";
+import { H264Decoder, isNativeH264DecoderSupported } from "../codec-polyfill/video-codec-polyfill.js";
 
 import CommandSender from "./ClientCommand.js";
 
@@ -53,9 +54,70 @@ const proxyConsole = {
   groupEnd: () => { },
 };
 
+// Helper: Create polyfill decoder
+async function createPolyfillDecoder(channelName) {
+  const decoder = new H264Decoder();
+  const init = createVideoInit(channelName);
+  decoder.onOutput = init.output;
+  decoder.onError = init.error;
+  // IMPORTANT: Must call configure() to initialize the underlying WASM decoder
+  await decoder.configure({ codec: 'avc1.42001f' });
+  return decoder;
+}
+
+// Helper: Create decoder with fallback
+async function createVideoDecoderWithFallback(channelName) {
+  try {
+    const nativeSupported = await isNativeH264DecoderSupported();
+    if (nativeSupported) {
+      console.log(`[VideoDecoder] ✅ Using NATIVE decoder for ${channelName}`);
+      return new VideoDecoder(createVideoInit(channelName));
+    }
+  } catch (e) {
+    proxyConsole.warn("Native VideoDecoder not available, using polyfill");
+  }
+  // console.log(`[VideoDecoder] 🔧 Using WASM decoder (tinyh264) for ${channelName}`);
+  return createPolyfillDecoder(channelName);
+}
+
 const createVideoInit = (channelName) => ({
   output: (frame) => {
-    self.postMessage({ type: "videoData", frame, quality: channelName }, [frame]);
+    // Native VideoDecoder outputs VideoFrame - send directly (transferable)
+    if (typeof VideoFrame !== 'undefined' && frame instanceof VideoFrame) {
+      if (!self._frameCount) self._frameCount = 0;
+      self._frameCount++;
+      self.postMessage({ type: "videoData", frame, quality: channelName }, [frame]);
+    } 
+    // WASM decoder outputs YUV frame object - send YUV directly for WebGL rendering
+    else if (frame && frame.yPlane && frame.uPlane && frame.vPlane) {
+      // Copy YUV planes for transfer (original data may be reused by decoder)
+      const yPlane = new Uint8Array(frame.yPlane);
+      const uPlane = new Uint8Array(frame.uPlane);
+      const vPlane = new Uint8Array(frame.vPlane);
+      
+      try {
+        // NOTE: Don't use transferables on iOS 15 - it can silently fail
+        // Just copy the data instead (slightly slower but more compatible)
+        self.postMessage({ 
+          type: "videoData", 
+          frame: { 
+            format: 'yuv420',
+            yPlane: yPlane,
+            uPlane: uPlane,
+            vPlane: vPlane,
+            width: frame.width, 
+            height: frame.height 
+          },
+          quality: channelName 
+        });
+      } catch (postMessageError) {
+        console.error('[Worker] postMessage FAILED:', postMessageError);
+      }
+    }
+    // Unknown frame format
+    else {
+      console.warn('[Worker] Unknown frame format:', frame);
+    }
   },
   error: (e) => {
     proxyConsole.error(`Video decoder error (${channelName}):`, e);
@@ -63,7 +125,6 @@ const createVideoInit = (channelName) => ({
       type: "error",
       message: `${channelName} decoder: ${e.message}`,
     });
-    // Attempt to recover by resetting keyframe flag - next keyframe will reinitialize decoder
     keyFrameReceived = false;
     proxyConsole.warn(`[Recovery] Reset keyframe flag for ${channelName} decoder, waiting for next keyframe`);
   },
@@ -85,6 +146,16 @@ const audioInit = {
       }
     }
 
+    // iOS 15 Debug: Log audio data being sent to worklet
+    if (!self._audioFrameCount) self._audioFrameCount = 0;
+    self._audioFrameCount++;
+    if (self._audioFrameCount <= 5 || self._audioFrameCount % 100 === 0) {
+      console.log('[iOS15 Audio DEBUG] Sending audio to worklet, frame#:', self._audioFrameCount, 
+        'channels:', channelData.length, 
+        'frames:', audioData.numberOfFrames,
+        'workletPort:', workletPort ? 'CONNECTED' : 'NULL');
+    }
+
     if (workletPort) {
       workletPort.postMessage(
         {
@@ -97,6 +168,8 @@ const audioInit = {
         },
         channelData.map((c) => c.buffer)
       );
+    } else {
+      console.error('[iOS15 Audio DEBUG] workletPort is NULL! Cannot send audio data');
     }
 
     audioData.close();
@@ -120,7 +193,12 @@ self.onmessage = async function (e) {
       // Get audioEnabled from init message - for screen share, this determines if we should subscribe to audio
       subscriptionAudioEnabled = e.data.audioEnabled !== undefined ? e.data.audioEnabled : true;
       console.log(`[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}`);
-      await initializeDecoders();
+      try {
+        await initializeDecoders();
+        console.log(`[Worker] Decoders initialized successfully`);
+      } catch (err) {
+        console.error(`[Worker] Decoder initialization failed:`, err);
+      }
       break;
 
     case "attachWebSocket":
@@ -338,17 +416,29 @@ function handleStreamConfigs(json) {
 
       proxyConsole.log(`Configuring decoder for ${key} (${channelName})`, { cfg });
       if (stream.mediaType === "video") {
+        // Check if this is a native VideoDecoder or WASM polyfill
+        const decoder = mediaDecoders.get(channelName);
+        // Guard against VideoDecoder not existing on iOS 15
+        const hasNativeVideoDecoder = typeof VideoDecoder !== 'undefined';
+        const isNativeDecoder = decoder && hasNativeVideoDecoder && decoder instanceof VideoDecoder;
+        
+        // For native VideoDecoder with Annex B format, don't use description
+        // For WASM polyfill decoder, pass description for SPS/PPS extraction
         const videoConfig = {
           codec: cfg.codec,
           codedWidth: cfg.codedWidth,
           codedHeight: cfg.codedHeight,
           frameRate: cfg.frameRate,
-          description: desc,
         };
+        
+        // Native VideoDecoder in Annex B mode doesn't need description
+        // WASM decoder needs description for SPS/PPS parsing
+        if (!isNativeDecoder && desc && desc.length > 0) {
+          videoConfig.description = desc;
+        }
 
         mediaConfigs.set(channelName, videoConfig);
 
-        const decoder = mediaDecoders.get(channelName);
         if (decoder) {
           try {
             decoder.configure(videoConfig);
@@ -374,9 +464,22 @@ function handleStreamConfigs(json) {
             decoder.configure(audioConfig);
 
             try {
+              // DEBUG: Log the desc structure to understand iOS 15 issue
+              console.log(`[Audio Debug] desc length: ${desc.length}, first 16 bytes:`, Array.from(desc.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+              
               const dataView = new DataView(desc.buffer);
               const timestamp = dataView.getUint32(4, false);
               const data = desc.slice(9);
+              console.log(`[Audio Debug] data:`, data);
+
+              // DEBUG: Check if data is a valid OggS page with BOS
+              const isOggS = data.length >= 4 && data[0] === 0x4f && data[1] === 0x67 && data[2] === 0x67 && data[3] === 0x53;
+              const headerType = data.length > 5 ? data[5] : -1;
+              const hasBOS = (headerType & 0x02) !== 0;
+              console.log(`[Audio Debug] After slice(9): OggS=${isOggS}, headerType=0x${headerType.toString(16)}, BOS=${hasBOS}, length=${data.length}`);
+              if (data.length >= 40) {
+                console.log(`[Audio Debug] Bytes 35-40 (channel info):`, Array.from(data.slice(35, 41)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+              }
 
               const chunk = new EncodedAudioChunk({
                 timestamp: timestamp * 1000,
@@ -493,18 +596,12 @@ async function processIncomingMessage(message) {
 //   videoCounterTest = 0;
 // }, 5000);
 
-function handleBinaryPacket(dataBuffer) {
+async function handleBinaryPacket(dataBuffer) {
   const dataView = new DataView(dataBuffer);
   const sequenceNumber = dataView.getUint32(0, false);
   const timestamp = dataView.getUint32(4, false);
   const frameType = dataView.getUint8(8);
   const data = dataBuffer.slice(9);
-
-  // DEBUG: Only log screen share packets (frameType 4 or 5)
-  // if (frameType === 4 || frameType === 5) {
-  //   console.warn(`[Worker] 📺 SCREEN_SHARE packet: frameType=${frameType}, seq=${sequenceNumber}, size=${data.byteLength}`);
-  // }
-
 
   if (frameType === 0 || frameType === 1) {
     const type = frameType === 0 ? "key" : "delta";
@@ -519,7 +616,7 @@ function handleBinaryPacket(dataBuffer) {
 
       // Recreate decoder if closed or in error state
       if (!decoder360p || decoderState === "closed" || decoderState === "unconfigured") {
-        decoder360p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P));
+        decoder360p = await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_360P);
         mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, decoder360p);
         const video360pConfig = mediaConfigs.get(CHANNEL_NAME.VIDEO_360P);
         if (video360pConfig) {
@@ -528,14 +625,38 @@ function handleBinaryPacket(dataBuffer) {
       }
 
       try {
-        const encodedChunk = new EncodedVideoChunk({
-          timestamp: timestamp * 1000,
-          type,
-          data,
-        });
-        decoder360p.decode(encodedChunk);
+        // Skip empty data
+        if (data.byteLength === 0) {
+          return;
+        }
+        
+        // Debug: Log decoder state and frame info
+        if (!self._decodeCount) self._decodeCount = 0;
+        self._decodeCount++;
+        
+        // Check if using polyfill (H264Decoder wrapper) or native VideoDecoder
+        // Guard against VideoDecoder not existing on iOS 15
+        const hasNativeVideoDecoder = typeof VideoDecoder !== 'undefined';
+        const isPolyfill = decoder360p.usingNative === false || !hasNativeVideoDecoder || !(decoder360p instanceof VideoDecoder);
+        
+        if (isPolyfill) {
+          // WASM decoder expects plain object with .data property
+          decoder360p.decode({
+            type,
+            timestamp: timestamp * 1000,
+            data: new Uint8Array(data),
+          });
+        } else {
+          // Native VideoDecoder expects EncodedVideoChunk
+          const encodedChunk = new EncodedVideoChunk({
+            timestamp: timestamp * 1000,
+            type,
+            data,
+          });
+          decoder360p.decode(encodedChunk);
+        }
       } catch (err) {
-        proxyConsole.error("360p decode error:", err);
+        console.error("360p decode error:", err);
         keyFrameReceived = false; // Wait for next keyframe
       }
     }
@@ -552,7 +673,7 @@ function handleBinaryPacket(dataBuffer) {
 
       // Recreate decoder if closed or in error state
       if (!decoder720p || decoderState === "closed" || decoderState === "unconfigured") {
-        decoder720p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P));
+        decoder720p = await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P);
         mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, decoder720p);
         const config720p = mediaConfigs.get(CHANNEL_NAME.VIDEO_720P);
         if (config720p) {
@@ -562,29 +683,40 @@ function handleBinaryPacket(dataBuffer) {
       }
 
       try {
-        const encodedChunk = new EncodedVideoChunk({
-          timestamp: timestamp * 1000,
-          type,
-          data,
-        });
-        decoder720p.decode(encodedChunk);
+        // Skip empty data
+        if (data.byteLength === 0) {
+          return;
+        }
+        
+        // Check if using polyfill or native
+        // Guard against VideoDecoder not existing on iOS 15
+        const hasNativeVideoDecoder = typeof VideoDecoder !== 'undefined';
+        const isPolyfill = decoder720p.usingNative === false || !hasNativeVideoDecoder || !(decoder720p instanceof VideoDecoder);
+        
+        if (isPolyfill) {
+          decoder720p.decode({
+            type,
+            timestamp: timestamp * 1000,
+            data: new Uint8Array(data),
+          });
+        } else {
+          const encodedChunk = new EncodedVideoChunk({
+            timestamp: timestamp * 1000,
+            type,
+            data,
+          });
+          decoder720p.decode(encodedChunk);
+        }
       } catch (err) {
-        proxyConsole.error("720p decode error:", err);
+        console.error("720p decode error:", err);
         keyFrameReceived = false; // Wait for next keyframe
       }
     }
     return;
   } else if (frameType === 4 || frameType === 5) {
-    // DEBUG: Screen share packet received
-    // console.warn(`[Worker] 📺 Screen share packet received! frameType=${frameType}, size=${data.byteLength}`);
-
     // todo: bind screen share 720p and camera 720p packet same packet type, dont need separate, create and get decoder base on subscribe type!!!!
     let videoDecoderScreenShare720p = mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P);
     const type = frameType === 4 ? "key" : "delta";
-
-    // DEBUG: Screen share packet received (commented to reduce console noise)
-    // console.warn(`[Worker] Screen share decoder exists: ${!!videoDecoderScreenShare720p}, type: ${type}, keyFrameReceived: ${keyFrameReceived}`);
-
 
     if (type === "key") {
       keyFrameReceived = true;
@@ -593,7 +725,8 @@ function handleBinaryPacket(dataBuffer) {
     if (keyFrameReceived) {
       try {
         if (mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).state === "closed") {
-          videoDecoderScreenShare720p = new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P));
+          videoDecoderScreenShare720p = await createVideoDecoderWithFallback(CHANNEL_NAME.SCREEN_SHARE_720P);
+          mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_720P, videoDecoderScreenShare720p);
           const screenShare720pConfig = mediaConfigs.get(CHANNEL_NAME.SCREEN_SHARE_720P);
           proxyConsole.log("Decoder error, Configuring screen share 720p decoder with config:", screenShare720pConfig);
           mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P).configure(screenShare720pConfig);
@@ -611,9 +744,30 @@ function handleBinaryPacket(dataBuffer) {
     }
     return;
   } else if (frameType === 6) {
+    // iOS 15 Debug: Track audio frame reception
+    if (!self._audioPacketCount) self._audioPacketCount = 0;
+    self._audioPacketCount++;
+    if (self._audioPacketCount <= 5 || self._audioPacketCount % 100 === 0) {
+      console.log('[iOS15 Audio DEBUG] Audio packet received, frame#:', self._audioPacketCount, 
+        'timestamp:', timestamp, 'dataLen:', data.byteLength);
+    }
+
     let audioDecoder = mediaDecoders.get(
       subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_AUDIO : CHANNEL_NAME.SCREEN_SHARE_AUDIO
     );
+    
+    if (!audioDecoder) {
+      console.error('[iOS15 Audio DEBUG] audioDecoder is NULL/undefined!');
+      return;
+    }
+
+    // iOS 15 Debug: Check decoder state before decode
+    if (self._audioPacketCount <= 5) {
+      console.log('[iOS15 Audio DEBUG] audioDecoder state:', audioDecoder.state,
+        'hasWorker:', !!audioDecoder.decoderWorker,
+        'frameCounter:', audioDecoder.frameCounter);
+    }
+
     const chunk = new EncodedAudioChunk({
       timestamp: timestamp * 1000,
       type: "key",
@@ -622,8 +776,13 @@ function handleBinaryPacket(dataBuffer) {
 
     try {
       audioDecoder.decode(chunk);
+      
+      // iOS 15 Debug: Log after decode call
+      if (self._audioPacketCount <= 5) {
+        console.log('[iOS15 Audio DEBUG] decode() called successfully, frameCounter now:', audioDecoder.frameCounter);
+      }
     } catch (err) {
-      proxyConsole.error("Audio decode error:", err);
+      console.error('[iOS15 Audio DEBUG] Audio decode error:', err);
     }
   }
 }
@@ -635,18 +794,40 @@ function handleBinaryPacket(dataBuffer) {
 async function initializeDecoders() {
   proxyConsole.log("Initializing camera decoders for subscribe type:", subscribeType);
   switch (subscribeType) {
-    case STREAM_TYPE.CAMERA:
-      mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P)));
-      mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
-      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, new OpusAudioDecoder(audioInit));
-      break;
+    case STREAM_TYPE.CAMERA: {
+      const video360pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_360P);
+      const video720pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P);
+      
+      const micAudioDecoder = new OpusAudioDecoder(audioInit);
+      console.log('[iOS15 Audio DEBUG] Created OpusAudioDecoder, configuring...');
+      
+      // Initialize audio immediately, don't wait for video
+      const audioConfigPromise = micAudioDecoder.configure({ sampleRate: 48000, numberOfChannels: 1 });
+      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, micAudioDecoder);
 
-    case STREAM_TYPE.SCREEN_SHARE:
-      mediaDecoders.set(
-        CHANNEL_NAME.SCREEN_SHARE_720P,
-        new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P))
-      );
-      mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_AUDIO, new OpusAudioDecoder(audioInit));
+      // Wait for video decoders concurrently
+      const [decoder360p, decoder720p] = await Promise.all([video360pPromise, video720pPromise]);
+      mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, decoder360p);
+      mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, decoder720p);
+      
+      await audioConfigPromise; // Ensure audio is configured (fast)
+      console.log('[iOS15 Audio DEBUG] OpusAudioDecoder configured, state:', micAudioDecoder.state,
+        'hasWorker:', !!micAudioDecoder.decoderWorker);
+      break;
+    }
+
+    case STREAM_TYPE.SCREEN_SHARE: {
+      const video720pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.SCREEN_SHARE_720P);
+
+      const screenAudioDecoder = new OpusAudioDecoder(audioInit);
+      const audioConfigPromise = screenAudioDecoder.configure({ sampleRate: 48000, numberOfChannels: 1 });
+      mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_AUDIO, screenAudioDecoder);
+
+      const decoderScreen720p = await video720pPromise;
+      mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_720P, decoderScreen720p);
+      
+      await audioConfigPromise;
+
       proxyConsole.warn(
         "Initialized screen share decoders:",
         mediaDecoders,
@@ -656,12 +837,23 @@ async function initializeDecoders() {
         CHANNEL_NAME.SCREEN_SHARE_AUDIO
       );
       break;
+    }
 
-    default:
-      mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_360P)));
-      mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_720P)));
-      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, new OpusAudioDecoder(audioInit));
+    default: {
+      const video360pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_360P);
+      const video720pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P);
+
+      const defaultMicAudioDecoder = new OpusAudioDecoder(audioInit);
+      const audioConfigPromise = defaultMicAudioDecoder.configure({ sampleRate: 48000, numberOfChannels: 1 });
+      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, defaultMicAudioDecoder);
+
+      const [decoder360p, decoder720p] = await Promise.all([video360pPromise, video720pPromise]);
+      mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, decoder360p);
+      mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, decoder720p);
+      
+      await audioConfigPromise;
       break;
+    }
   }
 
   // try {

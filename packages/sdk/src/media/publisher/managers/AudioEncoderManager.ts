@@ -58,6 +58,9 @@ export class AudioEncoderManager extends EventEmitter<{
   // Configuration
   private configReady = false;
   private audioConfig: AudioEncoderConfig | null = null;
+  
+  // Buffer for audio pages received before OpusHead BOS page
+  private pendingAudioPages: Uint8Array[] = [];
 
   constructor(
     channelName: ChannelName,
@@ -74,8 +77,10 @@ export class AudioEncoderManager extends EventEmitter<{
    * Initialize audio recorder with Opus encoding
    *
    * @param audioStream - MediaStream containing audio track
+   * @param audioContext - Optional pre-resumed AudioContext (required for iOS 15
+   *   where resume() must happen within user gesture before any await)
    */
-  async initialize(audioStream: MediaStream): Promise<void> {
+  async initialize(audioStream: MediaStream, audioContext?: AudioContext): Promise<void> {
     if (!audioStream) {
       throw new Error("Audio stream is required");
     }
@@ -105,6 +110,7 @@ export class AudioEncoderManager extends EventEmitter<{
       this.audioRecorder = await this.initAudioRecorder(
         audioStream,
         audioRecorderOptions,
+        audioContext,
       );
 
       this.audioRecorder.ondataavailable = (event: any) => {
@@ -196,16 +202,37 @@ export class AudioEncoderManager extends EventEmitter<{
 
     const dataArray = new Uint8Array(typedArray);
 
-    // Check for Opus header "OggS"
-    const isOpusHeader =
+    // Check for OggS page with BOS flag and OpusHead payload
+    // OggS structure:
+    // - Bytes 0-3: "OggS" magic
+    // - Byte 5: Header type (bit 1 = BOS flag)
+    // - Bytes 28-35: Payload start (should be "OpusHead" for config page)
+    const isOggS =
       dataArray.length >= 4 &&
       dataArray[0] === 79 && // 'O'
       dataArray[1] === 103 && // 'g'
       dataArray[2] === 103 && // 'g'
       dataArray[3] === 83; // 'S'
+    
+    // Check BOS flag (bit 1 of header type at byte 5)
+    const hasBOS = dataArray.length > 5 && (dataArray[5] & 0x02) !== 0;
+    
+    // Check for OpusHead signature at position 28 ("OpusHead")
+    const hasOpusHead = dataArray.length >= 36 &&
+      dataArray[28] === 0x4f && // 'O'
+      dataArray[29] === 0x70 && // 'p'
+      dataArray[30] === 0x75 && // 'u'
+      dataArray[31] === 0x73 && // 's'
+      dataArray[32] === 0x48 && // 'H'
+      dataArray[33] === 0x65 && // 'e'
+      dataArray[34] === 0x61 && // 'a'
+      dataArray[35] === 0x64;   // 'd'
 
-    if (isOpusHeader) {
-      // First chunk contains Opus configuration
+    // Only treat as config if it's an OggS page with BOS flag AND OpusHead payload
+    const isOpusConfigPage = isOggS && hasBOS && hasOpusHead;
+
+    if (isOpusConfigPage) {
+      // This is the genuine OpusHead BOS page - use for config
       if (!this.configReady && !this.audioConfig) {
         this.audioConfig = {
           codec: "opus",
@@ -214,7 +241,7 @@ export class AudioEncoderManager extends EventEmitter<{
           description: dataArray,
         };
 
-        log(`[AudioEncoder] Config ready for ${this.channelName}:`, {
+        log(`[AudioEncoder] Config ready for ${this.channelName} (BOS OpusHead page, ${dataArray.length} bytes):`, {
           codec: this.audioConfig.codec,
           sampleRate: this.audioConfig.sampleRate,
           numberOfChannels: this.audioConfig.numberOfChannels,
@@ -225,7 +252,23 @@ export class AudioEncoderManager extends EventEmitter<{
           config: this.audioConfig,
         });
 
+        // Replay any buffered audio pages now that config is ready
+        if (this.pendingAudioPages.length > 0) {
+          log(`[AudioEncoder] Replaying ${this.pendingAudioPages.length} buffered audio pages`);
+          for (const bufferedPage of this.pendingAudioPages) {
+            this.handleAudioData(bufferedPage);
+          }
+          this.pendingAudioPages = [];
+        }
+
         // Don't return - continue to send this chunk after config is sent
+      }
+    } else if (isOggS) {
+      // OggS page but NOT config page (audio data or OpusTags)
+      // If we haven't received config yet, buffer this page
+      if (!this.configReady && !this.audioConfig) {
+        this.pendingAudioPages.push(dataArray);
+        return; // Wait for config before processing
       }
 
       // Initialize timing on first audio chunk after config
