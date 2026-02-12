@@ -1173,15 +1173,21 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         videoOnlyStream.addTrack(videoTracks[0]);
       }
 
+      // Get actual screen dimensions for config
+      const { getVideoTrackDimensions } = await import('../../utils/videoResolutionHelper');
+      const screenDimensions = getVideoTrackDimensions(videoTrack);
+      const screenWidth = screenDimensions?.width || 1280;
+      const screenHeight = screenDimensions?.height || 720;
+
       const screenShareData = {
         stream: this.screenStream,
         videoOnlyStream,
         streamId: this.options.streamId,
         config: {
           codec: "avc1.640c34",
-          width: 1280,
-          height: 720,
-          framerate: 20,
+          width: screenWidth,
+          height: screenHeight,
+          framerate: 30,
           bitrate: 1000000,
         },
         hasAudio,
@@ -1223,10 +1229,39 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (!videoTrack) return;
 
     // Initialize video encoder manager for screen share
-    const screenSubStreams = getSubStreams("screen_share", {
+    let screenSubStreams = getSubStreams("screen_share", {
       can_publish: this.options.permissions.can_publish,
       can_publish_sources: this.options.permissions.can_publish_sources,
     });
+
+    // Extract actual screen dimensions and calculate dynamic resolutions
+    const { calculateSubStreamResolutions, getVideoTrackDimensions } = await import('../../utils/videoResolutionHelper');
+    const actualDimensions = getVideoTrackDimensions(videoTrack);
+
+    let screenWidth = 1280;
+    let screenHeight = 720;
+
+    if (actualDimensions) {
+      screenWidth = actualDimensions.width;
+      screenHeight = actualDimensions.height;
+      log("[Publisher] Actual screen share dimensions:", `${screenWidth}x${screenHeight}`);
+
+      const { video720p } = calculateSubStreamResolutions(screenWidth, screenHeight);
+      log("[Publisher] Calculated screen share 720p resolution:", `${video720p.width}x${video720p.height}`);
+
+      // Update screenSubStreams with calculated dimensions
+      screenSubStreams = screenSubStreams.map(subStream => {
+        if (subStream.channelName === ChannelName.SCREEN_SHARE_720P) {
+          return { ...subStream, width: video720p.width, height: video720p.height };
+        }
+        return subStream;
+      });
+
+      log("[Publisher] Updated screen share subStreams:", screenSubStreams);
+    } else {
+      log("[Publisher] Could not get actual screen dimensions, using defaults");
+    }
+
     this.screenVideoEncoderManager = new VideoEncoderManager();
 
     // Create video processor for screen share
@@ -1246,11 +1281,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       this.updateStatus("Screen video processing error", true);
     });
 
-    // Initialize and start video processing
+    // Initialize and start video processing with actual dimensions
     const baseConfig = {
       codec: "avc1.640c34",
-      width: 1280,
-      height: 720,
+      width: screenWidth,
+      height: screenHeight,
       framerate: 20, // Lower framerate for screen share
       bitrate: 1000000, // 1 Mbps for screen share
     };
@@ -1258,7 +1293,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     await this.screenVideoProcessor.initialize(videoTrack, baseConfig);
     await this.screenVideoProcessor.start();
 
-    log("[Publisher] Screen video processing started");
+    log("[Publisher] Screen video processing started with dimensions:", `${screenWidth}x${screenHeight}`);
   }
 
   private async startScreenAudioStreaming(): Promise<void> {
