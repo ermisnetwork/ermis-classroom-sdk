@@ -2001,9 +2001,13 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         selfBrowserSurface?: string;
       } = {
         video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 15 },
+          // Do NOT set ideal width/height — it forces the browser to
+          // stretch the tab capture into that exact resolution.
+          // Only set max to cap quality, and let the browser preserve
+          // the tab's natural aspect ratio.
+          width: { max: 1920 },
+          height: { max: 1080 },
+          frameRate: { ideal: 30 },
         },
         audio: true,
       };
@@ -2101,12 +2105,34 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       throw new Error("Tab stream or StreamManager not initialized");
     }
 
+    // Calculate actual livestream resolution from tab capture dimensions
+    const { calculateLivestreamResolution, getVideoTrackDimensions } = await import('../../utils/videoResolutionHelper');
+    const videoTrack = this.tabStream.getVideoTracks()[0];
+    let livestreamSubStream = SUB_STREAMS.LIVESTREAM_720P;
+
+    if (videoTrack) {
+      const actualDimensions = getVideoTrackDimensions(videoTrack);
+      if (actualDimensions) {
+        const { width: actualWidth, height: actualHeight } = actualDimensions;
+        log("[Publisher] Actual tab capture dimensions:", `${actualWidth}x${actualHeight}`);
+
+        const livestreamRes = calculateLivestreamResolution(actualWidth, actualHeight);
+        livestreamSubStream = {
+          ...SUB_STREAMS.LIVESTREAM_720P,
+          width: livestreamRes.width,
+          height: livestreamRes.height,
+        };
+      } else {
+        log("[Publisher] Could not get tab capture dimensions, using default livestream config");
+      }
+    }
+
     // Video processor for livestream
     this.livestreamVideoEncoderManager = new VideoEncoderManager();
     this.livestreamVideoProcessor = new VideoProcessor(
       this.livestreamVideoEncoderManager,
       this.streamManager,
-      [SUB_STREAMS.LIVESTREAM_720P] as SubStream[]
+      [livestreamSubStream] as SubStream[]
     );
 
     this.livestreamVideoProcessor.on("encoderError", (error) => {
@@ -2153,10 +2179,26 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (this.livestreamVideoProcessor) {
       const videoTrack = this.tabStream.getVideoTracks()[0];
       if (videoTrack) {
+        // Calculate resolution dynamically from actual tab capture dimensions
+        const { calculateLivestreamResolution, getVideoTrackDimensions } = await import('../../utils/videoResolutionHelper');
+        const actualDimensions = getVideoTrackDimensions(videoTrack);
+        console.log("[Publisher] ActualDimensions:", actualDimensions);
+        let width = 1280;
+        let height = 720;
+
+        if (actualDimensions) {
+          const livestreamRes = calculateLivestreamResolution(actualDimensions.width, actualDimensions.height);
+          width = livestreamRes.width;
+          height = livestreamRes.height;
+          log("[Publisher] Livestream encoding resolution:", `${width}x${height}`, `(from ${actualDimensions.width}x${actualDimensions.height})`);
+        } else {
+          log("[Publisher] Could not get tab dimensions, using default 1280x720");
+        }
+
         const baseConfig = {
           codec: "avc1.640c34",
-          width: 1280,
-          height: 720,
+          width,
+          height,
           framerate: 15,
           bitrate: 1_500_000,
         };
@@ -2433,9 +2475,13 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         selfBrowserSurface?: string;
       } = {
         video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 15 },
+          // Do NOT set ideal width/height — it forces the browser to
+          // stretch the tab capture into that exact resolution.
+          // Only set max to cap quality, and let the browser preserve
+          // the tab's natural aspect ratio.
+          width: { max: 1920 },
+          height: { max: 1080 },
+          frameRate: { ideal: 30 },
         },
         audio: true, // Request audio capture from tab
       };
