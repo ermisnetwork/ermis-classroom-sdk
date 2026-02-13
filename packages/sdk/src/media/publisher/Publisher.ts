@@ -124,6 +124,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private livestreamAudioMixer: LivestreamAudioMixer | null = null;
   private tabStream: MediaStream | null = null;
   private mixedAudioStream: MediaStream | null = null;
+  // Store viewport dimensions BEFORE getDisplayMedia popup changes them
+  private preCaptureViewportDimensions: { width: number; height: number } | null = null;
 
   constructor(config: PublisherConfig) {
     super();
@@ -1973,6 +1975,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         }
 
         this.mixedAudioStream = null;
+        this.preCaptureViewportDimensions = null;
       } else {
         log("[Publisher] Recording is active, keeping infrastructure running");
       }
@@ -2036,12 +2039,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         selfBrowserSurface?: string;
       } = {
         video: {
-          // Do NOT set ideal width/height — it forces the browser to
-          // stretch the tab capture into that exact resolution.
-          // Only set max to cap quality, and let the browser preserve
-          // the tab's natural aspect ratio.
-          width: { max: 1920 },
-          height: { max: 1080 },
           frameRate: { ideal: 30 },
         },
         audio: true,
@@ -2082,6 +2079,41 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         };
       }
 
+      // Wait for viewport to stabilize after getDisplayMedia.
+      // Chrome's sharing indicator bar animates in, causing MULTIPLE resize events.
+      // Debounce: wait until no HEIGHT resize fires for 300ms (bar fully settled).
+      // Only reacts to height changes — ignores width-only resizes (e.g. DevTools, sidebar).
+      const heightBeforeShare = window.innerHeight;
+      await new Promise<void>(resolve => {
+        let debounceTimer: ReturnType<typeof setTimeout>;
+        let lastSeenHeight = heightBeforeShare;
+        const onResize = () => {
+          const currentHeight = window.innerHeight;
+          // Ignore width-only resizes (DevTools, sidebars, etc.)
+          if (currentHeight === lastSeenHeight) return;
+          lastSeenHeight = currentHeight;
+          // Reset debounce timer on each height change
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            window.removeEventListener('resize', onResize);
+            clearTimeout(fallbackTimer);
+            resolve();
+          }, 300);
+        };
+        // Fallback: if no height resize within 3s, proceed with current dimensions
+        const fallbackTimer = setTimeout(() => {
+          window.removeEventListener('resize', onResize);
+          clearTimeout(debounceTimer);
+          resolve();
+        }, 3000);
+        window.addEventListener('resize', onResize);
+      });
+
+      this.preCaptureViewportDimensions = {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      };
+      log("[Publisher] Viewport dimensions for livestream:", `${this.preCaptureViewportDimensions.width}x${this.preCaptureViewportDimensions.height}`);
       this.updateStatus("Tab captured successfully");
     } catch (error) {
       console.error("[Publisher] Tab capture failed:", error);
@@ -2146,16 +2178,26 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     let livestreamSubStream = SUB_STREAMS.LIVESTREAM_720P;
 
     if (videoTrack) {
-      const actualDimensions = getVideoTrackDimensions(videoTrack);
-      if (actualDimensions) {
-        const { width: actualWidth, height: actualHeight } = actualDimensions;
-        log("[Publisher] Actual tab capture dimensions:", `${actualWidth}x${actualHeight}`);
-
-        const livestreamRes = calculateLivestreamResolution(actualWidth, actualHeight);
+      // Use pre-capture viewport dimensions (saved BEFORE getDisplayMedia popup appeared)
+      // This gives us the true browser height that viewers will see (without popup/sharing indicator)
+      const viewportDims = this.preCaptureViewportDimensions;
+      const trackDimensions = getVideoTrackDimensions(videoTrack);
+      if (viewportDims) {
+        const resolution = calculateLivestreamResolution(viewportDims.width, viewportDims.height);
+        log("[Publisher] Livestream resolution:", `${resolution.width}x${resolution.height}`);
         livestreamSubStream = {
           ...SUB_STREAMS.LIVESTREAM_720P,
-          width: livestreamRes.width,
-          height: livestreamRes.height,
+          width: resolution.width,
+          height: resolution.height,
+        };
+      } else if (trackDimensions) {
+        // Fallback: use track dimensions if pre-capture was not saved
+        const resolution = calculateLivestreamResolution(trackDimensions.width, trackDimensions.height);
+        log("[Publisher] Fallback: using track dimensions:", `${trackDimensions.width}x${trackDimensions.height} → ${resolution.width}x${resolution.height}`);
+        livestreamSubStream = {
+          ...SUB_STREAMS.LIVESTREAM_720P,
+          width: resolution.width,
+          height: resolution.height,
         };
       } else {
         log("[Publisher] Could not get tab capture dimensions, using default livestream config");
@@ -2214,20 +2256,23 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (this.livestreamVideoProcessor) {
       const videoTrack = this.tabStream.getVideoTracks()[0];
       if (videoTrack) {
-        // Calculate resolution dynamically from actual tab capture dimensions
+        // Use pre-capture viewport dimensions for resolution calculation
+        // This gives us the true browser dimensions BEFORE the getDisplayMedia popup changed them
         const { calculateLivestreamResolution, getVideoTrackDimensions } = await import('../../utils/videoResolutionHelper');
-        const actualDimensions = getVideoTrackDimensions(videoTrack);
-        console.log("[Publisher] ActualDimensions:", actualDimensions);
+        const viewportDims = this.preCaptureViewportDimensions;
+        const trackDims = getVideoTrackDimensions(videoTrack);
         let width = 1280;
         let height = 720;
 
-        if (actualDimensions) {
-          const livestreamRes = calculateLivestreamResolution(actualDimensions.width, actualDimensions.height);
+        if (viewportDims) {
+          const livestreamRes = calculateLivestreamResolution(viewportDims.width, viewportDims.height);
           width = livestreamRes.width;
           height = livestreamRes.height;
-          log("[Publisher] Livestream encoding resolution:", `${width}x${height}`, `(from ${actualDimensions.width}x${actualDimensions.height})`);
-        } else {
-          log("[Publisher] Could not get tab dimensions, using default 1280x720");
+        } else if (trackDims) {
+          // Fallback: use track dimensions
+          const livestreamRes = calculateLivestreamResolution(trackDims.width, trackDims.height);
+          width = livestreamRes.width;
+          height = livestreamRes.height;
         }
 
         const baseConfig = {
@@ -2444,6 +2489,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         }
 
         this.mixedAudioStream = null;
+        this.preCaptureViewportDimensions = null;
       } else {
         log("[Publisher] Livestream is active, keeping infrastructure running");
       }
@@ -2510,12 +2556,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         selfBrowserSurface?: string;
       } = {
         video: {
-          // Do NOT set ideal width/height — it forces the browser to
-          // stretch the tab capture into that exact resolution.
-          // Only set max to cap quality, and let the browser preserve
-          // the tab's natural aspect ratio.
-          width: { max: 1920 },
-          height: { max: 1080 },
           frameRate: { ideal: 30 },
         },
         audio: true, // Request audio capture from tab
@@ -2528,6 +2568,38 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       this.tabStream = await navigator.mediaDevices.getDisplayMedia(
         displayMediaOptions as DisplayMediaStreamOptions
       );
+
+      // Wait for viewport to stabilize after getDisplayMedia (same as captureCurrentTab).
+      // Chrome's sharing indicator bar animates in, causing MULTIPLE resize events.
+      if (!this.preCaptureViewportDimensions) {
+        const heightBeforeShare = window.innerHeight;
+        await new Promise<void>(resolve => {
+          let debounceTimer: ReturnType<typeof setTimeout>;
+          let lastSeenHeight = heightBeforeShare;
+          const onResize = () => {
+            const currentHeight = window.innerHeight;
+            if (currentHeight === lastSeenHeight) return;
+            lastSeenHeight = currentHeight;
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+              window.removeEventListener('resize', onResize);
+              clearTimeout(fallbackTimer);
+              resolve();
+            }, 300);
+          };
+          const fallbackTimer = setTimeout(() => {
+            window.removeEventListener('resize', onResize);
+            clearTimeout(debounceTimer);
+            resolve();
+          }, 3000);
+          window.addEventListener('resize', onResize);
+        });
+        this.preCaptureViewportDimensions = {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        };
+        log("[Publisher] Viewport dimensions for livestream:", `${this.preCaptureViewportDimensions.width}x${this.preCaptureViewportDimensions.height}`);
+      }
 
       const videoTracks = this.tabStream.getVideoTracks();
       const audioTracks = this.tabStream.getAudioTracks();
