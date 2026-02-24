@@ -4,6 +4,7 @@
  * Responsibilities:
  * - Initializes MediaStreamTrackGenerator for video
  * - Handles video frame writing
+ * - Optional jitter buffer for smooth playback (screen share)
  * - Manages video track lifecycle
  */
 
@@ -26,6 +27,32 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
   private videoGenerator: MediaStreamTrackGenerator | null = null;
   private videoWriter: WritableStream | null = null;
   private mediaStream: MediaStream | null = null;
+
+  // Jitter buffer - smooths bursty frame delivery into fixed-rate output
+  private jitterBufferEnabled = false;
+  private jitterBuffer: VideoFrame[] = [];
+  private playbackTimer: ReturnType<typeof setInterval> | null = null;
+  private playbackIntervalMs = 50; // 20fps output rate
+  private targetBufferSize = 3; // Aim to keep ~3 frames buffered (150ms at 20fps)
+  private maxBufferSize = 15; // Drop oldest frames if buffer exceeds this
+  private isWriting = false; // Guard against overlapping writes
+
+  // Diagnostics
+  private frameCount = 0;
+  private lastFrameArrivalTime = 0;
+  private frameArrivalGaps: number[] = [];
+
+  /**
+   * Enable jitter buffer for smooth playback
+   * @param fps - Target output framerate (used to calculate playback interval)
+   */
+  enableJitterBuffer(fps: number = 20): void {
+    this.jitterBufferEnabled = true;
+    this.playbackIntervalMs = Math.round(1000 / fps);
+    this.targetBufferSize = Math.max(2, Math.ceil(fps * 0.15)); // ~150ms worth of frames
+    this.maxBufferSize = fps; // 1 second max
+    log(`[VideoProcessor] Jitter buffer enabled: ${fps}fps, interval=${this.playbackIntervalMs}ms, targetBuffer=${this.targetBufferSize}`);
+  }
 
   /**
    * Initialize video system
@@ -53,8 +80,10 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       // Create MediaStream with video track only
       this.mediaStream = new MediaStream([this.videoGenerator]);
 
-      // DEBUG: Track state
-      // log("[VideoProcessor] 🎥 Track created, readyState:", this.videoGenerator.readyState);
+      // Start jitter buffer playback timer
+      if (this.jitterBufferEnabled) {
+        this.startPlaybackTimer();
+      }
 
       log("[VideoProcessor] ✅ Video system initialized, emitting 'initialized' event");
       this.emit("initialized", { stream: this.mediaStream });
@@ -69,10 +98,8 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
     }
   }
 
-  private frameCount = 0;
-
   /**
-   * Write video frame
+   * Write video frame (with optional jitter buffer)
    */
   async writeFrame(frame: VideoFrame): Promise<void> {
     if (!this.videoWriter || !frame) {
@@ -88,29 +115,114 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       }
     }
 
+    // Diagnostic: measure arrival timing
+    const now = performance.now();
+    if (this.lastFrameArrivalTime > 0) {
+      this.frameArrivalGaps.push(now - this.lastFrameArrivalTime);
+    }
+    this.lastFrameArrivalTime = now;
+
+    if (this.frameArrivalGaps.length >= 100) {
+      // const gaps = this.frameArrivalGaps;
+      // const min = Math.min(...gaps).toFixed(1);
+      // const max = Math.max(...gaps).toFixed(1);
+      // const avg = (gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(1);
+      // const jitter = gaps.filter(g => g > 100).length;
+      // console.warn(`[VideoProcessor] 📊 ARRIVAL: min=${min}ms max=${max}ms avg=${avg}ms jitter(>100ms)=${jitter}/100 buffer=${this.jitterBuffer.length}`);
+      this.frameArrivalGaps = [];
+    }
+
+    // Jitter buffer mode: queue frame for fixed-rate playback
+    if (this.jitterBufferEnabled) {
+      this.jitterBuffer.push(frame);
+
+      // Drop oldest frames if buffer is too large (prevent memory buildup)
+      while (this.jitterBuffer.length > this.maxBufferSize) {
+        const dropped = this.jitterBuffer.shift();
+        try { dropped?.close(); } catch {}
+        console.warn(`[VideoProcessor] ⚠️ Jitter buffer overflow, dropped frame (size=${this.jitterBuffer.length})`);
+      }
+      return;
+    }
+
+    // No jitter buffer — write immediately
+    await this.writeFrameDirect(frame);
+  }
+
+  /**
+   * Write a single frame to the video writer directly
+   */
+  private async writeFrameDirect(frame: VideoFrame): Promise<void> {
     try {
-      const writer = this.videoWriter.getWriter();
+      const writer = this.videoWriter!.getWriter();
       await writer.write(frame);
       writer.releaseLock();
 
       this.frameCount++;
-      // if (this.frameCount <= 5 || this.frameCount % 100 === 0) {
-      //   log(`[VideoProcessor] ✅ Frame ${this.frameCount} written successfully`);
-      // }
-
       this.emit("frameProcessed", undefined);
     } catch (error) {
       const err =
         error instanceof Error ? error : new Error("Video write failed");
       console.error(`[VideoProcessor] ❌ Failed to write video frame #${this.frameCount}:`, err);
 
-      // Check track state after error
       if (this.videoGenerator) {
         console.error("[VideoProcessor] Track state after error:", this.videoGenerator.readyState);
       }
 
       this.emit("error", { error: err, context: "writeFrame" });
       throw err;
+    }
+  }
+
+  // ==========================================
+  // === Jitter Buffer Playback             ===
+  // ==========================================
+
+  /**
+   * Start the fixed-rate playback timer
+   * Writes one frame from the buffer at each tick
+   */
+  private startPlaybackTimer(): void {
+    this.stopPlaybackTimer();
+    log(`[VideoProcessor] Starting jitter buffer playback at ${this.playbackIntervalMs}ms intervals`);
+
+    this.playbackTimer = setInterval(() => {
+      this.playbackTick();
+    }, this.playbackIntervalMs);
+  }
+
+  /**
+   * Stop the playback timer
+   */
+  private stopPlaybackTimer(): void {
+    if (this.playbackTimer) {
+      clearInterval(this.playbackTimer);
+      this.playbackTimer = null;
+    }
+  }
+
+  /**
+   * Playback tick: write one frame from the buffer
+   * Called at fixed intervals for smooth output
+   */
+  private async playbackTick(): Promise<void> {
+    // Guard against overlapping writes
+    if (this.isWriting) return;
+
+    if (this.jitterBuffer.length === 0) {
+      // Buffer underrun — no frame to show, keep showing last frame
+      return;
+    }
+
+    this.isWriting = true;
+    try {
+      // Take the next frame from the buffer
+      const frame = this.jitterBuffer.shift()!;
+      await this.writeFrameDirect(frame);
+    } catch {
+      // Write failed, skip frame
+    } finally {
+      this.isWriting = false;
     }
   }
 
@@ -126,6 +238,13 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
    */
   cleanup(): void {
     try {
+      // Stop playback timer and close buffered frames
+      this.stopPlaybackTimer();
+      for (const frame of this.jitterBuffer) {
+        try { frame.close(); } catch {}
+      }
+      this.jitterBuffer = [];
+
       // Close video writer
       if (this.videoWriter) {
         try {
