@@ -50,7 +50,7 @@ function App() {
         host: apiHost,
         hostNode: node,
         webtpUrl: `https://${node}/meeting/wt`,
-        sdkAssetsUrl: `https://${apiHost}/meeting/sdk-assets`,
+        // sdkAssetsUrl: `https://${apiHost}/meeting/sdk-assets`,
         // videoResolutions: [ChannelName.VIDEO_1440P], // Default [video_360p, video_720p]
         // subscriberInitQuality: 'video_1440p', // Default video_360p
       }}

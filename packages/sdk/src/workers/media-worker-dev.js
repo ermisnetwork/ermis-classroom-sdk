@@ -18,6 +18,11 @@ let audioEnabled = true;
 // For screen share, this is determined by whether the publisher has screen share audio
 let subscriptionAudioEnabled = true;
 
+// External decoder port — set by the main thread for platforms without nested
+// worker support (e.g. iOS 15 Safari).  When present, OpusAudioDecoder uses
+// this MessagePort instead of creating a nested Worker.
+let externalDecoderPort = null;
+
 let mediaConfigs = new Map();
 
 let mediaDecoders = new Map();
@@ -59,15 +64,15 @@ let protocol = null;
 // WebSocket specific
 let isWebSocket = false;
 
-/** @type {Map<string, WasmFecManager>} Per-channel FEC managers to prevent data mixing */
-const fecManagers = new Map();
+/** @type {WasmFecManager|null} Single shared FEC manager for all channels */
+let fecManager = null;
 let isRaptorQInitialized = false;
 
-function getOrCreateFecManager(channelName) {
-  if (!fecManagers.has(channelName)) {
-    fecManagers.set(channelName, new WasmFecManager());
+function getOrCreateFecManager() {
+  if (!fecManager) {
+    fecManager = new WasmFecManager();
   }
-  return fecManagers.get(channelName);
+  return fecManager;
 }
 
 async function initRaptorQWasm() {
@@ -184,27 +189,25 @@ const audioInit = {
       }
     
 
-    // iOS 15 Debug: Log audio data being sent to worklet
     if (!self._audioFrameCount) self._audioFrameCount = 0;
     self._audioFrameCount++;
-    if (self._audioFrameCount <= 5 || self._audioFrameCount % 100 === 0) {
-      console.log('[iOS15 Audio DEBUG] Sending audio to worklet, frame#:', self._audioFrameCount, 
-        'channels:', channelData.length, 
-        'frames:', audioData.numberOfFrames,
-        'workletPort:', workletPort ? 'CONNECTED' : 'NULL');
-    }
 
-    // iOS 15 Debug: Log audio data being sent to worklet
-    if (!self._audioFrameCount) self._audioFrameCount = 0;
-    self._audioFrameCount++;
-    if (self._audioFrameCount <= 5 || self._audioFrameCount % 100 === 0) {
-      console.log('[iOS15 Audio DEBUG] Sending audio to worklet, frame#:', self._audioFrameCount, 
-        'channels:', channelData.length, 
-        'frames:', audioData.numberOfFrames,
-        'workletPort:', workletPort ? 'CONNECTED' : 'NULL');
+    if (self._audioFrameCount < 10) {
+      console.log('[Audio] audioData:', audioData, "workletPort:", workletPort);
     }
 
     if (workletPort) {
+      // Log first few frames and sample values to verify data integrity
+      if (self._audioFrameCount <= 3) {
+        const ch0 = channelData[0];
+        const maxVal = Math.max(...Array.from(ch0.slice(0, 100)).map(Math.abs));
+        console.log('[Audio] Worklet frame#:', self._audioFrameCount,
+          'ch:', channelData.length, 'frames:', audioData.numberOfFrames,
+          'sampleRate:', audioData.sampleRate,
+          'maxAbs(first100):', maxVal.toFixed(6),
+          'bufferByteLen:', ch0.buffer.byteLength);
+      }
+
       workletPort.postMessage(
         {
           type: "audioData",
@@ -217,7 +220,7 @@ const audioInit = {
         channelData.map((c) => c.buffer),
       );
     } else {
-      console.error('[iOS15 Audio DEBUG] workletPort is NULL! Cannot send audio data');
+      console.error('[Audio] workletPort is NULL, cannot send audio data');
     }
 
     audioData.close();
@@ -252,9 +255,8 @@ self.onmessage = async function (e) {
       // Get audioEnabled from init message - for screen share, this determines if we should subscribe to audio
       subscriptionAudioEnabled = e.data.audioEnabled !== undefined ? e.data.audioEnabled : true;
       initialQuality = e.data.initialQuality;
-      console.log(`[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}, initialQuality=${initialQuality}`);
-      await initializeDecoders();
-      console.log(`[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}`);
+      externalDecoderPort = e.data.decoderPort || null;
+      console.log(`[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}, initialQuality=${initialQuality}, hasDecoderPort=${!!externalDecoderPort}`);
       try {
         await initializeDecoders();
         console.log(`[Worker] Decoders initialized successfully`);
@@ -395,7 +397,13 @@ async function sendOverWebSocket(data) {
 function attachWebRTCDataChannel(channelName, channel) {
   webRtcDataChannels.set(channelName, channel);
 
-  channel.binaryType = "arraybuffer";
+  try {
+    channel.binaryType = "arraybuffer";
+  } catch (e) {
+    // Safari 15: binaryType may already be set before transfer or
+    // setting it on a transferred channel may throw TypeMismatchError.
+    proxyConsole.warn(`[WebRTC] Could not set binaryType for ${channelName}:`, e.message);
+  }
 
   channel.onopen = () => {
     proxyConsole.log(`[WebRTC] Data channel opened: ${channelName}`);
@@ -409,7 +417,7 @@ function attachWebRTCDataChannel(channelName, channel) {
     out.set(initData, 4);
 
     channel.send(out);
-    proxyConsole.log(`[WebRTC] Sent subscribe message for ${channelName}`);
+    console.log(`[WebRTC] Sent subscribe message for ${channelName}`);
   };
 
   channel.onclose = () => {
@@ -420,8 +428,15 @@ function attachWebRTCDataChannel(channelName, channel) {
     proxyConsole.error(`[WebRTC] Data channel error for ${channelName}:`, error);
   };
 
-  channel.onmessage = (event) => {
-    handleWebRtcMessage(channelName, event.data);
+  channel.onmessage = async (event) => {
+    // console.warn(`[WebRTC] Received message for ${channelName}:`, event.data, " data type: ", typeof event.data);
+    let data = event.data;
+    // iOS 15: binaryType="arraybuffer" may not persist after transfer to worker,
+    // so data can arrive as Blob instead of ArrayBuffer.  Convert if needed.
+    if (data instanceof Blob) {
+      data = await data.arrayBuffer();
+    }
+    handleWebRtcMessage(channelName, data);
   };
 }
 
@@ -606,35 +621,38 @@ function initVideoJitterBuffer() {
   });
 }
 
+let fecDisabled = false; // Set to true after first WASM crash to avoid repeated errors
+
 function handleWebRtcMessage(channelName, message) {
     const { sequenceNumber, isFec, packetType, payload } = parseWebRTCPacket(new Uint8Array(message));
-    
-    // Initialize jitter buffer if needed
-    if (!videoJitterBuffer && channelName.startsWith('video_')) {
-      initVideoJitterBuffer();
-    }
 
+    // FEC packets must be recovered by RaptorQ before processing.
+    // Raw FEC payloads are NOT valid media data and must never reach the decoder.
     if (isFec) {
-      const channelFecManager = getOrCreateFecManager(channelName);
-      const result = channelFecManager.process_fec_packet(payload, sequenceNumber);
-      if (result) {
-        const decodedData = result[0][1];
-        // Use jitter buffer for video FEC packets
-        if (channelName.startsWith('video_') && videoJitterBuffer) {
-          videoJitterBuffer.addPacket(sequenceNumber, decodedData);
-        } else {
-          processIncomingMessage(decodedData);
-        }
+      if (fecDisabled) {
         return;
       }
-    } else {
-      // Use jitter buffer for video non-FEC packets
-      if (channelName.startsWith('video_') && videoJitterBuffer) {
-        videoJitterBuffer.addPacket(sequenceNumber, payload);
-      } else {
-        processIncomingMessage(payload);
+      try {
+        const channelFecManager = getOrCreateFecManager();
+        const result = channelFecManager.process_fec_packet(payload, sequenceNumber);
+        if (result) {
+          // Process ALL recovered chunks, not just the first
+          for (let i = 0; i < result.length; i++) {
+            const decodedData = result[i][1];
+            processIncomingMessage(decodedData);
+          }
+        }
+      } catch (fecError) {
+        if (!fecDisabled) {
+          console.warn('[WebRTC] FEC processing failed, disabling FEC:', fecError.message);
+          fecDisabled = true;
+        }
       }
+      return;
     }
+
+    // Non-FEC packets — bypass jitter buffer, process directly
+    processIncomingMessage(payload);
 }
 
 function parseWebRTCPacket(packet) {
@@ -723,7 +741,7 @@ function handleStreamConfigs(json) {
         const decoder = mediaDecoders.get(channelName);
         if (decoder) {
           try {
-            decoder.configure(audioConfig).then((configResult) => {
+            decoder.configure({ ...audioConfig, decoderPort: externalDecoderPort }).then((configResult) => {
               console.log(`[Audio] configured successfully for ${channelName}, result:`, configResult, "state:", decoder.state);
             }).catch((err) => {
               console.error(`[Audio] configure() REJECTED for ${channelName}:`, err);
@@ -830,31 +848,39 @@ async function readStream(reader) {
 }
 
 async function processIncomingMessage(message) {
-  try {
-    const dec = new TextDecoder();
-    const maybeText = dec.decode(message).trimStart();
-    
-    if (maybeText.startsWith('{')) {
-      try {
-        const json = JSON.parse(maybeText);
-        console.log(`[processIncomingMessage] Received JSON message:`, json);
-        if (json.type === 'DecoderConfigs') {
-          handleStreamConfigs(json);
-          return;
-        }
-      } catch (e) {
-        proxyConsole.warn(`[processIncomingMessage] Non-JSON text:`, maybeText);
+  // Get raw bytes for inspection
+  let bytes;
+  if (message instanceof Uint8Array) {
+    bytes = message;
+  } else if (message instanceof ArrayBuffer) {
+    bytes = new Uint8Array(message);
+  } else {
+    bytes = new Uint8Array(message.buffer || message);
+  }
+
+  // Only attempt JSON parsing if data starts with '{' (0x7B)
+  if (bytes.length > 0 && bytes[0] === 0x7B) {
+    try {
+      const text = new TextDecoder().decode(bytes);
+      const json = JSON.parse(text);
+      console.log(`[processIncomingMessage] Received JSON message:`, json);
+      if (json.type === 'DecoderConfigs') {
+        handleStreamConfigs(json);
         return;
       }
+    } catch (e) {
+      // Not valid JSON — binary data that happens to start with 0x7B.
+      // Fall through to binary handling.
     }
-  } catch (err) {
-    proxyConsole.error(`[processIncomingMessage] error:`, err);
   }
-  if (message instanceof ArrayBuffer) {
-    handleBinaryPacket(message);
-  } else {
-    handleBinaryPacket(message.buffer);
-  }
+
+  // Binary media packet
+  const buf = (message instanceof ArrayBuffer)
+    ? message
+    : bytes.buffer.byteLength === bytes.length
+      ? bytes.buffer
+      : bytes.slice().buffer;
+  handleBinaryPacket(buf);
 }
 
 async function handleBinaryPacket(dataBuffer) {
@@ -1026,15 +1052,15 @@ async function handleBinaryPacket(dataBuffer) {
       const decoderState = decoder1440p ? decoder1440p.state : null;
 
       // Recreate decoder if closed or in error state
-      if (!decoder1440p || decoderState === "closed" || decoderState === "unconfigured") {
-        decoder1440p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1440P));
-        mediaDecoders.set(CHANNEL_NAME.VIDEO_1440P, decoder1440p);
-        const config1440p = mediaConfigs.get(CHANNEL_NAME.VIDEO_1440P);
-        if (config1440p) {
-          proxyConsole.log("Configuring 1440p decoder with config:", config1440p);
-          decoder1440p.configure(config1440p);
-        }
-      }
+      // if (!decoder1440p || decoderState === "closed" || decoderState === "unconfigured") {
+      //   decoder1440p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1440P));
+      //   mediaDecoders.set(CHANNEL_NAME.VIDEO_1440P, decoder1440p);
+      //   const config1440p = mediaConfigs.get(CHANNEL_NAME.VIDEO_1440P);
+      //   if (config1440p) {
+      //     proxyConsole.log("Configuring 1440p decoder with config:", config1440p);
+      //     decoder1440p.configure(config1440p);
+      //   }
+      // }
 
       try {
         const encodedChunk = new EncodedVideoChunk({
@@ -1063,13 +1089,13 @@ async function handleBinaryPacket(dataBuffer) {
 
       // Recreate decoder if closed or in error state
       if (!videoDecoderScreenShare720p || decoderState === "closed" || decoderState === "unconfigured") {
-        videoDecoderScreenShare720p = new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P));
-        mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_720P, videoDecoderScreenShare720p);
-        const screenShare720pConfig = mediaConfigs.get(CHANNEL_NAME.SCREEN_SHARE_720P);
-        if (screenShare720pConfig) {
-          proxyConsole.log("Recreating screen share 720p decoder with config:", screenShare720pConfig);
-          videoDecoderScreenShare720p.configure(screenShare720pConfig);
-        }
+        // videoDecoderScreenShare720p = new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P));
+        // mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_720P, videoDecoderScreenShare720p);
+        // const screenShare720pConfig = mediaConfigs.get(CHANNEL_NAME.SCREEN_SHARE_720P);
+        // if (screenShare720pConfig) {
+        //   proxyConsole.log("Recreating screen share 720p decoder with config:", screenShare720pConfig);
+        //   videoDecoderScreenShare720p.configure(screenShare720pConfig);
+        // }
       }
 
       try {
@@ -1087,28 +1113,21 @@ async function handleBinaryPacket(dataBuffer) {
     }
     return;
   } else if (frameType === 6) {
-    // iOS 15 Debug: Track audio frame reception
     if (!self._audioPacketCount) self._audioPacketCount = 0;
     self._audioPacketCount++;
-    if (self._audioPacketCount <= 5 || self._audioPacketCount % 100 === 0) {
-      console.log('[iOS15 Audio DEBUG] Audio packet received, frame#:', self._audioPacketCount, 
-        'timestamp:', timestamp, 'dataLen:', data.byteLength);
-    }
 
     let audioDecoder = mediaDecoders.get(
       subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_AUDIO : CHANNEL_NAME.SCREEN_SHARE_AUDIO
     );
-    
+
     if (!audioDecoder) {
-      console.error('[iOS15 Audio DEBUG] audioDecoder is NULL/undefined!');
+      if (self._audioPacketCount <= 3) console.error('[Audio] audioDecoder is NULL');
       return;
     }
 
-    // iOS 15 Debug: Check decoder state before decode
-    if (self._audioPacketCount <= 5) {
-      console.log('[iOS15 Audio DEBUG] audioDecoder state:', audioDecoder.state,
-        'hasWorker:', !!audioDecoder.decoderWorker,
-        'frameCounter:', audioDecoder.frameCounter);
+    if (self._audioPacketCount <= 3) {
+      console.log('[Audio] packet#:', self._audioPacketCount,
+        'state:', audioDecoder.state, 'ts:', timestamp, 'len:', data.byteLength);
     }
 
     const chunk = new EncodedAudioChunk({
@@ -1119,13 +1138,8 @@ async function handleBinaryPacket(dataBuffer) {
 
     try {
       audioDecoder.decode(chunk);
-      
-      // iOS 15 Debug: Log after decode call
-      if (self._audioPacketCount <= 5) {
-        console.log('[iOS15 Audio DEBUG] decode() called successfully, frameCounter now:', audioDecoder.frameCounter);
-      }
     } catch (err) {
-      console.error('[iOS15 Audio DEBUG] Audio decode error:', err);
+      console.error('[Audio] decode error:', err);
     }
   }
 }
@@ -1142,22 +1156,20 @@ async function initializeDecoders() {
       const video720pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P);
       
       const micAudioDecoder = new OpusAudioDecoder(audioInit);
-      console.log('[iOS15 Audio DEBUG] Created OpusAudioDecoder, configuring...');
-      
       // Initialize audio immediately, don't wait for video
-      const audioConfigPromise = micAudioDecoder.configure({ sampleRate: 48000, numberOfChannels: 1 });
+      const audioConfigPromise = micAudioDecoder.configure({ sampleRate: 48000, numberOfChannels: 1, decoderPort: externalDecoderPort });
       mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, micAudioDecoder);
 
       // Wait for video decoders concurrently
       const [decoder360p, decoder720p] = await Promise.all([video360pPromise, video720pPromise]);
       mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, decoder360p);
       mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, decoder720p);
-      
-      await audioConfigPromise; // Ensure audio is configured (fast)
-      console.log('[iOS15 Audio DEBUG] OpusAudioDecoder configured, state:', micAudioDecoder.state,
-        'hasWorker:', !!micAudioDecoder.decoderWorker);
-      mediaDecoders.set(CHANNEL_NAME.VIDEO_1080P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P)));
-      mediaDecoders.set(CHANNEL_NAME.VIDEO_1440P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1440P)));
+
+      await audioConfigPromise;
+      console.log('[Audio] OpusDecoder configured, state:', micAudioDecoder.state,
+        'mode:', micAudioDecoder.useInlineDecoder ? 'inline' : 'worker');
+      // mediaDecoders.set(CHANNEL_NAME.VIDEO_1080P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P)));
+      // mediaDecoders.set(CHANNEL_NAME.VIDEO_1440P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1440P)));
       break;
     }
 
@@ -1183,15 +1195,14 @@ async function initializeDecoders() {
       const video720pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P);
 
       const defaultMicAudioDecoder = new OpusAudioDecoder(audioInit);
-      const audioConfigPromise = defaultMicAudioDecoder.configure({ sampleRate: 48000, numberOfChannels: 1 });
+      const audioConfigPromise = defaultMicAudioDecoder.configure({ sampleRate: 48000, numberOfChannels: 1, decoderPort: externalDecoderPort });
       mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, defaultMicAudioDecoder);
 
       const [decoder360p, decoder720p] = await Promise.all([video360pPromise, video720pPromise]);
       mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, decoder360p);
       mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, decoder720p);
-      mediaDecoders.set(CHANNEL_NAME.VIDEO_1080P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P)));
-      mediaDecoders.set(CHANNEL_NAME.VIDEO_1440P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1440P)));
-      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, new OpusAudioDecoder({ ...audioInit }));
+      // mediaDecoders.set(CHANNEL_NAME.VIDEO_1080P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P)));
+      // mediaDecoders.set(CHANNEL_NAME.VIDEO_1440P, new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1440P)));
       await audioConfigPromise;
       break;
     }
@@ -1330,7 +1341,7 @@ async function handleWebTransportBitrateSwitch(targetChannelName) {
 function resetDecoders() {
   if (videoDecoder360p) videoDecoder360p.reset();
   if (videoDecoder720p) videoDecoder720p.reset();
-  if (audioDecoder) audioDecoder.reset();
+  // if (audioDecoder) audioDecoder.reset();
 
   // videoCodecReceived = false;
   // audioCodecReceived = false;

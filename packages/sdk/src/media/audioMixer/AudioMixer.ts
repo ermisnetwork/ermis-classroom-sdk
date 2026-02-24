@@ -51,14 +51,9 @@ export class AudioMixer {
         latencyHint: "interactive" as AudioContextLatencyCategory,
       });
 
-      // iOS 15 Debug: Log AudioContext state
-      console.log('[AudioMixer iOS DEBUG] AudioContext created, state:', this.audioContext.state);
-
       // Resume context if suspended (required by some browsers)
       if (this.audioContext.state === "suspended") {
-        console.log('[AudioMixer iOS DEBUG] Attempting to resume suspended AudioContext...');
         await this.audioContext.resume();
-        console.log('[AudioMixer iOS DEBUG] AudioContext state after resume:', this.audioContext.state);
       }
 
       // Create mixer node (GainNode to combine audio)
@@ -141,13 +136,12 @@ export class AudioMixer {
 
       // Connect the port if provided
       if (channelWorkletPort) {
-        console.log('[AudioMixer iOS DEBUG] Sending connectWorker message with port for:', subscriberId);
         workletNode.port.postMessage(
           { type: "connectWorker", port: channelWorkletPort },
           [channelWorkletPort],
         );
       } else {
-        console.warn('[AudioMixer iOS DEBUG] No channelWorkletPort provided for:', subscriberId);
+        console.warn('[AudioMixer] No channelWorkletPort provided for:', subscriberId);
       }
 
       // Create gain node for individual volume control
@@ -434,20 +428,16 @@ export class AudioMixer {
     try {
       if (this.subscriberNodes.size > 0) {
         this.outputAudioElement.srcObject = this.outputDestination.stream;
-        console.log('[AudioMixer iOS DEBUG] Set srcObject, subscribers:', this.subscriberNodes.size);
-        
-        // iOS 15: Explicitly try to play and catch autoplay errors
+
+        // Explicitly try to play and catch autoplay errors
         const playPromise = this.outputAudioElement.play();
         if (playPromise !== undefined) {
-          playPromise.then(() => {
-            console.log('[AudioMixer iOS DEBUG] Audio element playing successfully');
-          }).catch((err) => {
-            console.error('[AudioMixer iOS DEBUG] Audio play() blocked:', err.name, err.message);
+          playPromise.catch((err) => {
+            console.error('[AudioMixer] Audio play() blocked:', err.name, err.message);
           });
         }
       } else {
         this.outputAudioElement.srcObject = null;
-        console.log('[AudioMixer iOS DEBUG] Cleared srcObject (no subscribers)');
       }
     } catch (error) {
       console.error("Failed to update output audio:", error);
@@ -475,14 +465,16 @@ export class AudioMixer {
             `Subscriber ${subscriberId} buffer size changed: ${newBufferSize}`,
           );
           break;
+        case "workletDiag":
+          // Diagnostic messages from the AudioWorklet (useful on iOS 15
+          // where worklet console.log may not appear in devtools)
+          console.log(`[AudioWorklet Diag] ${subscriberId}:`, event.data);
+          break;
         case "error":
           console.error(`Subscriber ${subscriberId} worklet error:`, error);
           break;
         default:
-          this._debug(
-            `Subscriber ${subscriberId} worklet message:`,
-            event.data,
-          );
+          break;
       }
     };
 

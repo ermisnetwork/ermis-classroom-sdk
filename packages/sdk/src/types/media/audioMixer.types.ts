@@ -71,6 +71,7 @@ export interface AudioMixerSubscriberInfo {
 export type AudioWorkletMessageType =
   | "bufferStatus"
   | "bufferSizeChanged"
+  | "workletDiag"
   | "error"
   | "connectWorker";
 

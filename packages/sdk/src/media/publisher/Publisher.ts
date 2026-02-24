@@ -436,7 +436,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       isMicOn: this.audioEnabled,
       isCameraOn: this.videoEnabled,
       publishChannels,
-      publishChannels,
     });
 
     // StreamManager now emits to globalEventBus directly - no need to re-emit

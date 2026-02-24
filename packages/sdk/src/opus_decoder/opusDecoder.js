@@ -190,25 +190,34 @@ class OpusAudioDecoder {
         this.numberOfChannels = config.numberOfChannels;
       }
 
+      // Store external decoder port if provided (from main thread for iOS 15 compatibility)
+      if (config.decoderPort) {
+        this._externalDecoderPort = config.decoderPort;
+      }
+
       // If already configured, skip re-initialization.
       // Re-running _configureInlineDecoder() would eval the WASM a second time,
       // corrupting the first OggOpusDecoder instance's decoderBuffer.
       if (this.state === 'configured') {
-        console.log('[iOS15 Audio DEBUG] Decoder already configured, skipping re-init');
         return true;
       }
 
-      // iOS 15 Fix: Detect iOS 15 Safari which doesn't support nested workers
-      const isIOS15Safari = this._isIOS15Safari();
-      console.log('[iOS15 Audio DEBUG] isIOS15Safari:', isIOS15Safari);
+      // 1. If an external decoder port was provided (for iOS 15 where nested
+      //    workers are not supported), use it — the actual Worker was created
+      //    on the main thread and messages are relayed through this port.
+      if (this._externalDecoderPort) {
+        console.log('[Opus Decoder] configure: using external decoder port (main-thread bridge)');
+        return await this._configurePortDecoder(this._externalDecoderPort);
+      }
 
-      if (isIOS15Safari) {
-        // Use inline decoder via importScripts for iOS 15
-        return await this._configureInlineDecoder();
-      } else {
-        // Use nested worker for other browsers
+      // 2. If Worker is available in this context, use nested worker
+      if (typeof Worker !== 'undefined') {
         return await this._configureWorkerDecoder();
       }
+
+      // 3. Fallback to inline decoder
+      console.warn('[Opus Decoder] Worker not available and no external port, using inline decoder');
+      return await this._configureInlineDecoder();
     } catch (err) {
       this.error(`Error initializing decoder: ${err.message}`);
       this.state = "unconfigured";
@@ -240,15 +249,15 @@ class OpusAudioDecoder {
             const testWorker = new Worker(testUrl);
             testWorker.terminate();
             URL.revokeObjectURL(testUrl);
-            console.log('[iOS15 Audio DEBUG] Nested Worker test: PASSED');
+            // Nested workers supported
             return false; // Nested workers work
           } catch (e) {
             URL.revokeObjectURL(testUrl);
-            console.log('[iOS15 Audio DEBUG] Nested Worker test: FAILED -', e.message);
+            console.log('[Opus Decoder] No nested worker support, using inline decoder');
             return true; // Nested workers don't work - iOS 15
           }
         } catch (e) {
-          console.log('[iOS15 Audio DEBUG] Nested Worker test error:', e.message);
+          console.log('[Opus Decoder] Nested worker test error:', e.message);
           return true; // Assume iOS 15 if test fails
         }
       }
@@ -268,36 +277,28 @@ class OpusAudioDecoder {
     if (typeof self !== 'undefined' && self.location) {
       const baseUrl = self.location.origin;
       workerUrl = `${baseUrl}/opus_decoder/decoderWorker.min.js?t=${timestamp}`;
-      console.log('[iOS15 Audio DEBUG] Using absolute worker URL:', workerUrl);
+      // absolute URL
     } else {
       workerUrl = `../opus_decoder/decoderWorker.min.js?t=${timestamp}`;
-      console.log('[iOS15 Audio DEBUG] Using relative worker URL:', workerUrl);
+      // relative URL
     }
+
+    console.log("[OpusDecoder] Worker URL", workerUrl);
     
     try {
       this.decoderWorker = new Worker(workerUrl);
-      console.log('[iOS15 Audio DEBUG] Worker created successfully');
+      console.log("[OpusDecoder] Worker created successfully", this.decoderWorker);
+      // Worker created successfully
     } catch (workerError) {
-      console.error('[iOS15 Audio DEBUG] Worker creation failed:', workerError.message);
-      // Fall back to inline decoder
-      console.log('[iOS15 Audio DEBUG] Falling back to inline decoder');
+      console.warn('[Opus Decoder] Worker creation failed, falling back to inline decoder:', workerError.message);
       return await this._configureInlineDecoder();
     }
 
-    // iOS 15 Debug: Track worker messages
-    let workerMessageCount = 0;
-
     // Set up message handler for decoded audio output
     this.decoderWorker.onmessage = (e) => {
-      workerMessageCount++;
-      if (workerMessageCount <= 5 || workerMessageCount % 100 === 0) {
-        console.log('[iOS15 Audio DEBUG] decoderWorker.onmessage #' + workerMessageCount, 
-          'data type:', typeof e.data, 
-          'is array:', Array.isArray(e.data),
-          'length:', e.data?.length);
-      }
-
+      console.log("[OpusDecoder] Worker received message", e);
       if (e.data === null) {
+        console.log("[OpusDecoder] Decoder worker sent null message");
         return;
       } else if (e.data && e.data.length) {
         this._handleDecodedAudio(e.data);
@@ -305,11 +306,11 @@ class OpusAudioDecoder {
     };
 
     this.decoderWorker.onerror = (e) => {
-      console.error('[iOS15 Audio DEBUG] decoderWorker.onerror:', e.message, e.filename, e.lineno);
+      console.error('[Opus Decoder] decoderWorker error:', e.message);
       this.error(`Decoder worker error: ${e.message}`);
     };
 
-    console.log('[iOS15 Audio DEBUG] Sending init command to decoder worker');
+    // Send init command to decoder worker
     this.decoderWorker.postMessage({
       command: "init",
       decoderSampleRate: this.sampleRate,
@@ -326,12 +327,46 @@ class OpusAudioDecoder {
   }
 
   /**
+   * Configure decoder using an external MessagePort that is relayed to a
+   * decoder Worker created on the main thread.  This avoids nested workers
+   * which are unsupported on iOS 15 Safari.
+   * @private
+   * @param {MessagePort} port
+   */
+  async _configurePortDecoder(port) {
+    this.decoderWorker = port;
+
+    port.onmessage = (e) => {
+      if (e.data === null) {
+        return;
+      } else if (e.data && e.data.length) {
+        this._handleDecodedAudio(e.data);
+      }
+    };
+
+    // Send init command to decoder worker (via relayed port)
+    port.postMessage({
+      command: "init",
+      decoderSampleRate: this.sampleRate,
+      outputBufferSampleRate: this.sampleRate,
+      numberOfChannels: this.numberOfChannels,
+    });
+
+    this.state = "configured";
+    this.baseTimestamp = 0;
+    this.isSetBaseTimestamp = false;
+    this.lastDuration = 0;
+    log("Opus decoder initialized and configured (port bridge mode)");
+    return true;
+  }
+
+  /**
    * Configure decoder using inline fetch + eval (iOS 15 fallback)
    * importScripts is NOT available in ES module workers, so we use fetch + eval
    * @private
    */
   async _configureInlineDecoder() {
-    console.log('[iOS15 Audio DEBUG] Using inline decoder (fetch + eval) for iOS 15 compatibility');
+    console.log('[Opus Decoder] Using inline decoder (iOS 15 fallback)');
 
     try {
       const timestamp = Date.now();
@@ -339,8 +374,7 @@ class OpusAudioDecoder {
       const decoderJsUrl = `${baseUrl}/opus_decoder/decoderWorker.min.js?t=${timestamp}`;
       const decoderWasmUrl = `${baseUrl}/opus_decoder/decoderWorker.min.wasm?t=${timestamp}`;
 
-      console.log('[iOS15 Audio DEBUG] Fetching decoder script:', decoderJsUrl);
-      console.log('[iOS15 Audio DEBUG] Fetching WASM binary:', decoderWasmUrl);
+      // Fetch both JS and WASM in parallel
 
       // Fetch both JS and WASM in parallel
       const [jsResponse, wasmResponse] = await Promise.all([
@@ -360,8 +394,7 @@ class OpusAudioDecoder {
         wasmResponse.arrayBuffer(),
       ]);
 
-      console.log('[iOS15 Audio DEBUG] Decoder script fetched, size:', scriptContent.length);
-      console.log('[iOS15 Audio DEBUG] WASM binary fetched, size:', wasmBinary.byteLength);
+      console.log('[Opus Decoder] Inline decoder: JS', scriptContent.length, 'bytes, WASM', wasmBinary.byteLength, 'bytes');
 
       // Pre-load WASM binary into Module so the eval'd script does not
       // need to fetch it (URL resolution is broken in eval/new Function context).
@@ -376,7 +409,7 @@ class OpusAudioDecoder {
       const evalFunction = new Function('Module', scriptContent);
       evalFunction(tempModule);
 
-      console.log('[iOS15 Audio DEBUG] Script evaluated, Module keys:', Object.keys(tempModule));
+      // Script evaluated
 
       // Wait for WASM module to be ready with timeout
       if (tempModule.mainReady) {
@@ -384,7 +417,7 @@ class OpusAudioDecoder {
           setTimeout(() => reject(new Error('WASM mainReady timeout (10s)')), 10000)
         );
         await Promise.race([tempModule.mainReady, readyTimeout]);
-        console.log('[iOS15 Audio DEBUG] Module.mainReady resolved');
+        // WASM ready
       }
       
       // Store reference to the loaded module
@@ -403,7 +436,7 @@ class OpusAudioDecoder {
         bufferLength: 4096,
       }, tempModule);
       
-      console.log('[iOS15 Audio DEBUG] OggOpusDecoder instance created');
+      // OggOpusDecoder instance created
       
       // Override the sendToOutputBuffers method to call our handler
       const self_decoder = this;
@@ -435,7 +468,7 @@ class OpusAudioDecoder {
       log("Opus decoder initialized and configured (inline mode for iOS 15)");
       return true;
     } catch (err) {
-      console.error('[iOS15 Audio DEBUG] Inline decoder setup failed:', err.message);
+      console.error('[Opus Decoder] Inline decoder setup failed:', err.message);
       this.error(`Inline decoder setup failed: ${err.message}`);
       this.state = "unconfigured";
       return false;
@@ -452,13 +485,13 @@ class OpusAudioDecoder {
   decode(chunk) {
     // Check if decoder is ready - support both worker and inline modes
     if (this.state !== "configured") {
-      console.warn('[iOS15 Audio DEBUG] decode() called but decoder not ready, state:', this.state);
+      console.warn('[Opus Decoder] decode() called but decoder not ready, state:', this.state);
       return;
     }
     
     // Check we have either worker or inline decoder
     if (!this.decoderWorker && !this.useInlineDecoder) {
-      console.warn('[iOS15 Audio DEBUG] decode() called but no decoder available');
+      console.warn('[Opus Decoder] decode() called but no decoder available');
       return;
     }
 
@@ -478,10 +511,9 @@ class OpusAudioDecoder {
       const encodedData = new Uint8Array(chunk.byteLength);
       chunk.copyTo(encodedData);
 
-      // iOS 15 Debug: Log decode calls
-      if (this.frameCounter <= 5 || this.frameCounter % 100 === 0) {
-        console.log('[iOS15 Audio DEBUG] Sending decode command #' + (this.frameCounter + 1), 
-          'dataLen:', encodedData.length, 'mode:', this.useInlineDecoder ? 'inline' : 'worker');
+      if (this.frameCounter <= 2) {
+        console.log('[Opus Decoder] decode #' + (this.frameCounter + 1),
+          'len:', encodedData.length, 'mode:', this.useInlineDecoder ? 'inline' : 'worker');
       }
 
       if (this.useInlineDecoder && this.inlineDecoder) {
@@ -489,6 +521,10 @@ class OpusAudioDecoder {
         this.inlineDecoder.decode(encodedData);
       } else if (this.decoderWorker) {
         // Worker mode for other browsers
+        if (this.frameCounter <= 2) {
+          console.log('[Opus Decoder] send to worker decode #' + (this.frameCounter + 1),
+            'len:', encodedData.length);
+        }
         this.decoderWorker.postMessage(
           {
             command: "decode",
@@ -500,7 +536,7 @@ class OpusAudioDecoder {
 
       this.frameCounter++;
     } catch (err) {
-      console.error('[iOS15 Audio DEBUG] Opus decode error:', err);
+      console.error('[Opus Decoder] Opus decode error:', err);
       this.error(`Opus decoding error: ${err.message || err}`);
     }
   }
@@ -513,12 +549,11 @@ class OpusAudioDecoder {
   _handleDecodedAudio(audioBuffers) {
     if (!audioBuffers || !audioBuffers.length) return;
 
-    // iOS 15 Debug: Track decoded audio output
     if (!this._decodedFrameCount) this._decodedFrameCount = 0;
     this._decodedFrameCount++;
-    if (this._decodedFrameCount <= 5 || this._decodedFrameCount % 100 === 0) {
-      console.log('[iOS15 Audio DEBUG] OpusDecoder output, frame#:', this._decodedFrameCount, 
-        'channels:', audioBuffers.length, 'frames:', audioBuffers[0]?.length);
+    if (this._decodedFrameCount <= 2) {
+      console.log('[Opus Decoder] decoded frame#:', this._decodedFrameCount,
+        'ch:', audioBuffers.length, 'frames:', audioBuffers[0]?.length);
     }
 
     try {
@@ -585,7 +620,12 @@ class OpusAudioDecoder {
    */
   close() {
     if (this.decoderWorker) {
-      this.decoderWorker.terminate();
+      // Worker has terminate(), MessagePort has close()
+      if (typeof this.decoderWorker.terminate === 'function') {
+        this.decoderWorker.terminate();
+      } else if (typeof this.decoderWorker.close === 'function') {
+        this.decoderWorker.close();
+      }
       this.decoderWorker = null;
     }
     this.state = "closed";
