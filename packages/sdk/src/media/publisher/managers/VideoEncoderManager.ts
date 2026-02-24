@@ -96,7 +96,7 @@ export class VideoEncoderManager extends EventEmitter<{
     // Configure encoder with optimal settings
     const encoderConfig: VideoEncoderConfig = {
       ...config,
-      latencyMode: "realtime",
+      latencyMode: config.latencyMode || "realtime",
       hardwareAcceleration: "prefer-hardware",
     };
 

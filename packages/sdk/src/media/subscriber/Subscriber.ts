@@ -220,6 +220,10 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
     // Video processor
     this.videoProcessor = new VideoProcessor();
+    // Enable jitter buffer for screen share — smooths bursty frame delivery
+    if (this.subscribeType === 'screen_share') {
+      this.videoProcessor.enableJitterBuffer(30); // 30fps
+    }
 
     // Audio processor
     this.audioProcessor = new AudioProcessor(

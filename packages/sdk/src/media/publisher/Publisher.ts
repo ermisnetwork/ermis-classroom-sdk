@@ -1296,6 +1296,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       height: screenHeight,
       framerate: 20, // Lower framerate for screen share
       bitrate: 1000000, // 1 Mbps for screen share
+      latencyMode: "quality" as const, // Smoother encoding, reduces keyframe spikes
     };
 
     await this.screenVideoProcessor.initialize(videoTrack, baseConfig);
