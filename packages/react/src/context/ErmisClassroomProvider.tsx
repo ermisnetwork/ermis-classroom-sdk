@@ -710,11 +710,6 @@ export function ErmisClassroomProvider({
       throw new Error('Not in a room');
     }
 
-    // Check if user is the room owner
-    if (currentRoom.ownerId !== userId) {
-      throw new Error('Only the room owner can end the meeting');
-    }
-
     try {
       // Call API to end the room
       await client.apiClient.endRoom({ room_id: currentRoom.id });
