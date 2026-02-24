@@ -1210,6 +1210,12 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         this.livestreamAudioMixer.addScreenShareAudio(screenAudioStream);
       }
 
+      // If livestreaming, recalculate livestream resolution
+      // (Chrome sharing bar changes viewport height, affecting tab capture dimensions)
+      if (this.isLivestreaming) {
+        this.recalculateLivestreamResolution();
+      }
+
       this.updateStatus(`Screen sharing started (Video: ${hasVideo}, Audio: ${hasAudio})`);
 
     } catch (error) {
@@ -1342,6 +1348,12 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       if (this.isLivestreaming && this.livestreamAudioMixer) {
         log("[Publisher] Removing screen share audio from livestream mix");
         this.livestreamAudioMixer.removeScreenShareAudio();
+      }
+
+      // If livestreaming, recalculate livestream resolution
+      // (Chrome sharing bar removed, viewport height restored)
+      if (this.isLivestreaming) {
+        this.recalculateLivestreamResolution();
       }
 
       this.updateStatus("Screen sharing stopped");
@@ -2143,22 +2155,23 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     let livestreamSubStream = SUB_STREAMS.LIVESTREAM_720P;
 
     if (videoTrack) {
-      // Use pre-capture viewport dimensions (saved BEFORE getDisplayMedia popup appeared)
-      // This gives us the true browser height that viewers will see (without popup/sharing indicator)
-      const viewportDims = this.preCaptureViewportDimensions;
+      // Use actual video track dimensions (from getSettings()) as primary source.
+      // These match the REAL frame dimensions that the encoder will receive.
+      // Viewport dimensions are only a fallback since they may not match capture dimensions.
       const trackDimensions = getVideoTrackDimensions(videoTrack);
-      if (viewportDims) {
-        const resolution = calculateLivestreamResolution(viewportDims.width, viewportDims.height);
-        log("[Publisher] Livestream resolution:", `${resolution.width}x${resolution.height}`);
+      const viewportDims = this.preCaptureViewportDimensions;
+      if (trackDimensions) {
+        const resolution = calculateLivestreamResolution(trackDimensions.width, trackDimensions.height);
+        log("[Publisher] Livestream resolution (from track):", `${trackDimensions.width}x${trackDimensions.height} → ${resolution.width}x${resolution.height}`);
         livestreamSubStream = {
           ...SUB_STREAMS.LIVESTREAM_720P,
           width: resolution.width,
           height: resolution.height,
         };
-      } else if (trackDimensions) {
-        // Fallback: use track dimensions if pre-capture was not saved
-        const resolution = calculateLivestreamResolution(trackDimensions.width, trackDimensions.height);
-        log("[Publisher] Fallback: using track dimensions:", `${trackDimensions.width}x${trackDimensions.height} → ${resolution.width}x${resolution.height}`);
+      } else if (viewportDims) {
+        // Fallback: use viewport dimensions if track dimensions not available
+        const resolution = calculateLivestreamResolution(viewportDims.width, viewportDims.height);
+        log("[Publisher] Fallback: using viewport dimensions:", `${viewportDims.width}x${viewportDims.height} → ${resolution.width}x${resolution.height}`);
         livestreamSubStream = {
           ...SUB_STREAMS.LIVESTREAM_720P,
           width: resolution.width,
@@ -2221,21 +2234,21 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (this.livestreamVideoProcessor) {
       const videoTrack = this.tabStream.getVideoTracks()[0];
       if (videoTrack) {
-        // Use pre-capture viewport dimensions for resolution calculation
-        // This gives us the true browser dimensions BEFORE the getDisplayMedia popup changed them
+        // Use actual track dimensions as primary source (matches real frame size)
         const { calculateLivestreamResolution, getVideoTrackDimensions } = await import('../../utils/videoResolutionHelper');
-        const viewportDims = this.preCaptureViewportDimensions;
         const trackDims = getVideoTrackDimensions(videoTrack);
+        const viewportDims = this.preCaptureViewportDimensions;
         let width = 1280;
         let height = 720;
 
-        if (viewportDims) {
-          const livestreamRes = calculateLivestreamResolution(viewportDims.width, viewportDims.height);
+        if (trackDims) {
+          const livestreamRes = calculateLivestreamResolution(trackDims.width, trackDims.height);
           width = livestreamRes.width;
           height = livestreamRes.height;
-        } else if (trackDims) {
-          // Fallback: use track dimensions
-          const livestreamRes = calculateLivestreamResolution(trackDims.width, trackDims.height);
+          log("[Publisher] Using track dimensions for livestream:", `${trackDims.width}x${trackDims.height} → ${width}x${height}`);
+        } else if (viewportDims) {
+          // Fallback: use viewport dimensions
+          const livestreamRes = calculateLivestreamResolution(viewportDims.width, viewportDims.height);
           width = livestreamRes.width;
           height = livestreamRes.height;
         }
@@ -2304,6 +2317,97 @@ export class Publisher extends EventEmitter<PublisherEvents> {
    */
   get livestreamTabStream(): MediaStream | null {
     return this.tabStream;
+  }
+
+  /**
+   * Recalculate livestream resolution when viewport changes (e.g., share tab starts/stops)
+   * Chrome's sharing indicator bar changes viewport height, which affects tab capture dimensions.
+   * This method waits for the viewport to stabilize, then reinitializes the video processor
+   * with new dimensions. The server will detect the config change and notify viewers to reset.
+   */
+  private async recalculateLivestreamResolution(): Promise<void> {
+    if (!this.livestreamVideoProcessor || !this.tabStream || !this.streamManager) return;
+
+    // Wait for viewport to stabilize after sharing bar animation
+    await new Promise<void>(resolve => {
+      let debounceTimer: ReturnType<typeof setTimeout>;
+      let lastSeenHeight = window.innerHeight;
+      const onResize = () => {
+        const currentHeight = window.innerHeight;
+        if (currentHeight === lastSeenHeight) return;
+        lastSeenHeight = currentHeight;
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          window.removeEventListener('resize', onResize);
+          clearTimeout(fallbackTimer);
+          resolve();
+        }, 300);
+      };
+      const fallbackTimer = setTimeout(() => {
+        window.removeEventListener('resize', onResize);
+        clearTimeout(debounceTimer);
+        resolve();
+      }, 2000);
+      window.addEventListener('resize', onResize);
+    });
+
+    // Recalculate resolution from current tab capture track dimensions
+    const { calculateLivestreamResolution, getVideoTrackDimensions } =
+      await import('../../utils/videoResolutionHelper');
+    const videoTrack = this.tabStream.getVideoTracks()[0];
+    if (!videoTrack) return;
+
+    const trackDims = getVideoTrackDimensions(videoTrack);
+    const dims = trackDims || { width: window.innerWidth, height: window.innerHeight };
+    const newRes = calculateLivestreamResolution(dims.width, dims.height);
+
+    log("[Publisher] Recalculating livestream resolution after share tab change:",
+      `${dims.width}x${dims.height} → ${newRes.width}x${newRes.height}`);
+
+    // Stop current video processor and encoder
+    await this.livestreamVideoProcessor.stop();
+    this.livestreamVideoProcessor = null;
+
+    if (this.livestreamVideoEncoderManager) {
+      await this.livestreamVideoEncoderManager.closeAll();
+      this.livestreamVideoEncoderManager = null;
+    }
+
+    // Reset config sent state so new config can be sent to server
+    this.streamManager.resetConfigSent(ChannelName.LIVESTREAM_720P);
+
+    // Reinitialize with new dimensions
+    const livestreamSubStream = {
+      ...SUB_STREAMS.LIVESTREAM_720P,
+      width: newRes.width,
+      height: newRes.height,
+    };
+
+    this.livestreamVideoEncoderManager = new VideoEncoderManager();
+    this.livestreamVideoProcessor = new VideoProcessor(
+      this.livestreamVideoEncoderManager,
+      this.streamManager,
+      [livestreamSubStream] as SubStream[]
+    );
+
+    this.livestreamVideoProcessor.on("encoderError", (error) => {
+      console.error("[Publisher] Livestream video encoder error:", error);
+      this.updateStatus("Livestream video encoder error", true);
+    });
+
+    const baseConfig = {
+      codec: "avc1.640c34",
+      width: newRes.width,
+      height: newRes.height,
+      framerate: 15,
+      bitrate: 1_500_000,
+    };
+
+    await this.livestreamVideoProcessor.initialize(videoTrack, baseConfig);
+    await this.livestreamVideoProcessor.start();
+
+    log("[Publisher] Livestream video processor restarted with new resolution:",
+      `${newRes.width}x${newRes.height}`);
   }
 
   // ==========================================
