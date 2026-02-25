@@ -25,13 +25,14 @@ interface VideoProcessorEvents extends Record<string, unknown> {
  */
 export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
   private videoGenerator: MediaStreamTrackGenerator | null = null;
-  private videoWriter: WritableStream | null = null;
+  private videoWriter: WritableStreamDefaultWriter | null = null;
   private mediaStream: MediaStream | null = null;
 
-  // Jitter buffer - smooths bursty frame delivery into fixed-rate output
+  // Jitter buffer - smooths bursty frame delivery into adaptive-rate output
   private jitterBufferEnabled = false;
   private jitterBuffer: VideoFrame[] = [];
-  private playbackTimer: ReturnType<typeof setInterval> | null = null;
+  private playbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private playbackTimerActive = false;
   private playbackIntervalMs = 50; // 20fps output rate
   private targetBufferSize = 3; // Aim to keep ~3 frames buffered (150ms at 20fps)
   private maxBufferSize = 15; // Drop oldest frames if buffer exceeds this
@@ -75,7 +76,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
         kind: "video",
       });
 
-      this.videoWriter = this.videoGenerator.writable;
+      this.videoWriter = this.videoGenerator.writable.getWriter();
 
       // Create MediaStream with video track only
       this.mediaStream = new MediaStream([this.videoGenerator]);
@@ -123,12 +124,12 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
     this.lastFrameArrivalTime = now;
 
     if (this.frameArrivalGaps.length >= 100) {
-      // const gaps = this.frameArrivalGaps;
-      // const min = Math.min(...gaps).toFixed(1);
-      // const max = Math.max(...gaps).toFixed(1);
-      // const avg = (gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(1);
-      // const jitter = gaps.filter(g => g > 100).length;
-      // console.warn(`[VideoProcessor] 📊 ARRIVAL: min=${min}ms max=${max}ms avg=${avg}ms jitter(>100ms)=${jitter}/100 buffer=${this.jitterBuffer.length}`);
+      const gaps = this.frameArrivalGaps;
+      const min = Math.min(...gaps).toFixed(1);
+      const max = Math.max(...gaps).toFixed(1);
+      const avg = (gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(1);
+      const jitter = gaps.filter(g => g > 100).length;
+      console.warn(`[VideoProcessor] 📊 ARRIVAL: min=${min}ms max=${max}ms avg=${avg}ms jitter(>100ms)=${jitter}/100 buffer=${this.jitterBuffer.length}`);
       this.frameArrivalGaps = [];
     }
 
@@ -154,9 +155,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
    */
   private async writeFrameDirect(frame: VideoFrame): Promise<void> {
     try {
-      const writer = this.videoWriter!.getWriter();
-      await writer.write(frame);
-      writer.releaseLock();
+      await this.videoWriter!.write(frame);
 
       this.frameCount++;
       this.emit("frameProcessed", undefined);
@@ -179,24 +178,44 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
   // ==========================================
 
   /**
-   * Start the fixed-rate playback timer
-   * Writes one frame from the buffer at each tick
+   * Start the adaptive-rate playback timer
+   * Writes one frame from the buffer at each tick, adjusting rate based on backlog
    */
   private startPlaybackTimer(): void {
     this.stopPlaybackTimer();
-    log(`[VideoProcessor] Starting jitter buffer playback at ${this.playbackIntervalMs}ms intervals`);
+    this.playbackTimerActive = true;
+    log(`[VideoProcessor] Starting jitter buffer playback at ~${this.playbackIntervalMs}ms intervals`);
 
-    this.playbackTimer = setInterval(() => {
-      this.playbackTick();
-    }, this.playbackIntervalMs);
+    const tick = () => {
+      if (!this.playbackTimerActive) return;
+
+      this.playbackTick().finally(() => {
+        if (!this.playbackTimerActive) return;
+
+        let delay = this.playbackIntervalMs;
+        const backlog = this.jitterBuffer.length;
+
+        // Adaptive delay: drain faster if buffer builds up
+        if (backlog > this.targetBufferSize * 2) {
+          delay = 5;  // extremely fast to catch up
+        } else if (backlog > this.targetBufferSize) {
+          delay = Math.max(5, Math.floor(this.playbackIntervalMs / 2)); // faster drain
+        }
+
+        this.playbackTimer = setTimeout(tick, delay);
+      });
+    };
+
+    this.playbackTimer = setTimeout(tick, this.playbackIntervalMs);
   }
 
   /**
    * Stop the playback timer
    */
   private stopPlaybackTimer(): void {
+    this.playbackTimerActive = false;
     if (this.playbackTimer) {
-      clearInterval(this.playbackTimer);
+      clearTimeout(this.playbackTimer);
       this.playbackTimer = null;
     }
   }
@@ -248,8 +267,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       // Close video writer
       if (this.videoWriter) {
         try {
-          const writer = this.videoWriter.getWriter();
-          writer.releaseLock();
+          this.videoWriter.releaseLock();
         } catch {
           // Writer might already be released
         }

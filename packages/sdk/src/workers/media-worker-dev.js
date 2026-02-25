@@ -503,8 +503,9 @@ class JitterBuffer {
   }
 }
 
-// Create jitter buffer for video packets
+// Create jitter buffers for video and screen share packets
 let videoJitterBuffer = null;
+let screenShareJitterBuffer = null;
 
 function initVideoJitterBuffer() {
   if (videoJitterBuffer) {
@@ -520,31 +521,63 @@ function initVideoJitterBuffer() {
   });
 }
 
+function initScreenShareJitterBuffer() {
+  if (screenShareJitterBuffer) {
+    screenShareJitterBuffer.destroy();
+  }
+  screenShareJitterBuffer = new JitterBuffer({
+    maxBufferSize: 30,
+    maxWaitMs: 100,
+    flushIntervalMs: 50,
+    onPacketReady: (data) => {
+      processIncomingMessage(data);
+    },
+  });
+}
+
+/**
+ * Check if a channel name is a video or screen share channel (not audio/control)
+ */
+function isVideoChannel(channelName) {
+  return channelName.startsWith('video_') || 
+         (channelName.startsWith('screen_share_') && !channelName.includes('audio'));
+}
+
+/**
+ * Get the appropriate jitter buffer for a channel, initializing if needed
+ */
+function getJitterBufferForChannel(channelName) {
+  if (channelName.startsWith('video_')) {
+    if (!videoJitterBuffer) initVideoJitterBuffer();
+    return videoJitterBuffer;
+  }
+  if (channelName.startsWith('screen_share_') && !channelName.includes('audio')) {
+    if (!screenShareJitterBuffer) initScreenShareJitterBuffer();
+    return screenShareJitterBuffer;
+  }
+  return null;
+}
+
 function handleWebRtcMessage(channelName, message) {
     const { sequenceNumber, isFec, packetType, payload } = parseWebRTCPacket(new Uint8Array(message));
     
-    // Initialize jitter buffer if needed
-    if (!videoJitterBuffer && channelName.startsWith('video_')) {
-      initVideoJitterBuffer();
-    }
+    const jitterBuffer = getJitterBufferForChannel(channelName);
 
     if (isFec) {
       const channelFecManager = getOrCreateFecManager(channelName);
       const result = channelFecManager.process_fec_packet(payload, sequenceNumber);
       if (result) {
         const decodedData = result[0][1];
-        // Use jitter buffer for video FEC packets
-        if (channelName.startsWith('video_') && videoJitterBuffer) {
-          videoJitterBuffer.addPacket(sequenceNumber, decodedData);
+        if (jitterBuffer) {
+          jitterBuffer.addPacket(sequenceNumber, decodedData);
         } else {
           processIncomingMessage(decodedData);
         }
         return;
       }
     } else {
-      // Use jitter buffer for video non-FEC packets
-      if (channelName.startsWith('video_') && videoJitterBuffer) {
-        videoJitterBuffer.addPacket(sequenceNumber, payload);
+      if (jitterBuffer) {
+        jitterBuffer.addPacket(sequenceNumber, payload);
       } else {
         processIncomingMessage(payload);
       }
