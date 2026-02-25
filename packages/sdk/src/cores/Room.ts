@@ -2240,23 +2240,23 @@ export class Room extends EventEmitter {
         }
 
         // If this is a remote participant and they were unbanned, reconnect their subscriber
-        if (participant !== this.localParticipant && unbannedChannels.length > 0 && participant.subscriber) {
-          log("[Room] 🔄 Remote participant was unbanned, reconnecting subscriber...", participant.userId, unbannedChannels);
-          try {
-            // Stop old subscriber (this also calls cleanup internally)
-            participant.subscriber.stop();
-            participant.setSubscriber(null as any);
+        // if (participant !== this.localParticipant && unbannedChannels.length > 0 && participant.subscriber) {
+        //   log("[Room] 🔄 Remote participant was unbanned, reconnecting subscriber...", participant.userId, unbannedChannels);
+        //   try {
+        //     // Stop old subscriber (this also calls cleanup internally)
+        //     participant.subscriber.stop();
+        //     participant.setSubscriber(null as any);
 
-            // Wait a bit for cleanup
-            await new Promise(resolve => setTimeout(resolve, 200));
+        //     // Wait a bit for cleanup
+        //     await new Promise(resolve => setTimeout(resolve, 200));
 
-            // Recreate subscriber
-            await this._setupRemoteSubscriber(participant);
-            log("[Room] ✅ Subscriber reconnected for remote participant:", participant.userId);
-          } catch (error) {
-            console.error("[Room] Failed to reconnect subscriber for remote participant:", error);
-          }
-        }
+        //     // Recreate subscriber
+        //     await this._setupRemoteSubscriber(participant);
+        //     log("[Room] ✅ Subscriber reconnected for remote participant:", participant.userId);
+        //   } catch (error) {
+        //     console.error("[Room] Failed to reconnect subscriber for remote participant:", error);
+        //   }
+        // }
 
         this.emit("permissionUpdated", {
           room: this,
