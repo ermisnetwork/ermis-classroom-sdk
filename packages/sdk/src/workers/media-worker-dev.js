@@ -702,7 +702,7 @@ async function attachWebTransportStream(readable, writable, channelName) {
   const options = {
     audio: subscribeType === STREAM_TYPE.CAMERA ? true : subscriptionAudioEnabled,
     video: true,
-    initialQuality: channelName,
+    initialQuality: subscribeType === STREAM_TYPE.CAMERA ? (initialQuality || channelName) : channelName,
   };
   proxyConsole.warn(`[WebTransport] Attached stream, options:`, options);
 
