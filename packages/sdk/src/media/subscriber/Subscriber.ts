@@ -655,7 +655,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         await this.attachWebSocketConnection();
       } else if (this.protocol === "webrtc") {
         if (this.subscribeType === "camera") {
-          this.attachDataChannel(ChannelName.VIDEO_360P);
+          this.attachDataChannel(this.config.initialQuality as ChannelName);
           this.attachDataChannel(ChannelName.MICROPHONE);
         } else if (this.subscribeType === "screen_share") {
           this.attachDataChannel(ChannelName.SCREEN_SHARE_720P);
