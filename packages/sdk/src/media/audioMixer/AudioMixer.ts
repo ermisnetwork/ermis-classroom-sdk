@@ -79,6 +79,18 @@ export class AudioMixer {
       this.outputDestination = this.audioContext.createMediaStreamDestination();
       this.mixerNode.connect(this.outputDestination);
 
+      // iOS 15 Safari fix: also connect mixerNode directly to the AudioContext
+      // destination (speakers).  On iOS 15, the MediaStreamAudioDestinationNode
+      // → <audio> element chain is unreliable — the <audio> element may never
+      // start playing (autoplay blocked, play() rejected) even after resume().
+      // A direct connection to audioContext.destination plays as soon as the
+      // AudioContext is in "running" state, regardless of <audio> element state.
+      this.audioContext.destination.channelCount = Math.min(
+        2,
+        this.audioContext.destination.maxChannelCount,
+      );
+      this.mixerNode.connect(this.audioContext.destination);
+
       // Create hidden audio element for mixed audio playback
       this.outputAudioElement = document.createElement("audio");
       this.outputAudioElement.autoplay = true;
@@ -454,12 +466,11 @@ export class AudioMixer {
           playPromise.catch((err) => {
             console.warn('[AudioMixer] Audio play() blocked:', err.name, err.message,
               '— will retry after user interaction');
-            // On iOS Safari, this means AudioContext is likely suspended.
-            // The interaction listeners registered in _setupErrorHandlers will
-            // resume the context and call _ensureAudioElementPlaying().
-            if (this.audioContext?.state === "suspended") {
-              this._addInteractionListeners();
-            }
+            // Always register interaction listeners when play() is blocked.
+            // On iOS 15 the AudioContext may be "running" (already resumed)
+            // but the <audio> element still fails to play without a fresh
+            // user gesture — so we must not gate this on the context state.
+            this._addInteractionListeners();
           });
         }
       } else {
@@ -561,13 +572,15 @@ export class AudioMixer {
 
     this._boundResumeOnInteraction = () => {
       if (!this.audioContext) return;
-      if (this.audioContext.state === "suspended" || this.audioContext.state === ("interrupted" as AudioContextState)) {
+      if (
+        this.audioContext.state === "suspended" ||
+        this.audioContext.state === ("interrupted" as AudioContextState)
+      ) {
         log("[AudioMixer] User interaction detected — resuming AudioContext");
         this.audioContext.resume()
           .then(() => {
             log("[AudioMixer] AudioContext resumed successfully, state:", this.audioContext?.state);
             this._ensureAudioElementPlaying();
-            // Once running, we don't need these listeners any more
             if (this.audioContext?.state === "running") {
               this._removeInteractionListeners();
             }
@@ -575,6 +588,12 @@ export class AudioMixer {
           .catch((err) => {
             console.warn("[AudioMixer] AudioContext resume failed:", err);
           });
+      } else if (this.audioContext.state === "running") {
+        // AudioContext already running (resumed earlier) but the <audio>
+        // element may still be paused due to a previous autoplay block.
+        // Re-try play() now that we have a fresh user gesture.
+        this._ensureAudioElementPlaying();
+        this._removeInteractionListeners();
       }
     };
 

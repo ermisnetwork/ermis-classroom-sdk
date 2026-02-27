@@ -43,7 +43,6 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
 
           if (workerType === "audioData") {
             counter++;
-            console.log('[Audio Worklet] audioData from worker:', receivedChannelDataBuffers);
             // Send diagnostics back to main thread for first few frames
             if (counter <= 3) {
               const ch0 = receivedChannelDataBuffers ? receivedChannelDataBuffers[0] : null;
@@ -115,7 +114,6 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
    */
   addAudioData(channelData) {
     // Ensure there's data to process
-    console.log('[Audio Worklet] addAudioData:', channelData);
     if (
       !channelData ||
       channelData.length === 0 ||

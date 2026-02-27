@@ -8,6 +8,70 @@ import type {
 } from "../../../types/media/publisher.types";
 import { log } from "../../../utils";
 
+// ---------------------------------------------------------------------------
+// OGG BOS page normalization — iOS 15 Safari fix
+//
+// Safari iOS 15: Recorder.js WASM encoder does not reset its internal OGG
+// page counter between sessions. When audio+video are published together the
+// first OGG page (OpusHead BOS) arrives with a non-zero page_sequence (e.g.
+// 23) and granule_position = -1 instead of the required 0 for both fields
+// per RFC 7845. Aurora.js (decoderWorker.min.js) rejects such a malformed
+// BOS page → completely silent audio on the receiver side.
+//
+// Fix: detect the malformed BOS page, patch it to spec-compliant values,
+// store the sequence offset, and renumber all subsequent OGG pages so the
+// stream is contiguous: BOS(seq=0), Tags(seq=1), Audio(seq=2, 3, …)
+// ---------------------------------------------------------------------------
+
+/** OGG CRC-32/MPEG-2 lookup table (computed once at module load). */
+const _oggCrcTable = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let r = (i << 24) >>> 0;
+    for (let j = 0; j < 8; j++) {
+      r = (r & 0x80000000) ? (((r << 1) >>> 0) ^ 0x04c11db7) : ((r << 1) >>> 0);
+    }
+    t[i] = r;
+  }
+  return t;
+})();
+
+/** Compute OGG CRC-32/MPEG-2 over a page (CRC field must already be zeroed). */
+function _oggCrc(page: Uint8Array): number {
+  let crc = 0;
+  for (let i = 0; i < page.length; i++) {
+    crc = (((crc << 8) >>> 0) ^ _oggCrcTable[((crc >>> 24) ^ page[i]) & 0xff]) >>> 0;
+  }
+  return crc;
+}
+
+/**
+ * Return a patched copy of an OGG page with a new page_sequence number
+ * (and optionally granule_position zeroed) and a recomputed CRC checksum.
+ */
+function _patchOggPage(page: Uint8Array, newSeq: number, zeroGranule: boolean): Uint8Array {
+  const p = new Uint8Array(page);
+  if (zeroGranule) {
+    for (let i = 6; i < 14; i++) p[i] = 0;      // granule_position (LE int64) = 0
+  }
+  p[18] =  newSeq        & 0xff;                  // page_sequence (LE uint32)
+  p[19] = (newSeq >>>  8) & 0xff;
+  p[20] = (newSeq >>> 16) & 0xff;
+  p[21] = (newSeq >>> 24) & 0xff;
+  p[22] = 0; p[23] = 0; p[24] = 0; p[25] = 0;   // zero CRC field before computing
+  const crc = _oggCrc(p);
+  p[22] = (crc >>> 24) & 0xff;
+  p[23] = (crc >>> 16) & 0xff;
+  p[24] = (crc >>>  8) & 0xff;
+  p[25] =  crc         & 0xff;
+  return p;
+}
+
+/** Read page_sequence (bytes 18-21, LE uint32) from a raw OGG page. */
+function _readOggSeq(page: Uint8Array): number {
+  return (page[18] | (page[19] << 8) | (page[20] << 16) | (page[21] << 24)) >>> 0;
+}
+
 /**
  * AudioEncoderManager - Manages audio encoding using Opus codec
  *
@@ -61,6 +125,11 @@ export class AudioEncoderManager extends EventEmitter<{
   
   // Buffer for audio pages received before OpusHead BOS page
   private pendingAudioPages: Uint8Array[] = [];
+
+  // OGG sequence offset for iOS 15 BOS page normalization.
+  // Stores the original page_sequence of the malformed BOS page so that
+  // all subsequent OGG pages can be renumbered to start from seq=1.
+  private _oggSeqOffset = 0;
 
   constructor(
     channelName: ChannelName,
@@ -176,6 +245,7 @@ export class AudioEncoderManager extends EventEmitter<{
       this.chunkCount = 0;
       this.configReady = false;
       this.audioConfig = null;
+      this._oggSeqOffset = 0;
 
       this.emit("stopped", { channelName: this.channelName });
     } catch (error) {
@@ -234,11 +304,22 @@ export class AudioEncoderManager extends EventEmitter<{
     if (isOpusConfigPage) {
       // This is the genuine OpusHead BOS page - use for config
       if (!this.configReady && !this.audioConfig) {
+        // iOS 15 Safari fix: Recorder.js WASM encoder sometimes produces the
+        // BOS page with page_sequence != 0 and granule_position = -1 when
+        // audio and video are published simultaneously. Patch to valid values.
+        const bosSeq = _readOggSeq(dataArray);
+        const granuleNonZero = dataArray.slice(6, 14).some(b => b !== 0);
+        let description: Uint8Array = dataArray;
+        if (bosSeq !== 0 || granuleNonZero) {
+          log(`[AudioEncoder] iOS 15: fixing malformed OGG BOS page for ${this.channelName} (page_seq=${bosSeq}, granule_non_zero=${granuleNonZero})`);
+          this._oggSeqOffset = bosSeq;
+          description = _patchOggPage(dataArray, 0, granuleNonZero);
+        }
         this.audioConfig = {
           codec: "opus",
           sampleRate: AUDIO_CONFIG.SAMPLE_RATE,
           numberOfChannels: AUDIO_CONFIG.CHANNEL_COUNT,
-          description: dataArray,
+          description,
         };
 
         log(`[AudioEncoder] Config ready for ${this.channelName} (BOS OpusHead page, ${dataArray.length} bytes):`, {
@@ -298,10 +379,15 @@ export class AudioEncoderManager extends EventEmitter<{
         this.baseTime +
         Math.floor((this.samplesSent * 1000000) / AUDIO_CONFIG.SAMPLE_RATE);
 
+      // Renumber OGG page_sequence if the BOS page was patched (iOS 15 fix)
+      const audioPage = this._oggSeqOffset > 0
+        ? _patchOggPage(dataArray, _readOggSeq(dataArray) - this._oggSeqOffset, false)
+        : dataArray;
+
       // Emit audio chunk with metadata
       this.emit("audioChunk", {
         channelName: this.channelName,
-        data: dataArray,
+        data: audioPage,
         timestamp,
         samplesSent: this.samplesSent,
         chunkCount: this.chunkCount,

@@ -30,9 +30,7 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (event) => {
       const { type, data, sampleRate, numberOfChannels, port } = event.data;
       if (type === "connectWorker") {
-        this.port.postMessage({ type: "mess", event: "workerPortConnected" });
         this.workerPort = port;
-        this.workerPort.postMessage({ type: "mess", event: "workerPortConnected" });
 
         this.workerPort.onmessage = (workerEvent) => {
           const {

@@ -336,33 +336,18 @@ class OpusAudioDecoder {
       numberOfChannels: this.numberOfChannels,
     };
 
-    // Set up message handler for decoded audio output
+    // Handle decoded audio from the worker.
+    // NOTE: decoderWorker.min.js does NOT send a proactive "null ready" signal.
+    // It only sends null via sendLastBuffer() (on "done" command).  All message
+    // handlers inside the worker are wrapped in its internal onRuntimeInitialized
+    // promise, so decode commands sent before WASM loads are safely queued and
+    // processed in-order when WASM is ready.  We therefore mark _wasmReady=true
+    // immediately below instead of waiting for a signal that never comes.
     this.decoderWorker.onmessage = (e) => {
-      // First message from worker (null) signals WASM is loaded and ready.
-      if (!this._wasmReady) {
-        this._wasmReady = true;
-        console.log('[Opus Decoder] Decoder worker WASM ready (worker mode), flushing',
-          this._pendingDecodes.length, 'buffered decodes');
-        if (this._wasmReadyResolve) {
-          this._wasmReadyResolve();
-          this._wasmReadyResolve = null;
-        }
-        if (this._wasmReadyTimeout) {
-          clearTimeout(this._wasmReadyTimeout);
-          this._wasmReadyTimeout = null;
-        }
-        // Re-send init to ensure it is processed
-        this.decoderWorker.postMessage(initMsg);
-        // Flush buffered decode commands
-        for (const pending of this._pendingDecodes) {
-          this.decoderWorker.postMessage(pending.msg, pending.transfer);
-        }
-        this._pendingDecodes = [];
-      }
-
       if (e.data === null) {
-        return;
-      } else if (e.data && e.data.length) {
+        return; // sendLastBuffer() ack — ignore
+      }
+      if (e.data && e.data.length) {
         this._handleDecodedAudio(e.data);
       }
     };
@@ -375,21 +360,18 @@ class OpusAudioDecoder {
     // Send init command to decoder worker
     this.decoderWorker.postMessage(initMsg);
 
-    // Timeout: if the worker never sends a ready signal, mark ready after 5s
-    this._wasmReadyTimeout = setTimeout(() => {
-      if (!this._wasmReady) {
-        console.warn('[Opus Decoder] WASM ready timeout (5s) on worker mode, flushing pending decodes');
-        this._wasmReady = true;
-        if (this._wasmReadyResolve) {
-          this._wasmReadyResolve();
-          this._wasmReadyResolve = null;
-        }
-        for (const pending of this._pendingDecodes) {
-          this.decoderWorker.postMessage(pending.msg, pending.transfer);
-        }
-        this._pendingDecodes = [];
-      }
-    }, 5000);
+    // Mark WASM ready immediately: the worker queues all incoming messages via
+    // its internal onRuntimeInitialized promise, so decode() calls made before
+    // the WASM module finishes loading are safe — they'll be processed in order.
+    // Waiting for a null "ready" signal (the old approach) always triggered the
+    // 5-second timeout because decoderWorker.min.js never sends that signal,
+    // causing 5 seconds of dropped audio on every session start.
+    this._wasmReady = true;
+    if (this._wasmReadyResolve) {
+      this._wasmReadyResolve();
+      this._wasmReadyResolve = null;
+    }
+    console.log('[Opus Decoder] Decoder worker ready (worker mode) — WASM will queue until loaded');
 
     this.state = "configured";
     this.baseTimestamp = 0;
@@ -417,33 +399,10 @@ class OpusAudioDecoder {
     };
 
     port.onmessage = (e) => {
-      // The first message from the decoder worker (typically null) signals
-      // that its WASM module has loaded and it is ready to process commands.
-      if (!this._wasmReady) {
-        this._wasmReady = true;
-        console.log('[Opus Decoder] Decoder worker WASM ready (port bridge), flushing',
-          this._pendingDecodes.length, 'buffered decodes');
-        if (this._wasmReadyResolve) {
-          this._wasmReadyResolve();
-          this._wasmReadyResolve = null;
-        }
-        if (this._wasmReadyTimeout) {
-          clearTimeout(this._wasmReadyTimeout);
-          this._wasmReadyTimeout = null;
-        }
-        // Re-send init to ensure it is processed (the first init may have
-        // arrived before the worker's onmessage handler was set up).
-        port.postMessage(initMsg);
-        // Flush buffered decode commands (e.g. the OpusHead page)
-        for (const pending of this._pendingDecodes) {
-          port.postMessage(pending.msg, pending.transfer);
-        }
-        this._pendingDecodes = [];
-      }
-
       if (e.data === null) {
-        return;
-      } else if (e.data && e.data.length) {
+        return; // sendLastBuffer() ack — ignore
+      }
+      if (e.data && e.data.length) {
         this._handleDecodedAudio(e.data);
       }
     };
@@ -451,22 +410,15 @@ class OpusAudioDecoder {
     // Send init command to decoder worker (via relayed port)
     port.postMessage(initMsg);
 
-    // Timeout: if the worker never sends a ready signal, mark ready after 5s
-    // and flush pending decodes so audio is not permanently blocked.
-    this._wasmReadyTimeout = setTimeout(() => {
-      if (!this._wasmReady) {
-        console.warn('[Opus Decoder] WASM ready timeout (5s) on port bridge, flushing pending decodes');
-        this._wasmReady = true;
-        if (this._wasmReadyResolve) {
-          this._wasmReadyResolve();
-          this._wasmReadyResolve = null;
-        }
-        for (const pending of this._pendingDecodes) {
-          port.postMessage(pending.msg, pending.transfer);
-        }
-        this._pendingDecodes = [];
-      }
-    }, 5000);
+    // Mark WASM ready immediately — same reasoning as _configureWorkerDecoder:
+    // the worker queues messages via onRuntimeInitialized, so it's safe to send
+    // decode commands before WASM finishes loading.
+    this._wasmReady = true;
+    if (this._wasmReadyResolve) {
+      this._wasmReadyResolve();
+      this._wasmReadyResolve = null;
+    }
+    console.log('[Opus Decoder] Decoder worker ready (port bridge) — WASM will queue until loaded');
 
     this.state = "configured";
     this.baseTimestamp = 0;
@@ -716,10 +668,6 @@ class OpusAudioDecoder {
 
     if (!this._decodedFrameCount) this._decodedFrameCount = 0;
     this._decodedFrameCount++;
-    if (this._decodedFrameCount <= 20) {
-      console.log('[Opus Decoder] decoded frame#:', this._decodedFrameCount,
-        'ch:', audioBuffers.length, 'frames:', audioBuffers[0]?.length);
-    }
 
     try {
       const numberOfFrames = audioBuffers[0].length;

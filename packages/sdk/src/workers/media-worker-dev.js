@@ -225,8 +225,10 @@ const audioInit = {
 
       if (workletPort) {
         audioDataCount++;
-        if  (audioDataCount <= 20) {
-          console.log('[Audio] workletPort is NOT NULL, sending audio data, audioDataCount: ', audioDataCount);
+        if (audioDataCount % 100 === 0) {
+          console.log("protocol", protocol, "isWebRTC", isWebRTC)
+          console.log('[Audio] audioDataCount:', audioDataCount);
+          console.log('[Audio] send audio data to worklet:', audioData);
         }
         // Log first few frames and sample values to verify data integrity
         workletPort.postMessage(
@@ -805,6 +807,24 @@ function handleStreamConfigs(json) {
                   decoder.decode(chunk);
                   decoder.isReadyForAudio = true; // Flag to allow normal packets
                   console.log(`[Audio] Sent description chunk for ${channelName}, now ready for audio packets`);
+
+                  // Replay any audio packets that arrived before the description
+                  if (decoder._preConfigBuffer && decoder._preConfigBuffer.length > 0) {
+                    console.log(`[Audio] Replaying ${decoder._preConfigBuffer.length} pre-config buffered packets for ${channelName}`);
+                    for (const buffered of decoder._preConfigBuffer) {
+                      try {
+                        const bufferedChunk = new EncodedAudioChunk({
+                          timestamp: buffered.timestamp * 1000,
+                          type: "key",
+                          data: buffered.data,
+                        });
+                        decoder.decode(bufferedChunk);
+                      } catch (err) {
+                        console.warn(`[Audio] Error replaying buffered chunk for ${channelName}:`, err);
+                      }
+                    }
+                    decoder._preConfigBuffer = null;
+                  }
                 } catch (err) {
                   console.warn(`[Audio] Error decoding first audio frame (${channelName}):`, err);
                 }
@@ -1119,9 +1139,18 @@ async function handleBinaryPacket(dataBuffer) {
       return;
     }
 
-    // Drop packets until the description chunk is sent
+    // Buffer packets arriving before the description chunk is sent, then
+    // replay them in order once the description is processed.
+    // (Previously these were hard-dropped, causing silent audio at stream start.)
     if (!audioDecoder.isReadyForAudio) {
-      if (self._audioPacketCount <= 10) console.warn('[Audio] Dropping audio packet, waiting for description chunk...');
+      // if (!audioDecoder._preConfigBuffer) audioDecoder._preConfigBuffer = [];
+      // const MAX_BUFFERED = 20; // ~2 seconds of audio at 100 ms/packet
+      // if (audioDecoder._preConfigBuffer.length < MAX_BUFFERED) {
+      //   // data is a Uint8Array view — copy it before the dataBuffer is reused
+      //   audioDecoder._preConfigBuffer.push({ timestamp, data: data.slice() });
+      // } else if (self._audioPacketCount <= 10) {
+      //   console.warn('[Audio] Pre-config buffer full, dropping audio packet');
+      // }
       return;
     }
 
@@ -1137,9 +1166,6 @@ async function handleBinaryPacket(dataBuffer) {
     });
 
     try {
-      if (protocol !== "webrtc") {
-        console.log('[Audio] decoder worker decode chunk:', chunk);
-      }
       audioDecoder.decode(chunk);
     } catch (err) {
       console.error('[Audio] decode error:', err);
