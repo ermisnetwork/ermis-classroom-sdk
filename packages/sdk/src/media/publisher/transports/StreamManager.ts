@@ -647,9 +647,9 @@ export class StreamManager extends EventEmitter<{
       sequenceNumber,
     );
 
-    // log(`[StreamManager] 📤 sendAudioChunk: Sending packet for ${channelName}, seq: ${sequenceNumber}, size: ${packet.length}`);
-    await this.sendPacket(channelName, packet, FrameType.AUDIO);
-    // log(`[StreamManager] ✅ sendAudioChunk: Packet sent for ${channelName}`);
+    // console.log(`[StreamManager] 📤 sendAudioChunk: Sending packet for ${channelName}, seq: ${sequenceNumber}, size: ${packet.length}`);
+    this.sendPacket(channelName, packet, FrameType.AUDIO);
+    // console.log(`[StreamManager] ✅ sendAudioChunk: Packet sent for ${channelName}`);
   }
 
   /**
