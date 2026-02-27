@@ -21,15 +21,10 @@ const DEFAULT_PUBLISHER_STATE: PublisherState = {
   isCameraOn: false,
 };
 
-// WasmEncoder type from RaptorQ
-interface WasmEncoderType {
-  new(data: Uint8Array, blockSize: number): WasmEncoderInstance;
-}
-
-interface WasmEncoderInstance {
-  encode(redundancy: number): Uint8Array[];
-  getConfigBuffer(): Uint8Array;
-  free(): void;
+/** Result returned by the FEC encode worker for a single packet. */
+interface FecEncodeResult {
+  fecPacketBuffers: ArrayBuffer[];
+  raptorQConfig: RaptorQConfig;
 }
 
 // StreamManager-specific config types
@@ -75,11 +70,15 @@ export class StreamManager extends EventEmitter<{
   private webRtcManager: WebRTCManager | null = null;
   // private peerConnection: RTCPeerConnection | null = null;
 
-  // FEC/RaptorQ WASM encoder (same as JS)
-  private WasmEncoder: WasmEncoderType | null = null;
-  private wasmInitialized = false;
-  private wasmInitializing = false;
-  private wasmInitPromise: Promise<void> | null = null;
+  // FEC/RaptorQ worker — offloads synchronous WASM encoding off the main thread
+  private fecWorker: Worker | null = null;
+  private fecWorkerReady = false;
+  private fecWorkerReadyPromise: Promise<void> | null = null;
+  private _fecRequestId = 0;
+  private _fecCallbacks = new Map<
+    number,
+    { resolve: (r: FecEncodeResult) => void; reject: (e: Error) => void }
+  >();
   private commandSender: CommandSender | null;
   public streamId: string;
   private publisherState: PublisherState = { ...DEFAULT_PUBLISHER_STATE };
@@ -91,10 +90,11 @@ export class StreamManager extends EventEmitter<{
 
 
     if (isWebRTC) {
-      (async () => {
-        await this.initWasmEncoder();
-      })();
-    };
+      // Eagerly start the FEC worker so WASM is loaded before the first packet
+      this.initFecWorker().catch((err) => {
+        console.error('[StreamManager] FEC worker initialization failed:', err);
+      });
+    }
 
     this.commandSender = isWebRTC ? new CommandSender({
       protocol: "webrtc",
@@ -142,47 +142,95 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
-   * Initialize WASM encoder for FEC (same as JS Publisher)
+   * Initialize the FEC encode worker.
+   * The worker loads RaptorQ WASM internally and signals readiness via a
+   * "ready" message.  Subsequent calls return the same Promise.
    */
-  private async initWasmEncoder(): Promise<void> {
-    if (this.wasmInitialized) {
-      return;
+  private initFecWorker(): Promise<void> {
+    if (this.fecWorkerReadyPromise) {
+      return this.fecWorkerReadyPromise;
     }
 
-    if (this.wasmInitializing && this.wasmInitPromise) {
-      await this.wasmInitPromise;
-      return;
-    }
-
-    this.wasmInitializing = true;
-
-    try {
-      // Dynamic import RaptorQ WASM module
-      const { default: init, WasmEncoder } = await import(
-        /* @vite-ignore */
-        `/raptorQ/raptorq_wasm.js?t=${Date.now()}`
+    this.fecWorkerReadyPromise = new Promise<void>((resolve, reject) => {
+      const timestamp = Date.now();
+      this.fecWorker = new Worker(
+        `/workers/raptorq-fec-worker.js?t=${timestamp}`,
+        { type: 'module' },
       );
 
-      this.WasmEncoder = WasmEncoder as WasmEncoderType;
+      this.fecWorker.onmessage = (e: MessageEvent) => {
+        const data = e.data;
+        switch (data.type) {
+          case 'ready':
+            this.fecWorkerReady = true;
+            log('[StreamManager] FEC worker ready');
+            resolve();
+            break;
 
-      this.wasmInitPromise = init(`/raptorQ/raptorq_wasm_bg.wasm?t=${Date.now()}`)
-        .then(() => {
-          this.wasmInitialized = true;
-          this.wasmInitializing = false;
-          log("[StreamManager] WASM encoder module loaded successfully");
-        })
-        .catch((err: unknown) => {
-          this.wasmInitializing = false;
-          console.error("[StreamManager] Failed to load WASM encoder module:", err);
-          throw new Error("Failed to load WASM encoder module");
-        });
+          case 'encoded': {
+            const cb = this._fecCallbacks.get(data.requestId);
+            if (cb) {
+              this._fecCallbacks.delete(data.requestId);
+              cb.resolve({
+                fecPacketBuffers: data.fecPacketBuffers,
+                raptorQConfig: data.raptorQConfig,
+              });
+            }
+            break;
+          }
 
-      await this.wasmInitPromise;
-    } catch (error) {
-      this.wasmInitializing = false;
-      console.error("[StreamManager] Error initializing WASM:", error);
-      throw error;
-    }
+          case 'error': {
+            const cb = data.requestId !== undefined
+              ? this._fecCallbacks.get(data.requestId)
+              : undefined;
+            if (cb) {
+              this._fecCallbacks.delete(data.requestId);
+              cb.reject(new Error(data.message));
+            } else {
+              // Worker-level error (e.g. WASM init failure)
+              console.error('[StreamManager] FEC worker error:', data.message);
+              reject(new Error(data.message));
+            }
+            break;
+          }
+
+          default:
+            break;
+        }
+      };
+
+      this.fecWorker.onerror = (e: ErrorEvent) => {
+        console.error('[StreamManager] FEC worker script error:', e.message);
+        reject(new Error(e.message));
+      };
+    });
+
+    return this.fecWorkerReadyPromise;
+  }
+
+  /**
+   * Offload RaptorQ FEC encoding to the worker thread.
+   * Returns the array of encoded FEC packet buffers and the RaptorQ config
+   * needed to build the on-wire packet headers.
+   */
+  private encodeWithFecWorker(
+    packet: Uint8Array,
+    chunkSize: number,
+    redundancy: number,
+  ): Promise<FecEncodeResult> {
+    return new Promise<FecEncodeResult>((resolve, reject) => {
+      const requestId = this._fecRequestId++;
+      this._fecCallbacks.set(requestId, { resolve, reject });
+
+      // slice() gives us a fresh ArrayBuffer with byteOffset === 0 that is
+      // safe to transfer (avoids aliasing issues with shared backing buffers).
+      const packetBuffer = packet.slice().buffer;
+
+      this.fecWorker!.postMessage(
+        { type: 'encode', requestId, packet: packetBuffer, chunkSize, redundancy },
+        [packetBuffer],
+      );
+    });
   }
 
   /**
@@ -928,12 +976,10 @@ export class StreamManager extends EventEmitter<{
       const transportPacketType = FrameTypeHelper.getTransportPacketType(frameType);
 
       if (needFecEncode) {
-        if (!this.wasmInitialized) {
-          await this.initWasmEncoder();
-        }
-
-        if (!this.WasmEncoder) {
-          throw new Error("WASM encoder not initialized");
+        // Ensure the FEC worker is ready (it should already be if WebRTC was
+        // used from the start, but guard here in case init raced ahead).
+        if (!this.fecWorkerReady) {
+          await this.initFecWorker();
         }
 
         const MAX_MTU = 512;
@@ -967,29 +1013,15 @@ export class StreamManager extends EventEmitter<{
         const HEADER_SIZE = 20;
         const chunkSize = MTU - HEADER_SIZE;
 
-        const encoder = new this.WasmEncoder(packet, chunkSize);
+        // Offload the synchronous WASM encoding to the FEC worker
+        const { fecPacketBuffers, raptorQConfig } = await this.encodeWithFecWorker(
+          packet,
+          chunkSize,
+          redundancy,
+        );
 
-        const configBuf = encoder.getConfigBuffer();
-        const configView = new DataView(configBuf.buffer, configBuf.byteOffset, configBuf.byteLength);
-
-        const transferLength = configView.getBigUint64(0, false);
-        const symbolSize = configView.getUint16(8, false);
-        const sourceBlocks = configView.getUint8(10);
-        const subBlocks = configView.getUint16(11, false);
-        const alignment = configView.getUint8(13);
-
-        const fecPackets = encoder.encode(redundancy);
-
-        const raptorQConfig: RaptorQConfig = {
-          transferLength,
-          symbolSize,
-          sourceBlocks,
-          subBlocks,
-          alignment,
-        };
-
-        for (let i = 0; i < fecPackets.length; i++) {
-          const fecPacket = fecPackets[i];
+        for (const buffer of fecPacketBuffers) {
+          const fecPacket = new Uint8Array(buffer);
           const wrapper = PacketBuilder.createFECPacket(
             fecPacket,
             sequenceNumber,
@@ -999,7 +1031,6 @@ export class StreamManager extends EventEmitter<{
           this.sendOrQueue(channelName, dataChannel, wrapper);
         }
 
-        encoder.free();
         return;
       }
 
@@ -1182,6 +1213,20 @@ export class StreamManager extends EventEmitter<{
 
     await Promise.all(closePromises);
     this.streams.clear();
+
+    // Terminate FEC worker and reject any pending encode promises
+    if (this.fecWorker) {
+      for (const [, cb] of this._fecCallbacks) {
+        cb.reject(new Error('StreamManager closed'));
+      }
+      this._fecCallbacks.clear();
+      this.fecWorker.terminate();
+      this.fecWorker = null;
+      this.fecWorkerReady = false;
+      this.fecWorkerReadyPromise = null;
+      log('[StreamManager] FEC worker terminated');
+    }
+
     log("[StreamManager] All streams closed");
   }
 

@@ -1,12 +1,12 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
-import { copySDKStaticFiles } from '@ermisnetwork/ermis-classroom-sdk/vite-plugin';
+// import { copySDKStaticFiles } from '@ermisnetwork/ermis-classroom-sdk/vite-plugin';
 
 export default defineConfig({
   plugins: [
     react(),
-    copySDKStaticFiles({ verbose: true })
+    // copySDKStaticFiles({ verbose: true })
   ],
   resolve: {
     alias: {
@@ -15,7 +15,7 @@ export default defineConfig({
   },
   server: {
     host: true,
-    port: 4000,
+    port: 4043,
     allowedHosts: true
   },
 })

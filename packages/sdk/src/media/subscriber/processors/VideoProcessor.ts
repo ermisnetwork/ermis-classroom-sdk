@@ -78,29 +78,29 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
   private videoGenerator: MediaStreamTrackGenerator | null = null;
   private videoWriter: WritableStreamDefaultWriter<VideoFrame> | null = null;
   private mediaStream: MediaStream | null = null;
-  
+
   // WebGL rendering for YUV420 (WASM decoder)
   private canvas: OffscreenCanvas | HTMLCanvasElement | null = null;
   private gl: WebGL2RenderingContext | null = null;
   private ctx2d: CanvasRenderingContext2D | null = null; // 2D fallback
   private yuvProgram: WebGLProgram | null = null;
   private rgbaProgram: WebGLProgram | null = null; // RGBA program
-  private textures: { 
-    y: WebGLTexture | null; 
-    u: WebGLTexture | null; 
+  private textures: {
+    y: WebGLTexture | null;
+    u: WebGLTexture | null;
     v: WebGLTexture | null;
     rgba: WebGLTexture | null; // RGBA texture
   } = { y: null, u: null, v: null, rgba: null };
-  
+
   // Buffers (from stream-poc2 - separate buffers for better attribute binding)
   private positionBuffer: WebGLBuffer | null = null;
   private texCoordBuffer: WebGLBuffer | null = null;
-  
+
   private webglInitialized = false;
   private useWebGL = false;
   private frameCount = 0;
   private _writeFrameCount = 0;
-  
+
   // Fallback for browsers without MediaStreamTrackGenerator (e.g. iOS 15)
   private useCanvasCapture = false;
 
@@ -111,19 +111,19 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
     try {
       // VideoFrame must exist
       if (typeof VideoFrame === 'undefined') return false;
-      
+
       // On iOS Safari 15, VideoFrame exists but doesn't work with OffscreenCanvas
       // Test by checking if we can create a minimal test
       // Note: The actual VideoFrame(canvas) creation will fail silently on some browsers
       // So we also need to check if OffscreenCanvas is properly supported
       if (typeof OffscreenCanvas === 'undefined') return false;
-      
+
       // Additional check: iOS Safari 15 has issues with VideoFrame + OffscreenCanvas
       // Detect by checking for native VideoDecoder support (if no VideoDecoder, likely old Safari)
       if (typeof VideoDecoder === 'undefined') {
         return false;
       }
-      
+
       return true;
     } catch {
       return false;
@@ -142,32 +142,32 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       const hasVideoFrameCanvas = this.isVideoFrameWithCanvasSupported();
 
       if (hasTrackGenerator && hasVideoFrameCanvas) {
-          log("[VideoProcessor] Creating MediaStreamTrackGenerator...");
-          // Create video track generator
-          this.videoGenerator = new MediaStreamTrackGenerator({
-            kind: "video",
-          });
+        log("[VideoProcessor] Creating MediaStreamTrackGenerator...");
+        // Create video track generator
+        this.videoGenerator = new MediaStreamTrackGenerator({
+          kind: "video",
+        });
 
-          // Keep persistent writer reference to avoid locking issues
-          this.videoWriter = this.videoGenerator.writable.getWriter();
+        // Keep persistent writer reference to avoid locking issues
+        this.videoWriter = this.videoGenerator.writable.getWriter();
 
-          // Create MediaStream with video track only
-          this.mediaStream = new MediaStream([this.videoGenerator]);
+        // Create MediaStream with video track only
+        this.mediaStream = new MediaStream([this.videoGenerator]);
       } else {
-          log("[VideoProcessor] Using canvas.captureStream() fallback.");
-          this.useCanvasCapture = true;
-          
-          // Create fallback canvas immediately
-          const width = 640; // Default width
-          const height = 480; // Default height
-          this.initWebGL(width, height);
-          
-          if (this.canvas && 'captureStream' in this.canvas) {
-              // Cast to any because TS might not know captureStream exists on HTMLCanvasElement in all envs or it might be OffscreenCanvas type intersection issue
-              this.mediaStream = (this.canvas as any).captureStream(30); // 30 FPS
-          } else {
-               throw new Error("Canvas captureStream not supported");
-          }
+        log("[VideoProcessor] Using canvas.captureStream() fallback.");
+        this.useCanvasCapture = true;
+
+        // Create fallback canvas immediately
+        const width = 640; // Default width
+        const height = 480; // Default height
+        this.initWebGL(width, height);
+
+        if (this.canvas && 'captureStream' in this.canvas) {
+          // Cast to any because TS might not know captureStream exists on HTMLCanvasElement in all envs or it might be OffscreenCanvas type intersection issue
+          this.mediaStream = (this.canvas as any).captureStream(30); // 30 FPS
+        } else {
+          throw new Error("Canvas captureStream not supported");
+        }
       }
 
       log("[VideoProcessor] Video system initialized");
@@ -224,7 +224,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       // Create YUV program for WASM decoder output
       this.yuvProgram = this.createProgram(VERTEX_SHADER, YUV_FRAGMENT_SHADER);
       if (!this.yuvProgram) return;
-      
+
       // Create RGBA program (from stream-poc2 - for VideoFrame/ImageData)
       this.rgbaProgram = this.createProgram(VERTEX_SHADER, RGBA_FRAGMENT_SHADER);
 
@@ -290,15 +290,15 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
    */
   private setupGeometry(): void {
     const gl = this.gl!;
-    
+
     // Positions (clip space) - from stream-poc2
     const positions = new Float32Array([
       -1, -1,
-       1, -1,
-      -1,  1,
-       1,  1,
+      1, -1,
+      -1, 1,
+      1, 1,
     ]);
-    
+
     // Texture coordinates (flipped Y for video) - from stream-poc2
     const texCoords = new Float32Array([
       0, 1,
@@ -306,12 +306,12 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       0, 0,
       1, 0,
     ]);
-    
+
     // Position buffer
     this.positionBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-    
+
     // Texcoord buffer
     this.texCoordBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
@@ -335,12 +335,12 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
    */
   private bindAttributes(program: WebGLProgram): void {
     const gl = this.gl!;
-    
+
     const positionLoc = gl.getAttribLocation(program, 'a_position');
     gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
     gl.enableVertexAttribArray(positionLoc);
     gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
-    
+
     const texCoordLoc = gl.getAttribLocation(program, 'a_texCoord');
     gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
     gl.enableVertexAttribArray(texCoordLoc);
@@ -356,7 +356,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       this.renderYUV420_2D(frame);
       return;
     }
-    
+
     const gl = this.gl!;
     const program = this.yuvProgram!;
     const { yPlane, uPlane, vPlane, width, height } = frame;
@@ -403,36 +403,36 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
   private renderYUV420_2D(frame: YUV420Frame): void {
     const ctx = this.ctx2d!;
     const { yPlane, uPlane, vPlane, width, height } = frame;
-    
+
     // Resize canvas if needed
     if (this.canvas!.width !== width || this.canvas!.height !== height) {
       this.canvas!.width = width;
       this.canvas!.height = height;
     }
-    
+
     const imageData = ctx.createImageData(width, height);
     const rgba = imageData.data;
     const uvWidth = width >> 1;
-    
+
     for (let j = 0; j < height; j++) {
       for (let i = 0; i < width; i++) {
         const yIndex = j * width + i;
         const uvIndex = (j >> 1) * uvWidth + (i >> 1);
-        
+
         const y = yPlane[yIndex];
         const u = uPlane[uvIndex] - 128;
         const v = vPlane[uvIndex] - 128;
-        
+
         // BT.601 conversion (same as stream-poc2)
         let r = y + 1.402 * v;
         let g = y - 0.344136 * u - 0.714136 * v;
         let b = y + 1.772 * u;
-        
+
         // Clamp to 0-255
         r = Math.max(0, Math.min(255, r));
         g = Math.max(0, Math.min(255, g));
         b = Math.max(0, Math.min(255, b));
-        
+
         const rgbaIndex = yIndex * 4;
         rgba[rgbaIndex] = r;
         rgba[rgbaIndex + 1] = g;
@@ -440,7 +440,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
         rgba[rgbaIndex + 3] = 255;
       }
     }
-    
+
     ctx.putImageData(imageData, 0, 0);
   }
 
@@ -450,42 +450,42 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
    */
   renderVideoFrame(frame: VideoFrame): void {
     if (!frame) return;
-    
+
     // Resize canvas if needed
     const displayWidth = frame.displayWidth;
     const displayHeight = frame.displayHeight;
-    
+
     if (this.canvas!.width !== displayWidth || this.canvas!.height !== displayHeight) {
       this.canvas!.width = displayWidth;
       this.canvas!.height = displayHeight;
-      
+
       if (this.gl) {
         this.gl.viewport(0, 0, displayWidth, displayHeight);
       }
     }
-    
+
     // For 2D context, use drawImage (optimal for VideoFrame - from stream-poc2)
     if (this.ctx2d) {
       this.ctx2d.drawImage(frame, 0, 0, displayWidth, displayHeight);
       return;
     }
-    
+
     // For WebGL, upload VideoFrame as texture
     // Modern browsers optimize this for GPU-backed VideoFrames
     const gl = this.gl!;
     const program = this.rgbaProgram!;
-    
+
     gl.viewport(0, 0, displayWidth, displayHeight);
     gl.useProgram(program);
     this.bindAttributes(program);
-    
+
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.textures.rgba);
-    
+
     // texImage2D with VideoFrame - browser handles GPU→GPU transfer if possible
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame);
     gl.uniform1i(gl.getUniformLocation(program, 'u_texture'), 0);
-    
+
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
@@ -497,24 +497,24 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       this.ctx2d.putImageData(imageData, 0, 0);
       return;
     }
-    
+
     const gl = this.gl!;
     const program = this.rgbaProgram!;
-    
+
     if (this.canvas!.width !== imageData.width || this.canvas!.height !== imageData.height) {
       this.canvas!.width = imageData.width;
       this.canvas!.height = imageData.height;
     }
-    
+
     gl.viewport(0, 0, this.canvas!.width, this.canvas!.height);
     gl.useProgram(program);
     this.bindAttributes(program);
-    
+
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.textures.rgba);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
     gl.uniform1i(gl.getUniformLocation(program, 'u_texture'), 0);
-    
+
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
@@ -544,7 +544,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       // Handle YUV420 frame from WASM decoder - use WebGL
       if ('format' in frame && frame.format === 'yuv420') {
         const yuvFrame = frame as YUV420Frame;
-        
+
         // Initialize WebGL on first YUV frame if not already done
         if (!this.webglInitialized) {
           this.initWebGL(yuvFrame.width, yuvFrame.height);
@@ -553,11 +553,11 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
         if (this.useWebGL && this.gl && this.canvas) {
           // Render YUV to canvas via WebGL (synchronous)
           this.renderYUV420(yuvFrame);
-          
+
           // If using canvas capture fallback, we're done! The stream updates automatically.
           if (this.useCanvasCapture) {
-             this.emit("frameProcessed", undefined);
-             return;
+            this.emit("frameProcessed", undefined);
+            return;
           }
 
           // Create VideoFrame from canvas and write to generator
@@ -565,7 +565,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
             const videoFrame = new VideoFrame(this.canvas as OffscreenCanvas, {
               timestamp: Date.now() * 1000,
             });
-            
+
             this.isWriting = true;
             // Non-blocking write - don't await
             this.videoWriter.write(videoFrame).then(() => {
@@ -623,18 +623,18 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
         if (this.textures.u) this.gl.deleteTexture(this.textures.u);
         if (this.textures.v) this.gl.deleteTexture(this.textures.v);
         if (this.textures.rgba) this.gl.deleteTexture(this.textures.rgba);
-        
+
         // Delete buffers
         if (this.positionBuffer) this.gl.deleteBuffer(this.positionBuffer);
         if (this.texCoordBuffer) this.gl.deleteBuffer(this.texCoordBuffer);
-        
+
         // Delete programs
         if (this.yuvProgram) this.gl.deleteProgram(this.yuvProgram);
         if (this.rgbaProgram) this.gl.deleteProgram(this.rgbaProgram);
-        
+
         this.gl = null;
       }
-      
+
       // Cleanup 2D context
       this.ctx2d = null;
       this.canvas = null;

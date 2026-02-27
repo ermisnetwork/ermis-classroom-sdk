@@ -9,7 +9,7 @@ import type {
   AudioWorkletMessage,
   SubscriberAudioNode,
 } from "../../types/media/audioMixer.types";
-import {log} from "../../utils";
+import { log } from "../../utils";
 
 export class AudioMixer {
   private audioContext: AudioContext | null = null;
@@ -19,6 +19,9 @@ export class AudioMixer {
   private isInitialized = false;
   private outputAudioElement: HTMLAudioElement | null = null;
   private loadedWorklets = new Set<string>();
+
+  // iOS Safari user-interaction resume handler
+  private _boundResumeOnInteraction: (() => void) | null = null;
 
   // Configuration
   private masterVolume: number;
@@ -51,9 +54,21 @@ export class AudioMixer {
         latencyHint: "interactive" as AudioContextLatencyCategory,
       });
 
-      // Resume context if suspended (required by some browsers)
+      // Resume context if suspended (required by some browsers).
+      // On iOS Safari this call may silently fail if not inside a user
+      // gesture — _setupErrorHandlers() will register interaction listeners
+      // as a fallback.
       if (this.audioContext.state === "suspended") {
-        await this.audioContext.resume();
+        try {
+          await this.audioContext.resume();
+        } catch {
+          // Will be retried on user interaction
+        }
+      }
+      // After resume attempt, check if context is actually running.
+      // On iOS Safari it may still be suspended if no user gesture occurred.
+      if (this.audioContext.state !== "running") {
+        log("[AudioMixer] AudioContext not running (state:", this.audioContext.state, ") — waiting for user interaction");
       }
 
       // Create mixer node (GainNode to combine audio)
@@ -136,6 +151,7 @@ export class AudioMixer {
 
       // Connect the port if provided
       if (channelWorkletPort) {
+        console.log('[AudioMixer] Connecting channelWorkletPort for:', subscriberId);
         workletNode.port.postMessage(
           { type: "connectWorker", port: channelWorkletPort },
           [channelWorkletPort],
@@ -337,6 +353,9 @@ export class AudioMixer {
     this._debug("Starting AudioMixer cleanup");
 
     try {
+      // Remove user-interaction listeners
+      this._removeInteractionListeners();
+
       // Remove audio element
       if (this.outputAudioElement) {
         this.outputAudioElement.srcObject = null;
@@ -402,7 +421,7 @@ export class AudioMixer {
       this._debug("Audio worklet already loaded:", audioWorkletUrl);
       return;
     }
-    
+
     try {
       await this.audioContext.audioWorklet.addModule(audioWorkletUrl);
       this.loadedWorklets.add(audioWorkletUrl);
@@ -433,7 +452,14 @@ export class AudioMixer {
         const playPromise = this.outputAudioElement.play();
         if (playPromise !== undefined) {
           playPromise.catch((err) => {
-            console.error('[AudioMixer] Audio play() blocked:', err.name, err.message);
+            console.warn('[AudioMixer] Audio play() blocked:', err.name, err.message,
+              '— will retry after user interaction');
+            // On iOS Safari, this means AudioContext is likely suspended.
+            // The interaction listeners registered in _setupErrorHandlers will
+            // resume the context and call _ensureAudioElementPlaying().
+            if (this.audioContext?.state === "suspended") {
+              this._addInteractionListeners();
+            }
           });
         }
       } else {
@@ -483,29 +509,114 @@ export class AudioMixer {
   }
 
   /**
-   * Setup error handlers for audio context
+   * Setup error handlers for audio context.
+   *
+   * iOS Safari keeps AudioContext in "suspended" state until a user gesture
+   * (tap, click, etc.) triggers `audioContext.resume()`.  We register
+   * interaction listeners that attempt to resume + replay the audio element
+   * so sound starts the moment the user taps anywhere on the page.
    */
   private _setupErrorHandlers(): void {
     if (!this.audioContext) return;
 
+    // ── 1. Monitor state changes ────────────────────────────────────────
     this.audioContext.onstatechange = () => {
-      this._debug(`Audio context state changed: ${this.audioContext?.state}`);
+      const state = this.audioContext?.state;
+      this._debug(`Audio context state changed: ${state}`);
 
-      if (this.audioContext?.state === "interrupted") {
-        console.warn("Audio context was interrupted");
+      if (state === "interrupted") {
+        // iOS Safari: phone call, Siri, etc. — try to resume immediately
+        console.warn("[AudioMixer] Audio context interrupted — attempting resume");
+        this.audioContext?.resume().catch(() => { });
+      }
+
+      if (state === "running") {
+        // Context just became running — make sure audio element is playing
+        this._ensureAudioElementPlaying();
+        // Remove user-interaction listeners (no longer needed)
+        this._removeInteractionListeners();
       }
     };
 
-    // Listen for audio context suspend/resume events
+    // ── 2. Resume when page becomes visible again ───────────────────────
     document.addEventListener("visibilitychange", async () => {
-      if (document.hidden) {
-        // Page hidden - optionally suspend context
-        // await this.suspend();
-      } else {
-        // Page visible - resume context if needed
+      if (!document.hidden) {
         await this.resume();
+        this._ensureAudioElementPlaying();
       }
     });
+
+    // ── 3. Resume on user interaction (critical for iOS Safari) ─────────
+    //    AudioContext.resume() only succeeds inside a user gesture on iOS.
+    //    Register listeners that fire once and clean themselves up.
+    this._addInteractionListeners();
+  }
+
+  /**
+   * Add user-interaction event listeners that resume the AudioContext.
+   * Required for iOS Safari where AudioContext starts suspended.
+   */
+  private _addInteractionListeners(): void {
+    if (this._boundResumeOnInteraction) return; // already registered
+
+    this._boundResumeOnInteraction = () => {
+      if (!this.audioContext) return;
+      if (this.audioContext.state === "suspended" || this.audioContext.state === ("interrupted" as AudioContextState)) {
+        log("[AudioMixer] User interaction detected — resuming AudioContext");
+        this.audioContext.resume()
+          .then(() => {
+            log("[AudioMixer] AudioContext resumed successfully, state:", this.audioContext?.state);
+            this._ensureAudioElementPlaying();
+            // Once running, we don't need these listeners any more
+            if (this.audioContext?.state === "running") {
+              this._removeInteractionListeners();
+            }
+          })
+          .catch((err) => {
+            console.warn("[AudioMixer] AudioContext resume failed:", err);
+          });
+      }
+    };
+
+    const events = ["click", "touchstart", "touchend", "keydown"];
+    for (const evt of events) {
+      document.addEventListener(evt, this._boundResumeOnInteraction, { capture: true });
+    }
+  }
+
+  /**
+   * Remove user-interaction listeners once AudioContext is running.
+   */
+  private _removeInteractionListeners(): void {
+    if (!this._boundResumeOnInteraction) return;
+
+    const events = ["click", "touchstart", "touchend", "keydown"];
+    for (const evt of events) {
+      document.removeEventListener(evt, this._boundResumeOnInteraction, { capture: true });
+    }
+    this._boundResumeOnInteraction = null;
+  }
+
+  /**
+   * Make sure the audio element is playing.
+   * Called after AudioContext resumes to recover from autoplay blocks.
+   */
+  private _ensureAudioElementPlaying(): void {
+    if (!this.outputAudioElement || !this.outputDestination) return;
+    if (this.subscriberNodes.size === 0) return;
+
+    // Re-assign srcObject in case it was cleared
+    if (!this.outputAudioElement.srcObject) {
+      this.outputAudioElement.srcObject = this.outputDestination.stream;
+    }
+
+    const playPromise = this.outputAudioElement.play();
+    if (playPromise !== undefined) {
+      playPromise.catch((err) => {
+        // Not an error on first load — will succeed after user interaction
+        this._debug("Audio play() deferred:", err.name);
+      });
+    }
   }
 
   /**

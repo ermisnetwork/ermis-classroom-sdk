@@ -418,27 +418,6 @@ export class WasmH264Encoder {
 }
 
 /**
- * Shared singleton WASM module for TinyH264 — avoids loading WASM multiple times
- * within the same worker context, which is critical for Safari 15 memory limits.
- * Each worker has its own module scope so this is safe (no cross-worker sharing).
- */
-let _sharedTinyH264Module = null;
-let _sharedTinyH264ModuleLoading = null;
-
-async function _getSharedTinyH264Module() {
-    if (_sharedTinyH264Module) return _sharedTinyH264Module;
-    if (_sharedTinyH264ModuleLoading) return _sharedTinyH264ModuleLoading;
-    _sharedTinyH264ModuleLoading = (async () => {
-        const { default: TinyH264Module } = await import('./h264-decoder/TinyH264.js');
-        const mod = await TinyH264Module();
-        _sharedTinyH264Module = mod;
-        _sharedTinyH264ModuleLoading = null;
-        return mod;
-    })();
-    return _sharedTinyH264ModuleLoading;
-}
-
-/**
  * WASM H.264 Decoder using tinyh264
  * Outputs YUV420 which can be rendered with WebGLRenderer
  */
@@ -454,15 +433,6 @@ export class WasmH264Decoder {
         this.pps = null;
         this.nalLengthSize = 4; // Default for AVC format
         this.outputRGBA = false; // Output RGBA instead of YUV420
-        // Reusable decode buffer to avoid per-frame allocation (Safari 15 GC pressure)
-        this._decodeBuffer = null;
-        this._decodeBufferSize = 0;
-        // Preallocated YUV output buffers — reused every frame to eliminate 3 allocs/frame
-        this._yBuf = null;
-        this._uBuf = null;
-        this._vBuf = null;
-        this._yuvWidth = 0;
-        this._yuvHeight = 0;
     }
     
     async configure(config) {
@@ -480,13 +450,14 @@ export class WasmH264Decoder {
         }
 
         try {
-            // Use shared singleton WASM module to avoid loading WASM multiple times
-            // in the same worker (critical for Safari 15 ~150MB memory limit).
-            const [wasmModule, { default: TinyH264Decoder }] = await Promise.all([
-                _getSharedTinyH264Module(),
+            // Dynamically import the WASM module and decoder wrapper
+            const [{ default: TinyH264Module }, { default: TinyH264Decoder }] = await Promise.all([
+                import('./h264-decoder/TinyH264.js'),
                 import('./h264-decoder/TinyH264Decoder.js')
             ]);
-            // wasmModule is the shared TinyH264 WASM instance
+            
+            // Initialize WASM module
+            const wasmModule = await TinyH264Module();
             
             // Create decoder wrapper with WASM module and output callback
             this.decoder = new TinyH264Decoder(wasmModule, (yuvData, width, height) => {
@@ -509,25 +480,12 @@ export class WasmH264Decoder {
                             timestamp: Date.now(),
                         });
                     } else {
-                        // Reuse preallocated YUV planes to avoid 3 new Uint8Array() per frame
-                        // (30fps × 5 workers = 450 allocations/s eliminated)
-                        if (this._yuvWidth !== width || this._yuvHeight !== height) {
-                            // Resolution changed (or first frame) — allocate new buffers
-                            this._yuvWidth = width;
-                            this._yuvHeight = height;
-                            this._yBuf = new Uint8Array(width * height);
-                            this._uBuf = new Uint8Array((width * height) >> 2);
-                            this._vBuf = new Uint8Array((width * height) >> 2);
-                        }
-                        // Copy into preallocated buffers
-                        this._yBuf.set(yPlane);
-                        this._uBuf.set(uPlane);
-                        this._vBuf.set(vPlane);
+                        // Output YUV planes for WebGL rendering
                         this.onOutput({
                             format: 'yuv420',
-                            yPlane: this._yBuf,
-                            uPlane: this._uBuf,
-                            vPlane: this._vBuf,
+                            yPlane: new Uint8Array(yPlane),
+                            uPlane: new Uint8Array(uPlane),
+                            vPlane: new Uint8Array(vPlane),
                             width,
                             height,
                             timestamp: Date.now(),
@@ -658,13 +616,11 @@ export class WasmH264Decoder {
             
             // Handle EncodedVideoChunk (native WebCodecs type)
             if (isEncodedVideoChunk) {
-                // Reuse decode buffer to avoid per-frame allocation (Safari 15 GC pressure)
-                if (!this._decodeBuffer || this._decodeBufferSize < chunk.byteLength) {
-                    this._decodeBufferSize = chunk.byteLength * 2; // Add headroom
-                    this._decodeBuffer = new ArrayBuffer(this._decodeBufferSize);
-                }
-                chunk.copyTo(this._decodeBuffer);
-                data = new Uint8Array(this._decodeBuffer, 0, chunk.byteLength);
+                // EncodedVideoChunk requires copyTo() to extract data
+                const buffer = new ArrayBuffer(chunk.byteLength);
+                chunk.copyTo(buffer);
+                data = new Uint8Array(buffer);
+                // Debug disabled for performance
             } else if (chunk.data) {
                 // Handle plain object with data property
                 data = chunk.data instanceof ArrayBuffer 

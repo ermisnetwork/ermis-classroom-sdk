@@ -104,7 +104,7 @@ export class AudioProcessor extends EventEmitter<{
 
     this.audioEncoderManager.on("audioChunk", async (data) => {
       // DEBUG: Log audio chunk reception
-      // log(`[AudioProcessor] 🎤 Audio chunk received - micEnabled: ${this.micEnabled}, timestamp: ${data.timestamp}, size: ${data.data.length}`);
+      log(`[AudioProcessor] 🎤 Audio chunk received - micEnabled: ${this.micEnabled}, timestamp: ${data.timestamp}, size: ${data.data.length}`);
 
       if (!this.micEnabled) {
         // log(`[AudioProcessor] ⏭️ Skipping audio chunk - mic is disabled`);

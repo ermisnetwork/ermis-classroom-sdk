@@ -38,6 +38,9 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   private wasmReady = false;
   private decoderWorker: Worker | null = null;
   private decoderChannel: MessageChannel | null = null;
+  // Video decoder worker (iOS 15 — offloads tinyh264 WASM to separate thread)
+  private videoDecoderWorker: Worker | null = null;
+  private videoDecoderChannel: MessageChannel | null = null;
   // private videoFrameCount = 0; // DEBUG: Count video frames
 
   constructor(workerUrl: string, subscriberId: string, protocol: "webrtc" | "webtransport" | "websocket") {
@@ -103,14 +106,15 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
         });
       };
 
-      // Create external decoder worker for platforms without nested worker
-      // support (iOS 15 Safari).  The decoder Worker is created here on the
-      // main thread and messages are relayed through a MessagePort.
+      // Create external decoder workers for platforms without nested worker
+      // support (iOS 15 Safari).  Workers are created here on the main thread
+      // and bridged to the media worker via MessagePorts.
       let decoderPort: MessagePort | undefined;
+      let videoDecoderPort: MessagePort | undefined;
       const transferables: Transferable[] = [channelPort];
 
       if (this.needsExternalDecoderWorker()) {
-        log('[WorkerManager] Creating external decoder worker (iOS 15 compat)');
+        console.warn('[WorkerManager] Creating external decoder worker (iOS 15 compat)');
         const timestamp = Date.now();
         this.decoderWorker = new Worker(
           `/opus_decoder/decoderWorker.min.js?t=${timestamp}`
@@ -145,6 +149,31 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
 
         decoderPort = this.decoderChannel.port1;
         transferables.push(decoderPort);
+
+        // ── Video decoder worker (tinyh264 WASM in separate thread) ──
+        // Offloads synchronous H.264 WASM decoding so it cannot starve
+        // the media worker's event loop (which needs to process audio).
+        log('[WorkerManager] Creating external video decoder worker (iOS 15 compat)');
+        this.videoDecoderWorker = new Worker(
+          `/workers/video-decoder-worker.js?t=${timestamp}`,
+          { type: 'module' }
+        );
+        this.videoDecoderChannel = new MessageChannel();
+
+        // Transfer port2 to the video decoder worker — it will use this
+        // port for all communication with the media worker.
+        this.videoDecoderWorker.postMessage(
+          { type: 'init', port: this.videoDecoderChannel.port2 },
+          [this.videoDecoderChannel.port2]
+        );
+
+        this.videoDecoderWorker.onerror = (e: ErrorEvent) => {
+          console.error('[WorkerManager] Video decoder worker error:', e.message);
+        };
+
+        // port1 goes to the media worker
+        videoDecoderPort = this.videoDecoderChannel.port1;
+        transferables.push(videoDecoderPort);
       }
 
       // Send init message with subscriberId, subscribeType, and audioEnabled
@@ -158,6 +187,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
           initialQuality: initialQuality,
           port: channelPort,
           decoderPort: decoderPort,
+          videoDecoderPort: videoDecoderPort,
           enableLogging,
           protocol: this.protocol,
         },
@@ -337,6 +367,15 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
    * Terminate the worker
    */
   terminate(): void {
+    if (this.videoDecoderWorker) {
+      this.videoDecoderWorker.terminate();
+      this.videoDecoderWorker = null;
+    }
+    if (this.videoDecoderChannel) {
+      // port2 was transferred to the video decoder worker — already gone.
+      // port1 was transferred to the media worker — already gone.
+      this.videoDecoderChannel = null;
+    }
     if (this.decoderWorker) {
       this.decoderWorker.terminate();
       this.decoderWorker = null;
