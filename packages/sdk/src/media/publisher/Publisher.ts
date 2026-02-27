@@ -1224,11 +1224,48 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     }
   }
 
+  /**
+   * Wait for viewport to stabilize after getDisplayMedia.
+   * Chrome's sharing indicator bar animates in, causing MULTIPLE resize events.
+   * Debounce: wait until no HEIGHT resize fires for 300ms (bar fully settled).
+   * Only reacts to height changes — ignores width-only resizes (e.g. DevTools, sidebar).
+   * Fallback: if no height resize within 3s, proceed with current dimensions.
+   */
+  private async waitForViewportStabilization(): Promise<void> {
+    const heightBeforeShare = window.innerHeight;
+    await new Promise<void>(resolve => {
+      let debounceTimer: ReturnType<typeof setTimeout>;
+      let lastSeenHeight = heightBeforeShare;
+      const onResize = () => {
+        const currentHeight = window.innerHeight;
+        if (currentHeight === lastSeenHeight) return;
+        lastSeenHeight = currentHeight;
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          window.removeEventListener('resize', onResize);
+          clearTimeout(fallbackTimer);
+          log('[Publisher] Viewport stabilized after resize');
+          resolve();
+        }, 300);
+      };
+      const fallbackTimer = setTimeout(() => {
+        window.removeEventListener('resize', onResize);
+        clearTimeout(debounceTimer);
+        log('[Publisher] Viewport stabilized (fallback timeout)');
+        resolve();
+      }, 3000);
+      window.addEventListener('resize', onResize);
+    });
+  }
+
   private async startScreenVideoCapture(): Promise<void> {
     if (!this.screenStream || !this.streamManager) return;
 
     const videoTrack = this.screenStream.getVideoTracks()[0];
     if (!videoTrack) return;
+
+    // Wait for Chrome's sharing bar to stabilize before reading dimensions
+    await this.waitForViewportStabilization();
 
     // Initialize video encoder manager for screen share
     const screenSubStreams = getSubStreams("screen_share", {
@@ -1237,11 +1274,27 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     });
     this.screenVideoEncoderManager = new VideoEncoderManager();
 
-    // Create video processor for screen share
+    // Calculate proportional resolution from actual capture dimensions
+    const { calculateScreenShareResolution } = await import('../../utils/videoResolutionHelper');
+    const trackSettings = videoTrack.getSettings();
+    const actualWidth = trackSettings.width || 1920;
+    const actualHeight = trackSettings.height || 1080;
+    log('[Publisher] Screen share dimensions after stabilization:', `${actualWidth}x${actualHeight}`);
+    const { width: screenWidth, height: screenHeight } = calculateScreenShareResolution(actualWidth, actualHeight);
+
+    // Update subStreams with actual proportional dimensions
+    const updatedSubStreams = screenSubStreams.map(subStream => {
+      if (subStream.channelName === ChannelName.SCREEN_SHARE_720P) {
+        return { ...subStream, width: screenWidth, height: screenHeight };
+      }
+      return subStream;
+    });
+
+    // Create video processor for screen share with updated subStreams
     this.screenVideoProcessor = new VideoProcessor(
       this.screenVideoEncoderManager,
       this.streamManager,
-      screenSubStreams as any
+      updatedSubStreams as any
     );
 
     this.screenVideoProcessor.on("encoderError", (error) => {
@@ -1257,11 +1310,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     // Initialize and start video processing
     const baseConfig = {
       codec: "avc1.640c34",
-      width: 1280,
-      height: 720,
-      framerate: 20, // Lower framerate for screen share
-      bitrate: 1000000, // 1 Mbps for screen share
-      latencyMode: "quality" as const, // Smoother encoding, reduces keyframe spikes
+      width: screenWidth,
+      height: screenHeight,
+      framerate: 20,
+      bitrate: 1000000,
+      latencyMode: "quality" as const,
     };
 
     await this.screenVideoProcessor.initialize(videoTrack, baseConfig);
@@ -2057,35 +2110,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         };
       }
 
-      // Wait for viewport to stabilize after getDisplayMedia.
-      // Chrome's sharing indicator bar animates in, causing MULTIPLE resize events.
-      // Debounce: wait until no HEIGHT resize fires for 300ms (bar fully settled).
-      // Only reacts to height changes — ignores width-only resizes (e.g. DevTools, sidebar).
-      const heightBeforeShare = window.innerHeight;
-      await new Promise<void>(resolve => {
-        let debounceTimer: ReturnType<typeof setTimeout>;
-        let lastSeenHeight = heightBeforeShare;
-        const onResize = () => {
-          const currentHeight = window.innerHeight;
-          // Ignore width-only resizes (DevTools, sidebars, etc.)
-          if (currentHeight === lastSeenHeight) return;
-          lastSeenHeight = currentHeight;
-          // Reset debounce timer on each height change
-          clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(() => {
-            window.removeEventListener('resize', onResize);
-            clearTimeout(fallbackTimer);
-            resolve();
-          }, 300);
-        };
-        // Fallback: if no height resize within 3s, proceed with current dimensions
-        const fallbackTimer = setTimeout(() => {
-          window.removeEventListener('resize', onResize);
-          clearTimeout(debounceTimer);
-          resolve();
-        }, 3000);
-        window.addEventListener('resize', onResize);
-      });
+      // Wait for Chrome's sharing bar to stabilize before reading dimensions
+      await this.waitForViewportStabilization();
 
       this.preCaptureViewportDimensions = {
         width: window.innerWidth,
@@ -2329,28 +2355,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private async recalculateLivestreamResolution(): Promise<void> {
     if (!this.livestreamVideoProcessor || !this.tabStream || !this.streamManager) return;
 
-    // Wait for viewport to stabilize after sharing bar animation
-    await new Promise<void>(resolve => {
-      let debounceTimer: ReturnType<typeof setTimeout>;
-      let lastSeenHeight = window.innerHeight;
-      const onResize = () => {
-        const currentHeight = window.innerHeight;
-        if (currentHeight === lastSeenHeight) return;
-        lastSeenHeight = currentHeight;
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          window.removeEventListener('resize', onResize);
-          clearTimeout(fallbackTimer);
-          resolve();
-        }, 300);
-      };
-      const fallbackTimer = setTimeout(() => {
-        window.removeEventListener('resize', onResize);
-        clearTimeout(debounceTimer);
-        resolve();
-      }, 2000);
-      window.addEventListener('resize', onResize);
-    });
+    // Wait for Chrome's sharing bar to stabilize before reading dimensions
+    await this.waitForViewportStabilization();
 
     // Recalculate resolution from current tab capture track dimensions
     const { calculateLivestreamResolution, getVideoTrackDimensions } =
@@ -2639,31 +2645,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         displayMediaOptions as DisplayMediaStreamOptions
       );
 
-      // Wait for viewport to stabilize after getDisplayMedia (same as captureCurrentTab).
-      // Chrome's sharing indicator bar animates in, causing MULTIPLE resize events.
+      // Wait for Chrome's sharing bar to stabilize before reading dimensions
       if (!this.preCaptureViewportDimensions) {
-        const heightBeforeShare = window.innerHeight;
-        await new Promise<void>(resolve => {
-          let debounceTimer: ReturnType<typeof setTimeout>;
-          let lastSeenHeight = heightBeforeShare;
-          const onResize = () => {
-            const currentHeight = window.innerHeight;
-            if (currentHeight === lastSeenHeight) return;
-            lastSeenHeight = currentHeight;
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-              window.removeEventListener('resize', onResize);
-              clearTimeout(fallbackTimer);
-              resolve();
-            }, 300);
-          };
-          const fallbackTimer = setTimeout(() => {
-            window.removeEventListener('resize', onResize);
-            clearTimeout(debounceTimer);
-            resolve();
-          }, 3000);
-          window.addEventListener('resize', onResize);
-        });
+        await this.waitForViewportStabilization();
         this.preCaptureViewportDimensions = {
           width: window.innerWidth,
           height: window.innerHeight,
