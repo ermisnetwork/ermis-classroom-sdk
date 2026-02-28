@@ -567,28 +567,45 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         numberOfChannels: 1,
       };
 
-      if (!this.InitAudioRecorder || typeof this.InitAudioRecorder !== 'function') {
-        throw new Error(`InitAudioRecorder is not available or not a function: ${typeof this.InitAudioRecorder}`);
+      if (this.options.audioCodec === "aac") {
+        // AAC path — uses FDK-AAC WASM or native WebCodecs AudioEncoder
+        const aacManager = new AACEncoderManager(ChannelName.MICROPHONE, audioConfig);
+        // audioEncoderManager field is typed AudioEncoderManager | null in Publisher.
+        // We cast via the shared base type to comply until Publisher class is updated.
+        this.audioEncoderManager = aacManager as unknown as AudioEncoderManager;
+
+        this.audioProcessor = new AudioProcessor(
+          aacManager,
+          this.streamManager,
+          ChannelName.MICROPHONE,
+        );
+      } else {
+        // Default Opus path (uses Recorder.js WASM)
+        if (!this.InitAudioRecorder || typeof this.InitAudioRecorder !== "function") {
+          throw new Error(
+            `InitAudioRecorder is not available or not a function: ${typeof this.InitAudioRecorder}`,
+          );
+        }
+
+        this.audioEncoderManager = new AudioEncoderManager(
+          ChannelName.MICROPHONE,
+          audioConfig,
+          this.InitAudioRecorder,
+        );
+
+        this.audioProcessor = new AudioProcessor(
+          this.audioEncoderManager,
+          this.streamManager,
+          ChannelName.MICROPHONE,
+        );
       }
-
-      this.audioEncoderManager = new AudioEncoderManager(
-        ChannelName.MICROPHONE,
-        audioConfig,
-        this.InitAudioRecorder
-      );
-
-      this.audioProcessor = new AudioProcessor(
-        this.audioEncoderManager,
-        this.streamManager,
-        ChannelName.MICROPHONE
-      );
 
       this.audioProcessor.on("encoderError", (error) => {
         console.error("[Publisher] Audio encoder error:", error);
         this.updateStatus("Audio encoder error", true);
       });
 
-      log("[Publisher] Audio processor initialized");
+      log(`[Publisher] Audio processor initialized (codec: ${this.options.audioCodec ?? "opus"})`);
     }
   }
 

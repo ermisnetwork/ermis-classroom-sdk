@@ -139,10 +139,9 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
   private playbackIntervalMs = 50; // 20fps output rate
   private targetBufferSize = 3; // Aim to keep ~3 frames buffered (150ms at 20fps)
   private maxBufferSize = 15; // Drop oldest frames if buffer exceeds this
-  private isWriting = false; // Guard against overlapping writes
+  // private isWriting = false; // Guard against overlapping writes
 
   // Diagnostics
-  private frameCount = 0;
   private lastFrameArrivalTime = 0;
   private frameArrivalGaps: number[] = [];
 
@@ -176,26 +175,40 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
           kind: "video",
         });
 
-        this.videoWriter = this.videoGenerator.writable;
+        this.videoWriter = this.videoGenerator.writable.getWriter();
 
         // Create MediaStream with video track only
         this.mediaStream = new MediaStream([this.videoGenerator]);
+      } else {
+        log("[VideoProcessor] Using canvas.captureStream() fallback.");
+        this.useCanvasCapture = true;
 
-        // DEBUG: Track state
-        // log("[VideoProcessor] 🎥 Track created, readyState:", this.videoGenerator.readyState);
+        // Create fallback canvas immediately
+        const width = 640; // Default width
+        const height = 480; // Default height
+        this.initWebGL(width, height);
 
-        log("[VideoProcessor] Video system initialized");
-        this.emit("initialized", { stream: this.mediaStream! });
-
-        return this.mediaStream;
-      } catch (error) {
-        const err =
-          error instanceof Error ? error : new Error("Video initialization failed");
-        console.error("[VideoProcessor] ❌ Failed to initialize video system:", err);
-        this.emit("error", { error: err, context: "init" });
-        throw err;
+        if (this.canvas && 'captureStream' in this.canvas) {
+          // Cast to any because TS might not know captureStream exists on HTMLCanvasElement in all envs or it might be OffscreenCanvas type intersection issue
+          this.mediaStream = (this.canvas as any).captureStream(30); // 30 FPS
+        } else {
+          throw new Error("Canvas captureStream not supported");
+        }
       }
+
+      log("[VideoProcessor] Video system initialized");
+      this.emit("initialized", { stream: this.mediaStream! });
+
+      return this.mediaStream!;
+
+    } catch (error) {
+      const err =
+        error instanceof Error ? error : new Error("Video initialization failed");
+      console.error("[VideoProcessor] ❌ Failed to initialize video system:", err);
+      this.emit("error", { error: err, context: "init" });
+      throw err;
     }
+  }
 
   /**
    * Initialize WebGL for YUV420 rendering (with 2D fallback from stream-poc2)
@@ -618,6 +631,29 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
     }
   }
 
+  /**
+   * Write a single frame to the video writer directly
+   */
+  private async writeFrameDirect(frame: VideoFrame): Promise<void> {
+    try {
+      await this.videoWriter!.write(frame);
+
+      this.frameCount++;
+      this.emit("frameProcessed", undefined);
+    } catch (error) {
+      const err =
+        error instanceof Error ? error : new Error("Video write failed");
+      console.error(`[VideoProcessor] ❌ Failed to write video frame #${this.frameCount}:`, err);
+
+      if (this.videoGenerator) {
+        console.error("[VideoProcessor] Track state after error:", this.videoGenerator.readyState);
+      }
+
+      this.emit("error", { error: err, context: "writeFrame" });
+      throw err;
+    }
+  }
+
   // ==========================================
   // === Jitter Buffer Playback             ===
   // ==========================================
@@ -629,7 +665,8 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
   private startPlaybackTimer(): void {
     this.stopPlaybackTimer();
     this.playbackTimerActive = true;
-    log(`[VideoProcessor] Starting jitter buffer playback at ~${this.playbackIntervalMs}ms intervals`);
+    log(`[VideoProcessor] Starting jitter buffer playback at ~${this.playbackIntervalMs
+      }ms intervals`);
 
     const tick = () => {
       if (!this.playbackTimerActive) return;

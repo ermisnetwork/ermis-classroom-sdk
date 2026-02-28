@@ -51,8 +51,12 @@ const simdJsPath = '/codec-polyfill/x264-encoder/x264_encoder.js';
 const nosimdWasmPath = '/codec-polyfill/x264-encoder/x264_encoder_nosimd.wasm';
 const nosimdJsPath = '/codec-polyfill/x264-encoder/x264_encoder_nosimd.js';
 
-// Cache buster to force fresh loads during development
-const cacheBuster = `?v=${Date.now()}`;
+// Static version string — intentionally NOT Date.now().
+// Using Date.now() as cache buster breaks Service Worker caching and forces
+// a fresh WASM download on every worker startup, causing OOM on Safari 15
+// when 5 workers each download + compile the same 640KB WASM module.
+// Bump this version manually when the WASM binary changes.
+const cacheBuster = `?v=1`;
 
 /**
  * Get the appropriate WASM paths based on SIMD support

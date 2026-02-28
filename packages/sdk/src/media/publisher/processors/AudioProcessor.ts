@@ -5,8 +5,12 @@ import type {
 } from "../../../types/media/publisher.types";
 import { AudioConfig } from "../../subscriber";
 import { AudioEncoderManager } from "../managers/AudioEncoderManager";
+import { AACEncoderManager } from "../managers/AACEncoderManager";
 import { StreamManager } from "../transports/StreamManager";
 import { log } from "../../../utils";
+
+/** Union type of all supported encoder managers */
+type AnyEncoderManager = AudioEncoderManager | AACEncoderManager;
 
 /**
  * AudioProcessor - Manages audio processing and encoding pipeline
@@ -51,7 +55,7 @@ export class AudioProcessor extends EventEmitter<{
   micStateChanged: boolean;
   configUpdated: Partial<AudioEncoderConfig>;
 }> {
-  private audioEncoderManager: AudioEncoderManager;
+  private audioEncoderManager: AnyEncoderManager;
   private streamManager: StreamManager;
   private channelName: ChannelName;
 
@@ -62,7 +66,7 @@ export class AudioProcessor extends EventEmitter<{
   private audioStream: MediaStream | null = null;
 
   constructor(
-    audioEncoderManager: AudioEncoderManager,
+    audioEncoderManager: AnyEncoderManager,
     streamManager: StreamManager,
     channelName: ChannelName,
   ) {
@@ -80,14 +84,16 @@ export class AudioProcessor extends EventEmitter<{
    */
   private setupEncoderHandlers(): void {
     this.audioEncoderManager.on("configReady", async (data) => {
-      // Wrap description in packet header.
+      const isAac = data.config.codec === "mp4a.40.2";
       const config: AudioConfig = {
         codec: data.config.codec!,
         sampleRate: data.config.sampleRate,
         numberOfChannels: data.config.numberOfChannels,
         ...(data.config.description && { description: data.config.description }),
       };
-      if (config.description && config.description instanceof Uint8Array) {
+      // Opus: wrap raw OGG page in Ermis packet header.
+      // AAC: description is already a raw AudioSpecificConfig — send as-is.
+      if (!isAac && config.description && config.description instanceof Uint8Array) {
         const packetWithHeader = this.streamManager.createAudioConfigPacket(
           this.channelName,
           config.description,
@@ -161,10 +167,10 @@ export class AudioProcessor extends EventEmitter<{
 
     // Copy config to avoid modifying original
     const configToSend = { ...savedConfig };
+    const isAac = configToSend.codec === "mp4a.40.2";
 
-    // Process description if needed (add packet header)
-    // Process description if needed (add packet header)
-    if (configToSend.description && configToSend.description instanceof Uint8Array) {
+    // Process description if needed (add packet header for Opus only)
+    if (!isAac && configToSend.description && configToSend.description instanceof Uint8Array) {
       // Always wrap the raw OggS header in an Ermis packet, matching setupEncoderHandlers logic
       const packetWithHeader = this.streamManager.createAudioConfigPacket(
         this.channelName,
@@ -379,7 +385,7 @@ The above content does NOT show the entire file contents. If you need to view an
   getStats(): {
     isProcessing: boolean;
     micEnabled: boolean;
-    encoderStats: ReturnType<AudioEncoderManager["getStats"]>;
+    encoderStats: ReturnType<AnyEncoderManager["getStats"]>;
   } {
     return {
       isProcessing: this.isProcessing,

@@ -1608,6 +1608,8 @@ export class Room extends EventEmitter {
       webRtcHost: this.mediaConfig.hostNode,
       permissions: this.localParticipant.permissions,
       videoResolutions: this.videoResolutions,
+      audioCodec: "aac",
+
       onStatusUpdate: (_message: string, isError?: boolean) => {
         this.localParticipant?.setConnectionStatus(
           isError ? "failed" : "connected",

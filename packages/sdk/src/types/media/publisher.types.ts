@@ -85,6 +85,13 @@ export interface PublisherConfig {
   onStatusUpdate?: (message: string, isError?: boolean) => void;
   onStreamStart?: () => void;
   onStreamStop?: () => void;
+  /**
+   * Audio codec to use for microphone encoding.
+   * - "opus" (default) — Opus via Recorder.js WASM (maximum compatibility)
+   * - "aac"            — AAC-LC via WebCodecs AudioEncoder (native) or
+   *                      FDK-AAC WASM (fallback). Better HLS compatibility.
+   */
+  audioCodec?: "opus" | "aac";
 }
 
 
@@ -281,13 +288,13 @@ export interface RecordingPermissionResult {
   stream?: MediaStream;
   /** Error if permission was denied */
   error?: Error;
-  
+
   // === User denial flags (granted = false) ===
   /** True if user chose not to share video */
   missingVideo?: boolean;
   /** True if user chose not to share audio (when audio was available) */
   missingAudio?: boolean;
-  
+
   // === System unavailability flags (granted = true but limited) ===
   /** True if video is unavailable due to system limitations */
   videoUnavailable?: boolean;

@@ -8,7 +8,7 @@ export interface CopySDKFilesOptions {
   directories?: string[];
 }
 
-const DEFAULT_DIRECTORIES = ['workers', 'raptorQ', 'polyfills', 'opus_decoder'];
+const DEFAULT_DIRECTORIES = ['workers', 'raptorQ', 'polyfills', 'opus_decoder', 'codec-polyfill'];
 const SDK_ROOT_FILES = ['sdk-sw.js'];
 
 export function copySDKStaticFiles(options: CopySDKFilesOptions = {}): Plugin {

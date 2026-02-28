@@ -3,6 +3,7 @@ import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
 import { CHANNEL_NAME, STREAM_TYPE } from "./publisherConstants.js";
 import { H264Decoder, isNativeH264DecoderSupported } from "../codec-polyfill/video-codec-polyfill.js";
+import { AACDecoder } from "../codec-polyfill/audio-codec-polyfill.js";
 import raptorqInit, { WasmFecManager } from '../raptorQ/raptorq_wasm.js';
 
 import CommandSender from "./ClientCommand.js";
@@ -812,63 +813,93 @@ function handleStreamConfigs(json) {
 
         mediaConfigs.set(channelName, audioConfig);
 
-        const decoder = mediaDecoders.get(channelName);
-        if (decoder) {
-          try {
-            decoder.configure({ ...audioConfig, decoderPort: externalDecoderPort })
-              .then((configResult) => {
-                console.log(`[Audio] configured successfully for ${channelName}, result:`, configResult, "state:", decoder.state);
-                // Wait for the decoder worker's WASM to be truly ready instead
-                // of relying on a hardcoded delay (which was unreliable on slow
-                // iOS 15 devices).
-                return decoder.waitForReady(5000);
-              })
-              .then(() => {
-                try {
-                  console.log(`[Audio] Decoder WASM ready for ${channelName}, sending description chunk`);
+        const isAAC = cfg.codec === "mp4a.40.2";
 
-                  const dataView = new DataView(desc.buffer, desc.byteOffset, desc.byteLength);
-                  const timestamp = dataView.getUint32(4, false);
-                  const data = desc.slice(9);
-
-                  const chunk = new EncodedAudioChunk({
-                    timestamp: timestamp * 1000,
-                    type: "key",
-                    data,
-                  });
-                  decoder.decode(chunk);
-                  decoder.isReadyForAudio = true; // Flag to allow normal packets
-                  console.log(`[Audio] Sent description chunk for ${channelName}, now ready for audio packets`);
-
-                  // Replay any audio packets that arrived before the description
-                  if (decoder._preConfigBuffer && decoder._preConfigBuffer.length > 0) {
-                    console.log(`[Audio] Replaying ${decoder._preConfigBuffer.length} pre-config buffered packets for ${channelName}`);
-                    for (const buffered of decoder._preConfigBuffer) {
-                      try {
-                        const bufferedChunk = new EncodedAudioChunk({
-                          timestamp: buffered.timestamp * 1000,
-                          type: "key",
-                          data: buffered.data,
-                        });
-                        decoder.decode(bufferedChunk);
-                      } catch (err) {
-                        console.warn(`[Audio] Error replaying buffered chunk for ${channelName}:`, err);
-                      }
-                    }
-                    decoder._preConfigBuffer = null;
-                  }
-                } catch (err) {
-                  console.warn(`[Audio] Error decoding first audio frame (${channelName}):`, err);
-                }
-              })
-              .catch((err) => {
-                console.error(`[Audio] configure/ready REJECTED for ${channelName}:`, err);
-              });
-          } catch (err) {
-            console.error(`[Audio] Configure decoder FAIL ${channelName}:`, err);
+        if (isAAC) {
+          // ── AAC path: swap out any existing decoder for AACDecoder ──────────────
+          const existingDecoder = mediaDecoders.get(channelName);
+          // close old Opus decoder if it was already created
+          if (existingDecoder && typeof existingDecoder.stop === 'function') {
+            try { existingDecoder.stop(); } catch { /* ignore */ }
           }
+
+          const aacDecoder = new AACDecoder();
+          aacDecoder.onOutput = audioInit.output;
+          aacDecoder.onError = audioInit.error;
+
+          mediaDecoders.set(channelName, aacDecoder);
+
+          aacDecoder.configure({
+            codec: 'mp4a.40.2',
+            sampleRate: cfg.sampleRate,
+            numberOfChannels: cfg.numberOfChannels,
+            description: desc, // AudioSpecificConfig
+          }).then(() => {
+            aacDecoder.isReadyForAudio = true;
+            console.log(`[Audio] AACDecoder configured for ${channelName} — using ${aacDecoder.usingNative ? 'native WebCodecs' : 'FAAD2 WASM'}`);
+          }).catch((err) => {
+            console.error(`[Audio] AACDecoder configure failed for ${channelName}:`, err);
+          });
         } else {
-          console.warn(`[Audio] No decoder for audio channel ${channelName}`);
+          // ── Opus path (unchanged) ─────────────────────────────────────────────────
+          const decoder = mediaDecoders.get(channelName);
+          if (decoder) {
+            try {
+              decoder.configure({ ...audioConfig, decoderPort: externalDecoderPort })
+                .then((configResult) => {
+                  console.log(`[Audio] configured successfully for ${channelName}, result:`, configResult, "state:", decoder.state);
+                  // Wait for the decoder worker's WASM to be truly ready instead
+                  // of relying on a hardcoded delay (which was unreliable on slow
+                  // iOS 15 devices).
+                  return decoder.waitForReady(5000);
+                })
+                .then(() => {
+                  try {
+                    console.log(`[Audio] Decoder WASM ready for ${channelName}, sending description chunk`);
+
+                    const dataView = new DataView(desc.buffer, desc.byteOffset, desc.byteLength);
+                    const timestamp = dataView.getUint32(4, false);
+                    const data = desc.slice(9);
+
+                    const chunk = new EncodedAudioChunk({
+                      timestamp: timestamp * 1000,
+                      type: "key",
+                      data,
+                    });
+                    decoder.decode(chunk);
+                    decoder.isReadyForAudio = true; // Flag to allow normal packets
+                    console.log(`[Audio] Sent description chunk for ${channelName}, now ready for audio packets`);
+
+                    // Replay any audio packets that arrived before the description
+                    if (decoder._preConfigBuffer && decoder._preConfigBuffer.length > 0) {
+                      console.log(`[Audio] Replaying ${decoder._preConfigBuffer.length} pre-config buffered packets for ${channelName}`);
+                      for (const buffered of decoder._preConfigBuffer) {
+                        try {
+                          const bufferedChunk = new EncodedAudioChunk({
+                            timestamp: buffered.timestamp * 1000,
+                            type: "key",
+                            data: buffered.data,
+                          });
+                          decoder.decode(bufferedChunk);
+                        } catch (err) {
+                          console.warn(`[Audio] Error replaying buffered chunk for ${channelName}:`, err);
+                        }
+                      }
+                      decoder._preConfigBuffer = null;
+                    }
+                  } catch (err) {
+                    console.warn(`[Audio] Error decoding first audio frame (${channelName}):`, err);
+                  }
+                })
+                .catch((err) => {
+                  console.error(`[Audio] configure/ready REJECTED for ${channelName}:`, err);
+                });
+            } catch (err) {
+              console.error(`[Audio] Configure decoder FAIL ${channelName}:`, err);
+            }
+          } else {
+            console.warn(`[Audio] No decoder for audio channel ${channelName}`);
+          }
         }
       }
     } catch (err) {

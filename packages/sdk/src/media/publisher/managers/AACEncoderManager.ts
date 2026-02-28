@@ -5,45 +5,39 @@ import type {
 } from "../../../types/media/publisher.types";
 import { log } from "../../../utils";
 
-/**
- * AAC Audio Configuration Constants
- */
+// ---------------------------------------------------------------------------
+// AACEncoderManager
+//
+// Encodes microphone audio to AAC.
+//
+// Architecture (avoids Vite's restriction on dynamic import() from /public):
+//   1. AudioWorklet "aac-capture-processor" captures PCM quanta (128 frames)
+//      from the mic and sends them to this manager via postMessage.
+//   2. Manager accumulates quanta until a full AAC frame (1024 samples) is ready.
+//   3. Accumulated frame is transferred to aac-encoder-worker.js (a plain
+//      ES module Worker served from /public/workers/).  The worker can safely
+//      import from /public/codec-polyfill/ because Workers are outside
+//      Vite's module graph — no "file in /public" error.
+//   4. Worker emits 'output' messages with raw AAC-LC bytes + optional
+//      AudioSpecificConfig metadata (first chunk only).
+//   5. Manager emits configReady (with AudioSpecificConfig) and audioChunk events
+//      that are identical to AudioEncoderManager, so AudioProcessor accepts both.
+// ---------------------------------------------------------------------------
+
 const AAC_CONFIG = {
   SAMPLE_RATE: 48000,
-  CHANNEL_COUNT: 2, // Stereo for better HLS compatibility
-  BITRATE: 128000, // 128kbps for good quality AAC
-  SAMPLES_PER_FRAME: 1024, // AAC frame size
+  CHANNEL_COUNT: 1, // mono – mirrors current Opus configuration
+  BITRATE: 128_000,
+  SAMPLES_PER_FRAME: 1024, // AAC-LC frame size
 } as const;
 
-/**
- * AACEncoderManager - Manages audio encoding using AAC codec for HLS livestream
- *
- * Uses Web Audio API's native AudioEncoder with AAC codec (mp4a.40.2)
- * for HLS compatibility instead of Opus.
- *
- * Responsibilities:
- * - Initialize AAC audio encoder
- * - Process and encode audio chunks
- * - Manage timing and synchronization
- * - Handle audio configuration
- * - Track encoding state and statistics
- *
- * Events:
- * - initialized: When audio encoder is initialized
- * - started: When encoding starts
- * - stopped: When encoding stops
- * - configReady: When AAC configuration is available
- * - audioChunk: When encoded audio chunk is ready
- * - error: When an error occurs
- */
+const AAC_WORKLET_PROCESSOR = "aac-capture-processor";
+
 export class AACEncoderManager extends EventEmitter<{
   initialized: { channelName: ChannelName };
   started: { channelName: ChannelName };
   stopped: { channelName: ChannelName };
-  configReady: {
-    channelName: ChannelName;
-    config: AudioEncoderConfig;
-  };
+  configReady: { channelName: ChannelName; config: AudioEncoderConfig };
   audioChunk: {
     channelName: ChannelName;
     data: Uint8Array;
@@ -53,23 +47,37 @@ export class AACEncoderManager extends EventEmitter<{
   };
   error: unknown;
 }> {
-  private audioEncoder: AudioEncoder | null = null;
-  private audioContext: AudioContext | null = null;
-  private mediaStreamSource: MediaStreamAudioSourceNode | null = null;
-  private audioWorkletNode: AudioWorkletNode | null = null;
   private channelName: ChannelName;
   private config: AudioEncoderConfig;
-  private audioStream: MediaStream | null = null;
 
-  // Timing management
-  private baseTime = 0;
+  // Audio graph
+  private audioContext: AudioContext | null = null;
+  private audioStream: MediaStream | null = null;
+  private mediaStreamSource: MediaStreamAudioSourceNode | null = null;
+  private captureWorkletNode: AudioWorkletNode | null = null;
+
+  // Encoder Worker (served from /public/workers/aac-encoder-worker.js)
+  private encoderWorker: Worker | null = null;
+  private workerReady = false;
+
+  // PCM accumulation buffer
+  private pcmBuffer: Float32Array = new Float32Array(AAC_CONFIG.SAMPLES_PER_FRAME);
+  private pcmBufferOffset = 0;
+
+  // Timing
+  private baseTimestampUs = 0; // microseconds
   private samplesSent = 0;
   private chunkCount = 0;
 
-  // Configuration
-  private configReady = false;
+  // State
+  private _configSent = false;
   private audioConfig: AudioEncoderConfig | null = null;
-  private isEncoding = false;
+  private _isEncoding = false;
+  private _decoderConfigSent = false;
+
+  // URL defaults (callers may override)
+  private workerUrl = "/workers/aac-encoder-worker.js";
+  private workletUrl = "/workers/aac-capture-worklet.js";
 
   constructor(channelName: ChannelName, config: AudioEncoderConfig) {
     super();
@@ -77,392 +85,307 @@ export class AACEncoderManager extends EventEmitter<{
     this.config = config;
   }
 
-  /**
-   * Check if AAC encoding is supported by the browser
-   */
-  static isSupported(): boolean {
-    return typeof AudioEncoder !== "undefined";
-  }
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   /**
-   * Initialize AAC audio encoder
+   * Initialize the encoder.
    *
-   * @param audioStream - MediaStream containing audio track
+   * @param audioStream  MediaStream with at least one audio track.
+   * @param audioContext Optional pre-created AudioContext (iOS 15: create in user gesture).
+   * @param workletUrl   URL of aac-capture-worklet.js. Default: /workers/aac-capture-worklet.js
+   * @param workerUrl    URL of aac-encoder-worker.js.  Default: /workers/aac-encoder-worker.js
    */
-  async initialize(audioStream: MediaStream): Promise<void> {
-    if (!audioStream) {
-      throw new Error("Audio stream is required");
+  async initialize(
+    audioStream: MediaStream,
+    audioContext?: AudioContext,
+    workletUrl = "/workers/aac-capture-worklet.js",
+    workerUrl = "/workers/aac-encoder-worker.js",
+  ): Promise<void> {
+    if (!audioStream || audioStream.getAudioTracks().length === 0) {
+      throw new Error("[AACEncoderManager] No audio track in stream");
     }
 
-    const audioTrack = audioStream.getAudioTracks()[0];
-    if (!audioTrack) {
-      throw new Error("No audio track found in stream");
-    }
+    this.audioStream = audioStream;
+    this.workletUrl = workletUrl;
+    this.workerUrl = workerUrl;
 
-    if (!AACEncoderManager.isSupported()) {
-      throw new Error("AudioEncoder API is not supported in this browser");
-    }
+    // AudioContext — reuse caller's or create new one.
+    const AudioContextClass =
+      (globalThis as any).AudioContext || (globalThis as any).webkitAudioContext;
+    this.audioContext =
+      audioContext ??
+      new AudioContextClass({ sampleRate: AAC_CONFIG.SAMPLE_RATE, latencyHint: "interactive" });
 
-    try {
-      // Store stream reference
-      this.audioStream = audioStream;
+    // Start the encoder worker early so configure() can run in parallel with
+    // AudioWorklet module loading.
+    await this._startEncoderWorker();
 
-      // Create AudioContext for processing
-      this.audioContext = new AudioContext({
-        sampleRate: AAC_CONFIG.SAMPLE_RATE,
-      });
-
-      // Create AAC encoder
-      this.audioEncoder = new AudioEncoder({
-        output: (chunk, metadata) => {
-          this.handleEncodedChunk(chunk, metadata);
-        },
-        error: (error) => {
-          console.error(`[AACEncoder] Encoder error:`, error);
-          this.emit("error", error);
-        },
-      });
-
-      // Configure encoder with AAC codec
-      const encoderConfig: AudioEncoderConfig & { codec: string; bitrate: number } = {
-        codec: "mp4a.40.2", // AAC-LC
-        sampleRate: AAC_CONFIG.SAMPLE_RATE,
-        numberOfChannels: AAC_CONFIG.CHANNEL_COUNT,
-        bitrate: AAC_CONFIG.BITRATE,
-      };
-
-      // Check if AAC is supported
-      const support = await AudioEncoder.isConfigSupported(encoderConfig);
-      if (!support.supported) {
-        throw new Error("AAC codec configuration not supported");
-      }
-
-      this.audioEncoder.configure(encoderConfig);
-
-      // Store config with codec info
-      this.audioConfig = {
-        codec: "mp4a.40.2",
-        sampleRate: AAC_CONFIG.SAMPLE_RATE,
-        numberOfChannels: AAC_CONFIG.CHANNEL_COUNT,
-      };
-
-      log(`[AACEncoder] Initialized for ${this.channelName}`);
-      this.emit("initialized", { channelName: this.channelName });
-    } catch (error) {
-      console.error(
-        `[AACEncoder] Failed to initialize ${this.channelName}:`,
-        error
-      );
-      this.emit("error", error);
-      throw error;
-    }
+    log(`[AACEncoderManager] Initialized for ${this.channelName}`);
+    this.emit("initialized", { channelName: this.channelName });
   }
 
-  /**
-   * Start audio encoding
-   */
+  /** Start capturing and encoding. Must be called after initialize(). */
   async start(): Promise<void> {
-    if (!this.audioEncoder || !this.audioContext || !this.audioStream) {
-      throw new Error("Audio encoder not initialized");
+    if (!this.audioContext || !this.audioStream) {
+      throw new Error("[AACEncoderManager] Not initialized — call initialize() first");
+    }
+    if (this._isEncoding) {
+      console.warn("[AACEncoderManager] Already encoding");
+      return;
     }
 
+    if (this.audioContext.state === "suspended") {
+      await this.audioContext.resume();
+    }
+
+    // Register the capture AudioWorklet module (idempotent).
     try {
-      // Resume AudioContext if it's suspended (browsers policy)
-      if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume();
-      }
-
-      // Load AudioWorklet module
-      // Assuming the worker file is served at /workers/audio-worklet.js
-      try {
-        await this.audioContext.audioWorklet.addModule("/workers/audio-worklet.js");
-      } catch (e) {
-        console.warn("[AACEncoder] Failed to load audio-worklet.js, trying relative path...", e);
-        // Fallback or retry logic if needed, but for now we assume standard path
-      }
-
-      // Create media stream source
-      this.mediaStreamSource = this.audioContext.createMediaStreamSource(
-        this.audioStream
-      );
-
-      // Create AudioWorkletNode
-      this.audioWorkletNode = new AudioWorkletNode(
-        this.audioContext,
-        "audio-capture-processor",
-        {
-          numberOfInputs: 1,
-          numberOfOutputs: 1,
-          outputChannelCount: [AAC_CONFIG.CHANNEL_COUNT], // Stereo output
-          processorOptions: {
-            bufferSize: 4096,
-          },
-        }
-      );
-
-      // Handle messages from worklet
-      this.audioWorkletNode.port.onmessage = (event) => {
-        if (!this.isEncoding || !this.audioEncoder) return;
-
-        const { type, planarData } = event.data;
-
-        if (type === 'audioData' && planarData) {
-          this.processAudioChunk(planarData);
-        }
-      };
-
-      this.audioWorkletNode.onprocessorerror = (err) => {
-        console.error(`[AACEncoder] AudioWorklet processor error:`, err);
-        this.emit("error", err);
-      };
-
-      // Connect the audio graph
-      this.mediaStreamSource.connect(this.audioWorkletNode);
-      this.audioWorkletNode.connect(this.audioContext.destination); // Needed to keep processor alive
-
-      // Reset timing
-      this.baseTime = performance.now() * 1000; // Convert to microseconds
-      this.samplesSent = 0;
-      this.chunkCount = 0;
-      this.isEncoding = true;
-
-      this.emit("started", { channelName: this.channelName });
-      log(`[AACEncoder] Started for ${this.channelName} using AudioWorklet`);
-    } catch (error) {
-      console.error(`[AACEncoder] Failed to start ${this.channelName}:`, error);
-      this.emit("error", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Process audio chunk from worklet
-   */
-  private processAudioChunk(planarChannelBuffers: Float32Array[]): void {
-    if (!this.audioEncoder) return;
-
-    const numberOfChannels = planarChannelBuffers.length;
-    const numberOfFrames = planarChannelBuffers[0].length;
-    
-    // Flatten planar data for AudioData (all channels sequentially)
-    const totalLength = numberOfFrames * numberOfChannels;
-    const planarData = new Float32Array(totalLength);
-    
-    for (let ch = 0; ch < numberOfChannels; ch++) {
-       planarData.set(planarChannelBuffers[ch], ch * numberOfFrames);
+      await this.audioContext.audioWorklet.addModule(this.workletUrl);
+    } catch (err) {
+      console.warn("[AACEncoderManager] AudioWorklet addModule (may be benign duplicate):", err);
     }
 
-    try {
-      // Create AudioData from the input buffer
-      const audioData = new AudioData({
-        format: "f32-planar",
-        sampleRate: AAC_CONFIG.SAMPLE_RATE,
-        numberOfFrames: numberOfFrames,
-        numberOfChannels: AAC_CONFIG.CHANNEL_COUNT,
-        timestamp: this.getCurrentTimestamp(),
-        data: planarData.buffer as ArrayBuffer,
-      });
+    this.mediaStreamSource = this.audioContext.createMediaStreamSource(this.audioStream);
+    this.captureWorkletNode = new AudioWorkletNode(
+      this.audioContext,
+      AAC_WORKLET_PROCESSOR,
+      {
+        numberOfInputs: 1,
+        numberOfOutputs: 0,
+        channelCount: AAC_CONFIG.CHANNEL_COUNT,
+        channelCountMode: "explicit",
+        channelInterpretation: "speakers",
+      },
+    );
 
-      this.audioEncoder.encode(audioData);
-      audioData.close();
-
-      this.samplesSent += numberOfFrames;
-    } catch (error) {
-      console.error(`[AACEncoder] Encode error:`, error);
-    }
-  }
-
-  /**
-   * Handle encoded AAC chunk from encoder
-   */
-  private handleEncodedChunk(
-    chunk: EncodedAudioChunk,
-    metadata?: EncodedAudioChunkMetadata
-  ): void {
-    // Get the encoded data
-    const data = new Uint8Array(chunk.byteLength);
-    chunk.copyTo(data);
-
-    // Handle first chunk with config (description)
-    if (metadata?.decoderConfig?.description && !this.configReady) {
-      const description = new Uint8Array(
-        metadata.decoderConfig.description as ArrayBuffer
-      );
-
-      this.audioConfig = {
-        codec: "mp4a.40.2",
-        sampleRate: AAC_CONFIG.SAMPLE_RATE,
-        numberOfChannels: AAC_CONFIG.CHANNEL_COUNT,
-        description: description,
-      };
-
-      this.emit("configReady", {
-        channelName: this.channelName,
-        config: this.audioConfig,
-      });
-
-      this.configReady = true;
-      log(`[AACEncoder] AAC config with description ready for ${this.channelName}`);
-    }
-
-    // Emit audio chunk
-    this.emit("audioChunk", {
-      channelName: this.channelName,
-      data: data,
-      timestamp: chunk.timestamp,
-      samplesSent: this.samplesSent,
-      chunkCount: this.chunkCount,
-    });
-
-    this.chunkCount++;
-  }
-
-  /**
-   * Stop audio encoding
-   */
-  async stop(): Promise<void> {
-    this.isEncoding = false;
-
-    try {
-      // Disconnect audio graph
-      if (this.audioWorkletNode) {
-        this.audioWorkletNode.port.onmessage = null;
-        this.audioWorkletNode.disconnect();
-        this.audioWorkletNode = null;
-      }
-
-      if (this.mediaStreamSource) {
-        this.mediaStreamSource.disconnect();
-        this.mediaStreamSource = null;
-      }
-
-      // Flush and close encoder
-      if (this.audioEncoder && this.audioEncoder.state !== "closed") {
-        await this.audioEncoder.flush();
-        this.audioEncoder.close();
-      }
-      this.audioEncoder = null;
-
-      // Close audio context
-      if (this.audioContext && this.audioContext.state !== "closed") {
-        await this.audioContext.close();
-      }
-      this.audioContext = null;
-
-      // Clear stream reference
-      this.audioStream = null;
-
-      // Reset state
-      this.baseTime = 0;
-      this.samplesSent = 0;
-      this.chunkCount = 0;
-      this.configReady = false;
-      this.audioConfig = null;
-
-      this.emit("stopped", { channelName: this.channelName });
-      log(`[AACEncoder] Stopped for ${this.channelName}`);
-    } catch (error) {
-      console.error(`[AACEncoder] Error stopping ${this.channelName}:`, error);
-    }
-  }
-
-  /**
-   * Mark config as sent to server
-   */
-  setConfigSent(): void {
-    this.configReady = true;
-    log(`[AACEncoder] Config marked as sent for ${this.channelName}`);
-  }
-
-  /**
-   * Check if config is ready
-   */
-  isConfigReady(): boolean {
-    return this.audioConfig !== null;
-  }
-
-  /**
-   * Check if config has been sent
-   */
-  isConfigSent(): boolean {
-    return this.configReady;
-  }
-
-  /**
-   * Get audio configuration
-   */
-  getConfig(): AudioEncoderConfig | null {
-    return this.audioConfig;
-  }
-
-  /**
-   * Get statistics
-   */
-  getStats(): {
-    channelName: string;
-    baseTime: number;
-    samplesSent: number;
-    chunkCount: number;
-    configReady: boolean;
-    isRecording: boolean;
-  } {
-    return {
-      channelName: this.channelName,
-      baseTime: this.baseTime,
-      samplesSent: this.samplesSent,
-      chunkCount: this.chunkCount,
-      configReady: this.configReady,
-      isRecording: this.isEncoding,
+    this.captureWorkletNode.port.onmessage = (event: MessageEvent) => {
+      // event.data = { channelData: Float32Array[] } (buffers transferred)
+      this._accumulatePCM(event.data.channelData as Float32Array[]);
     };
-  }
 
-  /**
-   * Reset timing counters
-   */
-  resetTiming(): void {
-    this.baseTime = 0;
+    this.mediaStreamSource.connect(this.captureWorkletNode);
+
+    // Reset counters.
+    this.baseTimestampUs = Math.round(performance.now() * 1000);
     this.samplesSent = 0;
     this.chunkCount = 0;
-    log(`[AACEncoder] Timing reset for ${this.channelName}`);
+    this.pcmBufferOffset = 0;
+    this._decoderConfigSent = false;
+    this._isEncoding = true;
+
+    log(`[AACEncoderManager] Started encoding for ${this.channelName}`);
+    this.emit("started", { channelName: this.channelName });
   }
 
-  /**
-   * Get channel name
-   */
-  getChannelName(): ChannelName {
-    return this.channelName;
-  }
+  /** Stop encoding and release resources. */
+  async stop(): Promise<void> {
+    if (!this._isEncoding && !this.encoderWorker) return;
 
-  /**
-   * Check if encoder is active
-   */
-  isRecording(): boolean {
-    return this.isEncoding;
-  }
+    this._isEncoding = false;
 
-  /**
-   * Get current timestamp in microseconds
-   */
-  getCurrentTimestamp(): number {
-    if (this.baseTime === 0) {
-      return 0;
+    // Flush the worker encoder.
+    if (this.encoderWorker && this.workerReady) {
+      this.encoderWorker.postMessage({ type: "flush" });
+      // Give it 500ms to flush before terminating.
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
+
+    // Tear down audio graph.
+    this.mediaStreamSource?.disconnect();
+    this.captureWorkletNode?.disconnect();
+    this.captureWorkletNode = null;
+    this.mediaStreamSource = null;
+
+    // Terminate worker.
+    if (this.encoderWorker) {
+      this.encoderWorker.postMessage({ type: "close" });
+      this.encoderWorker.terminate();
+      this.encoderWorker = null;
+    }
+
+    this.workerReady = false;
+    this.audioConfig = null;
+    this._configSent = false;
+    this._decoderConfigSent = false;
+    this.baseTimestampUs = 0;
+    this.samplesSent = 0;
+    this.chunkCount = 0;
+    this.pcmBufferOffset = 0;
+
+    log(`[AACEncoderManager] Stopped for ${this.channelName}`);
+    this.emit("stopped", { channelName: this.channelName });
+  }
+
+  // ── AudioEncoderManager-compatible API ────────────────────────────────────
+
+  setConfigSent(): void { this._configSent = true; }
+  isConfigReady(): boolean { return this.audioConfig !== null; }
+  isConfigSent(): boolean { return this._configSent; }
+  getConfig(): AudioEncoderConfig | null { return this.audioConfig; }
+  updateConfig(config: Partial<AudioEncoderConfig>): void {
+    this.config = { ...this.config, ...config };
+    if (this.audioConfig) this.audioConfig = { ...this.audioConfig, ...config };
+  }
+  getStats() {
+    return {
+      channelName: this.channelName,
+      baseTime: this.baseTimestampUs,
+      samplesSent: this.samplesSent,
+      chunkCount: this.chunkCount,
+      configReady: this._configSent,
+      isRecording: this._isEncoding,
+    };
+  }
+  resetTiming(): void { this.baseTimestampUs = 0; this.samplesSent = 0; this.chunkCount = 0; }
+  getCurrentTimestamp(): number { return this._computeTimestampUs(); }
+  getChannelName(): ChannelName { return this.channelName; }
+  isRecording(): boolean { return this._isEncoding; }
+
+  // ── Private ───────────────────────────────────────────────────────────────
+
+  /**
+   * Create and configure the encoder Worker.
+   * The Worker is an ES module served from /public/workers/ so it can import
+   * from /public/codec-polyfill/ without Vite interference.
+   */
+  private async _startEncoderWorker(): Promise<void> {
+    this.encoderWorker = new Worker(this.workerUrl, { type: "module" });
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("aac-encoder-worker configure timeout")), 10_000);
+
+      this.encoderWorker!.onmessage = (e: MessageEvent) => {
+        const msg = e.data;
+        switch (msg.type) {
+          case "configured":
+            clearTimeout(timeout);
+            this.workerReady = true;
+            log(
+              `[AACEncoderManager] Worker configured for ${this.channelName}` +
+              ` — using ${msg.usingNative ? "native WebCodecs" : "FDK-AAC WASM"}`,
+            );
+            resolve();
+            // Reassign message handler for ongoing messages.
+            this.encoderWorker!.onmessage = (ev) => this._handleWorkerMessage(ev);
+            break;
+          case "error":
+            clearTimeout(timeout);
+            reject(new Error(msg.message));
+            break;
+        }
+      };
+
+      this.encoderWorker!.onerror = (err) => {
+        clearTimeout(timeout);
+        reject(new Error(`aac-encoder-worker error: ${err.message}`));
+      };
+
+      this.encoderWorker!.postMessage({
+        type: "configure",
+        config: {
+          sampleRate: AAC_CONFIG.SAMPLE_RATE,
+          numberOfChannels: AAC_CONFIG.CHANNEL_COUNT,
+          bitrate: AAC_CONFIG.BITRATE,
+        },
+      });
+    });
+  }
+
+  private _handleWorkerMessage(e: MessageEvent): void {
+    const msg = e.data;
+
+    switch (msg.type) {
+      case "output": {
+        // ── configReady (first output only) ───────────────────────────────
+        if (!this._decoderConfigSent && msg.metadata?.decoderConfig) {
+          this._decoderConfigSent = true;
+          const dc = msg.metadata.decoderConfig;
+          this.audioConfig = {
+            codec: dc.codec ?? "mp4a.40.2",
+            sampleRate: dc.sampleRate ?? AAC_CONFIG.SAMPLE_RATE,
+            numberOfChannels: dc.numberOfChannels ?? AAC_CONFIG.CHANNEL_COUNT,
+            ...(dc.description && { description: new Uint8Array(dc.description) }),
+          };
+          this.emit("configReady", { channelName: this.channelName, config: this.audioConfig });
+          log(
+            `[AACEncoderManager] configReady for ${this.channelName}` +
+            (this.audioConfig.description
+              ? ` — ASC: ${Array.from(this.audioConfig.description).map((b) => b.toString(16).padStart(2, "0")).join(" ")}`
+              : ""),
+          );
+        }
+
+        // ── audioChunk ─────────────────────────────────────────────────────
+        const data: Uint8Array = msg.data;
+        if (!data || data.length === 0) break;
+
+        const timestamp = this._computeTimestampUs();
+        this.emit("audioChunk", {
+          channelName: this.channelName,
+          data,
+          timestamp,
+          samplesSent: this.samplesSent,
+          chunkCount: this.chunkCount,
+        });
+        this.chunkCount++;
+        break;
+      }
+
+      case "error":
+        console.error("[AACEncoderManager] Worker error:", msg.message);
+        this.emit("error", new Error(msg.message));
+        break;
+
+      case "flushed":
+        log(`[AACEncoderManager] Worker flushed for ${this.channelName}`);
+        break;
+    }
+  }
+
+  /**
+   * Accumulate 128-frame PCM quanta into 1024-sample (one AAC frame) buffers.
+   * When full, transfer the buffer to the encoder worker.
+   */
+  private _accumulatePCM(channelData: Float32Array[]): void {
+    if (!this._isEncoding || !this.workerReady || !this.encoderWorker) return;
+
+    const samples = channelData[0]; // mono: take channel 0
+    if (!samples) return;
+
+    let offset = 0;
+    while (offset < samples.length) {
+      const space = AAC_CONFIG.SAMPLES_PER_FRAME - this.pcmBufferOffset;
+      const toCopy = Math.min(space, samples.length - offset);
+
+      this.pcmBuffer.set(samples.subarray(offset, offset + toCopy), this.pcmBufferOffset);
+      this.pcmBufferOffset += toCopy;
+      offset += toCopy;
+
+      if (this.pcmBufferOffset === AAC_CONFIG.SAMPLES_PER_FRAME) {
+        // Full frame — transfer to worker.
+        const timestamp = this._computeTimestampUs();
+        const frame = this.pcmBuffer.slice(); // copy so we can reuse pcmBuffer
+        this.encoderWorker.postMessage(
+          {
+            type: "encode",
+            pcm: frame,
+            sampleRate: AAC_CONFIG.SAMPLE_RATE,
+            numberOfFrames: AAC_CONFIG.SAMPLES_PER_FRAME,
+            numberOfChannels: AAC_CONFIG.CHANNEL_COUNT,
+            timestamp,
+          },
+          [frame.buffer],
+        );
+        this.samplesSent += AAC_CONFIG.SAMPLES_PER_FRAME;
+        this.pcmBufferOffset = 0;
+      }
+    }
+  }
+
+  private _computeTimestampUs(): number {
+    if (this.baseTimestampUs === 0) return 0;
     return Math.floor(
-      this.baseTime + (this.samplesSent * 1000000) / AAC_CONFIG.SAMPLE_RATE
+      this.baseTimestampUs + (this.samplesSent * 1_000_000) / AAC_CONFIG.SAMPLE_RATE,
     );
-  }
-
-  /**
-   * Get samples sent count
-   */
-  getSamplesSent(): number {
-    return this.samplesSent;
-  }
-
-  /**
-   * Get chunk count
-   */
-  getChunkCount(): number {
-    return this.chunkCount;
   }
 }
