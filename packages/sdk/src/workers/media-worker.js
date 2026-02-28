@@ -2,6 +2,7 @@
 import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
+import { H264Decoder, isNativeH264DecoderSupported } from "../codec-polyfill/video-codec-polyfill.js";
 
 // import { OpusAudioDecoder } from "../opus_decoder/opusDecoder";
 
@@ -43,15 +44,66 @@ const proxyConsole = {
   groupEnd: () => {},
 };
 
+// Helper: Convert YUV420 to RGBA for transfer to main thread
+function convertYUV420toRGBA(yPlane, uPlane, vPlane, width, height) {
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  const uvWidth = width >> 1;
+  for (let j = 0; j < height; j++) {
+    for (let i = 0; i < width; i++) {
+      const yIndex = j * width + i;
+      const uvIndex = (j >> 1) * uvWidth + (i >> 1);
+      const y = yPlane[yIndex];
+      const u = uPlane[uvIndex] - 128;
+      const v = vPlane[uvIndex] - 128;
+      let r = y + 1.402 * v;
+      let g = y - 0.344136 * u - 0.714136 * v;
+      let b = y + 1.772 * u;
+      r = Math.max(0, Math.min(255, r));
+      g = Math.max(0, Math.min(255, g));
+      b = Math.max(0, Math.min(255, b));
+      const rgbaIndex = yIndex * 4;
+      rgba[rgbaIndex] = r;
+      rgba[rgbaIndex + 1] = g;
+      rgba[rgbaIndex + 2] = b;
+      rgba[rgbaIndex + 3] = 255;
+    }
+  }
+  return rgba;
+}
+
+// Helper: Create polyfill decoder
+async function createPolyfillDecoder() {
+  const decoder = new H264Decoder();
+  decoder.onOutput = videoInit.output;
+  decoder.onError = videoInit.error;
+  await decoder.configure({ codec: 'avc1.42001f' });
+  return decoder;
+}
+
+// Helper: Create decoder with fallback
+async function createVideoDecoderWithFallback() {
+  try {
+    const nativeSupported = await isNativeH264DecoderSupported();
+    if (nativeSupported) {
+      return new VideoDecoder(videoInit);
+    }
+  } catch (e) {
+    proxyConsole.warn("Native VideoDecoder not available, using polyfill");
+  }
+  return createPolyfillDecoder();
+}
+
 const videoInit = {
   output: (frame) => {
-    self.postMessage(
-      {
-        type: "videoData",
-        frame: frame,
-      },
-      [frame]
-    );
+    if (typeof VideoFrame !== 'undefined' && frame instanceof VideoFrame) {
+      self.postMessage({ type: "videoData", frame: frame }, [frame]);
+    } else if (frame.format === 'yuv420') {
+      const rgba = convertYUV420toRGBA(frame.yPlane, frame.uPlane, frame.vPlane, frame.width, frame.height);
+      self.postMessage({ 
+        type: "videoData", 
+        frame: { format: 'rgba', data: rgba, width: frame.width, height: frame.height }
+      }, [rgba.buffer]);
+    }
   },
   error: (e) => {
     proxyConsole.error("Video decoder error:", e);
@@ -252,7 +304,7 @@ async function initializeDecoders() {
     event: "init-decoders",
     message: "Initializing decoders",
   });
-  videoDecoder = new VideoDecoder(videoInit);
+  videoDecoder = await createVideoDecoderWithFallback();
   try {
     audioDecoder = new OpusAudioDecoder(audioInit);
     self.postMessage({
@@ -287,7 +339,7 @@ function setupWebSocket() {
   mediaWebsocket.onclose = handleMediaWsClose;
 }
 
-function handleMediaWsMessage(event) {
+async function handleMediaWsMessage(event) {
   if (typeof event.data === "string") {
     const dataJson = JSON.parse(event.data);
     if (dataJson.type === "TotalViewerCount") {
@@ -391,7 +443,7 @@ function handleMediaWsMessage(event) {
       type === "key" && (keyFrameReceived = true);
       if (keyFrameReceived) {
         if (videoDecoder.state === "closed") {
-          videoDecoder = new VideoDecoder(videoInit);
+          videoDecoder = await createVideoDecoderWithFallback();
           videoDecoder.configure(videoConfig);
         }
         const encodedChunk = new EncodedVideoChunk({

@@ -99,7 +99,17 @@ export class VideoProcessor extends EventEmitter<{
       this.videoTrack = videoTrack;
       this.cameraEnabled = videoTrack.enabled;
 
+      // Check if we need to use WASM fallback (iOS 15 Safari - no native VideoEncoder)
+      // WASM x264 only supports single encoder instance, so skip 720p
+      const isWasmFallback = typeof VideoEncoder === "undefined";
+      
       for (const subStream of this.subStreams) {
+        // Skip high-res encoders for WASM fallback (single instance limitation)
+        if (isWasmFallback && subStream.name.includes("720")) {
+          console.log(`[VideoProcessor] Skipping ${subStream.name} encoder (WASM single instance limitation)`);
+          continue;
+        }
+        
         const encoderConfig: VideoEncoderConfig = {
           codec: config.codec,
           width: subStream.width!,
@@ -108,7 +118,8 @@ export class VideoProcessor extends EventEmitter<{
           bitrate: subStream.bitrate!,
         };
 
-        this.videoEncoderManager.createEncoder(
+        // Use async version for WASM fallback support (iOS 15 Safari)
+        await this.videoEncoderManager.createEncoderAsync(
           subStream.name,
           subStream.channelName,
           encoderConfig,
@@ -122,10 +133,23 @@ export class VideoProcessor extends EventEmitter<{
       this.triggerWorker = new Worker("/polyfills/triggerWorker.js");
       this.triggerWorker.postMessage({ frameRate: config.framerate });
 
+      // Get target resolution from first subStream (smallest) for WASM encoder fallback
+      // This enables resize at capture layer like stream-poc2
+      // Only set targetConfig if dimensions are valid numbers
+      const firstSubStream = this.subStreams[0];
+      const hasValidDimensions = firstSubStream && 
+        typeof firstSubStream.width === 'number' && firstSubStream.width > 0 &&
+        typeof firstSubStream.height === 'number' && firstSubStream.height > 0;
+      
+      const targetConfig = isWasmFallback && hasValidDimensions 
+        ? { width: firstSubStream.width, height: firstSubStream.height }
+        : undefined;
+
       this.videoProcessor = new (window as any).MediaStreamTrackProcessor(
         videoTrack,
         this.triggerWorker,
         true,
+        targetConfig,
       );
 
       this.videoReader = this.videoProcessor.readable.getReader();
@@ -314,9 +338,6 @@ export class VideoProcessor extends EventEmitter<{
   ): Promise<void> {
     // Debug: log every call to handleEncodedChunk for screen share
     const isScreenShare = channelName.includes('screen_share');
-    // if (isScreenShare) {
-    //   console.warn(`[VideoProcessor] handleEncodedChunk called for ${channelName}, type: ${chunk.type}, size: ${chunk.byteLength}, cameraEnabled: ${this.cameraEnabled}, isCapturingConfig: ${this.isCapturingConfig}`);
-    // }
 
     try {
       // Handle decoder config
@@ -358,6 +379,10 @@ export class VideoProcessor extends EventEmitter<{
       // NOTE: For screen share, cameraEnabled doesn't apply - we always send
       // We only want to send the config, not the actual video data
       const shouldBlockChunk = this.isCapturingConfig || (!this.cameraEnabled && !isScreenShare);
+      
+      // DEBUG: Log blocking status
+      const isConfigSent = this.streamManager.isConfigSent(channelName);
+
       if (shouldBlockChunk) {
         if (isScreenShare) {
           console.warn(`[VideoProcessor] BLOCKING screen share chunk! isCapturingConfig: ${this.isCapturingConfig}, cameraEnabled: ${this.cameraEnabled}`);
@@ -366,7 +391,10 @@ export class VideoProcessor extends EventEmitter<{
       }
 
       // Wait for config to be sent before sending video chunks
-      if (!this.streamManager.isConfigSent(channelName)) {
+      if (!isConfigSent) {
+        if (this.frameCounter % 30 === 0) {
+           console.warn(`[VideoProcessor] ⏳ Waiting for config to be sent for ${channelName} (dropping chunk)`);
+        }
         if (isScreenShare) {
           console.warn(`[VideoProcessor] Waiting for config to be sent for ${channelName}`);
         }

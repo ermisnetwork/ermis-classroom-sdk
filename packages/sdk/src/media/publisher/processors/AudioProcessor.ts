@@ -104,7 +104,7 @@ export class AudioProcessor extends EventEmitter<{
 
     this.audioEncoderManager.on("audioChunk", async (data) => {
       // DEBUG: Log audio chunk reception
-      // log(`[AudioProcessor] 🎤 Audio chunk received - micEnabled: ${this.micEnabled}, timestamp: ${data.timestamp}, size: ${data.data.length}`);
+      log(`[AudioProcessor] 🎤 Audio chunk received - micEnabled: ${this.micEnabled}, timestamp: ${data.timestamp}, size: ${data.data.length}`);
 
       if (!this.micEnabled) {
         // log(`[AudioProcessor] ⏭️ Skipping audio chunk - mic is disabled`);
@@ -196,7 +196,7 @@ The above content does NOT show the entire file contents. If you need to view an
    *
    * @param audioStream - MediaStream containing audio track
    */
-  async initialize(audioStream: MediaStream): Promise<void> {
+  async initialize(audioStream: MediaStream, audioContext?: AudioContext): Promise<void> {
     if (!audioStream) {
       throw new Error("Audio stream is required");
     }
@@ -217,7 +217,7 @@ The above content does NOT show the entire file contents. If you need to view an
         log("[AudioProcessor] Initial mic enabled state:", this.micEnabled);
       }
 
-      await this.audioEncoderManager.initialize(audioStream);
+      await this.audioEncoderManager.initialize(audioStream, audioContext);
 
       log("[AudioProcessor] Initialized successfully");
       this.emit("initialized", { channelName: this.channelName });

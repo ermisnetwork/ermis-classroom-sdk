@@ -718,7 +718,7 @@ export class Room extends EventEmitter {
     // Fallback: Apply to all streams for userId
     const participants = this.getParticipantsByUserId(targetId);
     if (participants.length > 0) {
-      return Promise.all(participants.map(p => 
+      return Promise.all(participants.map(p =>
         this.updateParticipantPermission(p.streamId, {
           can_publish_sources: [["mic_48k", false]],
         })
@@ -744,7 +744,7 @@ export class Room extends EventEmitter {
     // Fallback: Apply to all streams for userId
     const participants = this.getParticipantsByUserId(targetId);
     if (participants.length > 0) {
-      return Promise.all(participants.map(p => 
+      return Promise.all(participants.map(p =>
         this.updateParticipantPermission(p.streamId, {
           can_publish_sources: [["mic_48k", true]],
         })
@@ -759,7 +759,7 @@ export class Room extends EventEmitter {
    * Convenience method for updateParticipantPermission
    */
   async disableParticipantCamera(targetId: string): Promise<any> {
-     // Try precise targeting via streamId
+    // Try precise targeting via streamId
     const participantByStream = this.getParticipantByStreamId(targetId);
     if (participantByStream) {
       return this.updateParticipantPermission(participantByStream.streamId, {
@@ -770,7 +770,7 @@ export class Room extends EventEmitter {
     // Fallback: Apply to all streams for userId
     const participants = this.getParticipantsByUserId(targetId);
     if (participants.length > 0) {
-      return Promise.all(participants.map(p => 
+      return Promise.all(participants.map(p =>
         this.updateParticipantPermission(p.streamId, {
           can_publish_sources: [["video_360p", false], ["video_720p", false], ["video_1080p", false]],
         })
@@ -796,7 +796,7 @@ export class Room extends EventEmitter {
     // Fallback: Apply to all streams for userId
     const participants = this.getParticipantsByUserId(targetId);
     if (participants.length > 0) {
-      return Promise.all(participants.map(p => 
+      return Promise.all(participants.map(p =>
         this.updateParticipantPermission(p.streamId, {
           can_publish_sources: [["video_360p", true], ["video_720p", true], ["video_1080p", true]],
         })
@@ -813,7 +813,7 @@ export class Room extends EventEmitter {
     // Try precise targeting via streamId
     const participantByStream = this.getParticipantByStreamId(targetId);
     if (participantByStream) {
-       return this.updateParticipantPermission(participantByStream.streamId, {
+      return this.updateParticipantPermission(participantByStream.streamId, {
         can_publish_sources: [["screen_share_720p", true], ["screen_share_1080p", true], ["screen_share_audio", true]],
       });
     }
@@ -821,7 +821,7 @@ export class Room extends EventEmitter {
     // Fallback: Apply to all streams for userId
     const participants = this.getParticipantsByUserId(targetId);
     if (participants.length > 0) {
-      return Promise.all(participants.map(p => 
+      return Promise.all(participants.map(p =>
         this.updateParticipantPermission(p.streamId, {
           can_publish_sources: [["screen_share_720p", true], ["screen_share_1080p", true], ["screen_share_audio", true]],
         })
@@ -846,7 +846,7 @@ export class Room extends EventEmitter {
     // Fallback: Apply to all streams for userId
     const participants = this.getParticipantsByUserId(targetId);
     if (participants.length > 0) {
-      return Promise.all(participants.map(p => 
+      return Promise.all(participants.map(p =>
         this.updateParticipantPermission(p.streamId, {
           can_publish_sources: [["screen_share_720p", false], ["screen_share_1080p", false], ["screen_share_audio", false]],
         })
@@ -1231,7 +1231,7 @@ export class Room extends EventEmitter {
    */
   pinParticipant(id: string): boolean {
     // Try streamId first (precise), fallback to userId
-    const participant = this.getParticipantByStreamId(id) 
+    const participant = this.getParticipantByStreamId(id)
       || Array.from(this.participants.values()).find(p => p.userId === id);
     if (!participant) return false;
 
@@ -1394,7 +1394,7 @@ export class Room extends EventEmitter {
    */
   async reconnectRemoteStream(id: string): Promise<void> {
     // Try streamId first (precise), fallback to userId
-    const participant = this.getParticipantByStreamId(id) 
+    const participant = this.getParticipantByStreamId(id)
       || Array.from(this.participants.values()).find(p => p.userId === id);
 
     if (!participant) {
@@ -1477,7 +1477,7 @@ export class Room extends EventEmitter {
       }
 
       console.warn(`[Room] 🔊 handleRemoteScreenShare: participantUserId=${participantUserId}, hasAudio param=${hasAudio}, participant.hasScreenShareAudio BEFORE=${participant.hasScreenShareAudio}`);
-      
+
       // Update participant's screen share audio state if provided
       if (hasAudio !== undefined) {
         participant.hasScreenShareAudio = hasAudio;
@@ -1725,8 +1725,7 @@ export class Room extends EventEmitter {
 
       // Skip join event for local participant's own stream (check stream_id, not user_id for multi-stream support)
       if (joinedParticipant.stream_id === this.localParticipant?.streamId) {
-        console.log("[Room] Skipping join event for local participant's stream");
-        log("[Room] Skipping join event for local participant's stream");
+        console.log("[Room] Skipping join event for local participant's stream", "joined participant stream id", joinedParticipant.stream_id, "this local participant stream id", this.localParticipant?.streamId);
         return;
       }
 
@@ -1791,10 +1790,10 @@ export class Room extends EventEmitter {
       log("[Room] Received 'removed' event:", { removedUserId, removedStreamId, reason, timestamp });
 
       // Check if this is the local participant being removed (check stream_id for multi-stream support)
-      const isLocalRemoved = removedStreamId 
+      const isLocalRemoved = removedStreamId
         ? removedStreamId === this.localParticipant?.streamId
         : removedUserId === this.localParticipant?.userId; // fallback for legacy events
-      
+
       if (isLocalRemoved) {
         log("[Room] Local participant was removed from the room");
 
@@ -1815,8 +1814,8 @@ export class Room extends EventEmitter {
       } else {
         // Remote participant was removed - use stream_id for lookup
         const streamId = removedEvent.participant?.stream_id;
-        const participant = streamId 
-          ? this.participants.get(streamId) 
+        const participant = streamId
+          ? this.participants.get(streamId)
           : this.getParticipant(removedUserId); // fallback to userId lookup
         if (participant) {
           log("[Room] Remote participant was removed:", removedUserId, "streamId:", participant.streamId);
@@ -1843,10 +1842,10 @@ export class Room extends EventEmitter {
       log("[Room] Received 'replaced' event:", { replacedUserId, replacedStreamId, timestamp });
 
       // Check if this is the local participant being replaced
-      const isLocalReplaced = replacedStreamId 
+      const isLocalReplaced = replacedStreamId
         ? replacedStreamId === this.localParticipant?.streamId
         : replacedUserId === this.localParticipant?.userId;
-      
+
       if (isLocalReplaced) {
         log("[Room] Local participant was replaced by a new session");
 
@@ -1859,21 +1858,21 @@ export class Room extends EventEmitter {
       } else {
         // Remote participant was replaced - use stream_id for lookup
         const streamId = replacedStreamId;
-        const participant = streamId 
-          ? this.participants.get(streamId) 
+        const participant = streamId
+          ? this.participants.get(streamId)
           : this.getParticipant(replacedUserId); // fallback to userId lookup
-          
-        if (participant) {
-            log("[Room] Remote participant was replaced:", replacedUserId, "streamId:", participant.streamId);
-            
-            // Emit remove event so UI can clean up immediately
-            // We treat 'replaced' as a form of removal for other clients
-            this.emit("participantRemoved", {
-                room: this,
-                participant: participant,
-            });
 
-            this.removeParticipantByStreamId(participant.streamId);
+        if (participant) {
+          log("[Room] Remote participant was replaced:", replacedUserId, "streamId:", participant.streamId);
+
+          // Emit remove event so UI can clean up immediately
+          // We treat 'replaced' as a form of removal for other clients
+          this.emit("participantRemoved", {
+            room: this,
+            participant: participant,
+          });
+
+          this.removeParticipantByStreamId(participant.streamId);
         }
       }
     }
@@ -1888,10 +1887,10 @@ export class Room extends EventEmitter {
       log("[Room] Received 'replaced' event:", { replacedUserId, replacedStreamId, timestamp });
 
       // Check if this is the local participant being replaced
-      const isLocalReplaced = replacedStreamId 
+      const isLocalReplaced = replacedStreamId
         ? replacedStreamId === this.localParticipant?.streamId
         : replacedUserId === this.localParticipant?.userId;
-      
+
       if (isLocalReplaced) {
         log("[Room] Local participant was replaced by a new session");
 
@@ -1920,8 +1919,8 @@ export class Room extends EventEmitter {
       const screenEvent = event as any;
       // Prefer stream_id lookup, fallback to user_id
       const streamId = screenEvent.participant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(streamId) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(screenEvent.participant.user_id);
       // Extract hasAudio from event (server forwards has_audio at top level)
       console.warn(`[Room] 📥 Received start_share_screen event FULL:`, JSON.stringify(screenEvent, null, 2));
@@ -1936,11 +1935,11 @@ export class Room extends EventEmitter {
           true,
           hasAudio, // Pass hasAudio to subscriber
         );
-      } else {         
-         if (participant && participant.streamId === this.localParticipant?.streamId) {
-            participant.isScreenSharing = true;
-            participant.hasScreenShareAudio = hasAudio;
-         }
+      } else {
+        if (participant && participant.streamId === this.localParticipant?.streamId) {
+          participant.isScreenSharing = true;
+          participant.hasScreenShareAudio = hasAudio;
+        }
       }
     }
 
@@ -1948,8 +1947,8 @@ export class Room extends EventEmitter {
       const screenEvent = event as any;
       // Prefer stream_id lookup, fallback to user_id
       const streamId = screenEvent.participant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(streamId) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(screenEvent.participant.user_id);
 
       // Check streamId (not userId) to support multi-stream per user
@@ -1975,8 +1974,8 @@ export class Room extends EventEmitter {
       const micEvent = event as any;
       // Prefer stream_id lookup, fallback to user_id
       const streamId = micEvent.participant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(streamId) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(micEvent.participant.user_id);
       if (participant) {
         participant.updateMicStatus(true);
@@ -1992,8 +1991,8 @@ export class Room extends EventEmitter {
       const micEvent = event as any;
       // Prefer stream_id lookup, fallback to user_id
       const streamId = micEvent.participant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(streamId) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(micEvent.participant.user_id);
       if (participant) {
         participant.updateMicStatus(false);
@@ -2009,8 +2008,8 @@ export class Room extends EventEmitter {
       const cameraEvent = event as any;
       // Prefer stream_id lookup, fallback to user_id
       const streamId = cameraEvent.participant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(streamId) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(cameraEvent.participant.user_id);
       if (participant) {
         participant.updateCameraStatus(true);
@@ -2026,8 +2025,8 @@ export class Room extends EventEmitter {
       const cameraEvent = event as any;
       // Prefer stream_id lookup, fallback to user_id
       const streamId = cameraEvent.participant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(streamId) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(cameraEvent.participant.user_id);
       if (participant) {
         participant.updateCameraStatus(false);
@@ -2046,8 +2045,8 @@ export class Room extends EventEmitter {
       const pinType: PinType = eventParticipant.pin_type ?? pinEvent.pin_type ?? PinType.User;
       // Prefer stream_id lookup, fallback to user_id
       const streamId = eventParticipant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(eventParticipant.stream_id) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(eventParticipant.stream_id)
         : this.getParticipant(eventParticipant.user_id);
       if (participant) {
         this.pinParticipant(participant.streamId);
@@ -2088,8 +2087,8 @@ export class Room extends EventEmitter {
       const handEvent = event as any;
       // Prefer stream_id lookup, fallback to user_id
       const streamId = handEvent.participant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(streamId) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(handEvent.participant.user_id);
       if (participant) {
         participant.updateHandRaiseStatus(true);
@@ -2105,8 +2104,8 @@ export class Room extends EventEmitter {
       const handEvent = event as any;
       // Prefer stream_id lookup, fallback to user_id
       const streamId = handEvent.participant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(streamId) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(handEvent.participant.user_id);
       if (participant) {
         participant.updateHandRaiseStatus(false);
@@ -2122,8 +2121,8 @@ export class Room extends EventEmitter {
       const requestEvent = event as any;
       // Prefer stream_id lookup, fallback to user_id
       const streamId = requestEvent.participant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(streamId) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(requestEvent.participant.user_id);
       this.emit("screenShareRequested", {
         room: this,
@@ -2154,8 +2153,8 @@ export class Room extends EventEmitter {
       const disconnectEvent = event as any;
       // Prefer stream_id lookup, fallback to user_id
       const streamId = disconnectEvent.participant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(streamId) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(disconnectEvent.participant.user_id);
       if (participant) {
         this.emit("participantDisconnected", {
@@ -2169,8 +2168,8 @@ export class Room extends EventEmitter {
       const reconnectEvent = event as any;
       // Prefer stream_id lookup, fallback to user_id
       const streamId = reconnectEvent.participant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(streamId) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(reconnectEvent.participant.user_id);
       if (participant) {
         this.emit("participantReconnected", {
@@ -2204,8 +2203,8 @@ export class Room extends EventEmitter {
       // Prefer stream_id lookup, fallback to user_id
       // Note: permission_updated event structure may vary, checking logic
       const streamId = permissionEvent.participant.stream_id;
-      const participant = streamId 
-        ? this.getParticipantByStreamId(streamId) 
+      const participant = streamId
+        ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(permissionEvent.participant.user_id);
       if (participant) {
         const permissionChanged = permissionEvent.permission_changed;

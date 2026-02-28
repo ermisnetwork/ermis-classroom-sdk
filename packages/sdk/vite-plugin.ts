@@ -1,6 +1,6 @@
-import {join, dirname} from 'path';
-import {cpSync, existsSync, mkdirSync, watch, type FSWatcher} from 'fs';
-import type {Plugin, ViteDevServer} from 'vite';
+import { join, dirname } from 'path';
+import { cpSync, existsSync, mkdirSync, watch, type FSWatcher } from 'fs';
+import type { Plugin, ViteDevServer } from 'vite';
 
 export interface CopySDKFilesOptions {
   verbose?: boolean;
@@ -50,8 +50,8 @@ export function copySDKStaticFiles(options: CopySDKFilesOptions = {}): Plugin {
   const copyDirectory = (src: string, dest: string, dirName: string): boolean => {
     if (!existsSync(src)) return false;
     const parentDir = dirname(dest);
-    if (!existsSync(parentDir)) mkdirSync(parentDir, {recursive: true});
-    cpSync(src, dest, {recursive: true, force: true});
+    if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true });
+    cpSync(src, dest, { recursive: true, force: true });
     log(`Copied ${dirName}/`);
     return true;
   };
@@ -75,7 +75,7 @@ export function copySDKStaticFiles(options: CopySDKFilesOptions = {}): Plugin {
       const src = join(sdkPath, file);
       if (existsSync(src)) {
         const dest = join(publicDir, file);
-        cpSync(src, dest, {force: true});
+        cpSync(src, dest, { force: true });
         log(`Copied ${file}`);
       }
     }
@@ -92,13 +92,13 @@ export function copySDKStaticFiles(options: CopySDKFilesOptions = {}): Plugin {
       const srcDir = join(sdkPath, dir);
       if (!existsSync(srcDir)) continue;
       try {
-        const watcher = watch(srcDir, {recursive: true}, (_eventType, filename) => {
+        const watcher = watch(srcDir, { recursive: true }, (_eventType, filename) => {
           if (!filename) return;
           log(`${dir}/${filename} changed, re-copying...`);
           const src = join(sdkPath!, dir);
           const dest = join(publicDir, dir);
           copyDirectory(src, dest, dir);
-          if (server) server.ws.send({type: 'full-reload'});
+          if (server) server.ws.send({ type: 'full-reload' });
         });
         watchers.push(watcher);
         log(`Watching ${dir}/ for changes`);

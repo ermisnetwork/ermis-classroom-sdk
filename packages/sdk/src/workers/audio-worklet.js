@@ -1,9 +1,9 @@
 const proxyConsole = {
-  log: () => {},
-  error: () => {},
-  warn: () => {},
-  debug: () => {},
-  info: () => {},
+  log: (...args) => console.log('[AudioWorklet]', ...args),
+  error: (...args) => console.error('[AudioWorklet]', ...args),
+  warn: (...args) => console.warn('[AudioWorklet]', ...args),
+  debug: (...args) => console.debug('[AudioWorklet]', ...args),
+  info: (...args) => console.info('[AudioWorklet]', ...args),
   trace: () => {},
   group: () => {},
   groupEnd: () => {},
@@ -23,12 +23,14 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
     this.numberOfChannels = 2; // Default channels, updated on first data packet
     this.fadeInLength = 480; // 10ms fade-in at 48kHz to prevent clicks
     this.adaptiveBufferSize = this.bufferSize;
-
+    
+    console.log('[Audio Worklet] AudioWorklet loaded');
     let counter = 0;
     // Listen for messages from the main thread
     this.port.onmessage = (event) => {
       const { type, data, sampleRate, numberOfChannels, port } = event.data;
       if (type === "connectWorker") {
+        console.log('[Audio Worklet] connectWorker, workerPort:', port);
         this.workerPort = port;
 
         this.workerPort.onmessage = (workerEvent) => {
@@ -41,6 +43,20 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
 
           if (workerType === "audioData") {
             counter++;
+            // Send diagnostics back to main thread for first few frames
+            if (counter <= 3) {
+              const ch0 = receivedChannelDataBuffers ? receivedChannelDataBuffers[0] : null;
+              this.port.postMessage({
+                type: "workletDiag",
+                frame: counter,
+                hasData: !!receivedChannelDataBuffers,
+                channels: receivedChannelDataBuffers ? receivedChannelDataBuffers.length : 0,
+                ch0Length: ch0 ? ch0.length : 0,
+                ch0ByteLen: ch0 && ch0.buffer ? ch0.buffer.byteLength : 0,
+                bufferSize: this.audioBuffers[0] ? this.audioBuffers[0].length : 0,
+              });
+            }
+
             if (
               this.sampleRate !== workerSampleRate ||
               this.numberOfChannels !== workerChannels
@@ -49,15 +65,24 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
               this.numberOfChannels = workerChannels;
               this.fadeInLength = Math.round(workerSampleRate / 100);
               this.resizeBuffers(workerChannels);
-              proxyConsole.log(
-                `Processor configured from worker: ${workerSampleRate}Hz, ${workerChannels} channels.`
-              );
             }
 
             this.addAudioData(receivedChannelDataBuffers);
+
+            // Report after adding data (first few frames)
+            if (counter <= 3) {
+              this.port.postMessage({
+                type: "workletDiag",
+                frame: counter,
+                phase: "afterAdd",
+                bufferSize: this.audioBuffers[0] ? this.audioBuffers[0].length : 0,
+                isPlaying: this.isPlaying,
+              });
+            }
           }
         };
-        proxyConsole.log("Worker port connected to AudioWorklet");
+        // Confirm port connection back to main thread
+        this.port.postMessage({ type: "workletDiag", event: "workerPortConnected" });
       } else if (type === "reset") {
         this.reset();
       } else if (type === "setBufferSize") {

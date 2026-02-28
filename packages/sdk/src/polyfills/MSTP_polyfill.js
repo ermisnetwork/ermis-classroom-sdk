@@ -6,29 +6,70 @@ const hasAudioWorklet = () => {
   );
 };
 
+// iOS 15 compatibility: detect OffscreenCanvas and VideoFrame support
+const hasOffscreenCanvas = typeof OffscreenCanvas !== 'undefined';
+const hasVideoFrame = typeof VideoFrame !== 'undefined';
+
 if (!self.MediaStreamTrackProcessor) {
   self.MediaStreamTrackProcessor = class MediaStreamTrackProcessor {
-    constructor(track, triggerWorker, init) {
+    // 4th param: optional target resolution config {width, height} for resize at capture layer (like stream-poc2)
+    constructor(track, triggerWorker, init, targetConfig) {
       if (track.kind == "video") {
         this.readable = new ReadableStream({
           async start(controller) {
             this.video = document.createElement("video");
             this.video.srcObject = new MediaStream([track]);
+            this.video.setAttribute('playsinline', ''); // Required for iOS
+            this.video.setAttribute('webkit-playsinline', ''); // Legacy iOS
+            this.video.muted = true; // Required for autoplay on iOS
             await Promise.all([
               this.video.play(),
               new Promise((r) => (this.video.onloadedmetadata = r)),
             ]);
             this.track = track;
-            this.canvas = new OffscreenCanvas(
-              this.video.videoWidth,
-              this.video.videoHeight
-            );
-            this.ctx = this.canvas.getContext("2d", {desynchronized: true});
+            
+            // Use target resolution if provided (like stream-poc2), otherwise use video dimensions
+            const targetWidth = targetConfig?.width || this.video.videoWidth;
+            const targetHeight = targetConfig?.height || this.video.videoHeight;
+            
+            // iOS 15 fallback: use regular canvas if OffscreenCanvas unavailable
+            if (hasOffscreenCanvas) {
+              this.canvas = new OffscreenCanvas(targetWidth, targetHeight);
+              this.ctx = this.canvas.getContext("2d", {desynchronized: true});
+            } else {
+              // Fallback for iOS 15: use regular canvas with target resolution
+              this.canvas = document.createElement('canvas');
+              this.canvas.width = targetWidth;
+              this.canvas.height = targetHeight;
+              this.ctx = this.canvas.getContext("2d", {willReadFrequently: true});
+            }
+            
             this.t1 = performance.now();
+            this.hasVideoFrame = hasVideoFrame;
+            
             //todo: move this triggerWorker.postMessage to pull function, only trigger when window is hidden, add logic stop interval when window is visible
             triggerWorker.postMessage({
               frameRate: track.getSettings().frameRate,
             });
+
+            // Helper to create frame output (VideoFrame or ImageData-like for iOS 15)
+            this.createFrameOutput = () => {
+              const timestamp = this.t1;
+              if (this.hasVideoFrame) {
+                return new VideoFrame(this.canvas, {timestamp});
+              } else {
+                // iOS 15 fallback: return ImageData-like object for WASM encoder
+                const imageData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+                return {
+                  type: 'imagedata',
+                  data: imageData.data,
+                  width: this.canvas.width,
+                  height: this.canvas.height,
+                  timestamp,
+                  close: () => {} // No-op close for compatibility
+                };
+              }
+            };
 
             document.addEventListener("visibilitychange", async () => {
               init = false;
@@ -36,42 +77,63 @@ if (!self.MediaStreamTrackProcessor) {
                 return new Promise((resolve) => {
                   triggerWorker.onmessage = (event) => {
                     this.t1 = event.data;
-                    this.ctx.drawImage(this.video, 0, 0);
-                    controller.enqueue(
-                      new VideoFrame(this.canvas, {timestamp: this.t1})
-                    );
+                    this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
+                    controller.enqueue(this.createFrameOutput());
                     resolve();
                   };
                 });
               } else if (!document.hidden) {
-                while (
-                  performance.now() - this.t1 <
-                  1000 / track.getSettings().frameRate
-                  ) {
-                  await new Promise((r) => requestAnimationFrame(r));
+                // Use requestVideoFrameCallback when returning from background
+                if ('requestVideoFrameCallback' in this.video) {
+                  await new Promise((resolve) => {
+                    this.video.requestVideoFrameCallback((now) => {
+                      this.t1 = now;
+                      resolve();
+                    });
+                  });
+                } else {
+                  // Fallback: setTimeout + requestAnimationFrame
+                  await new Promise((resolve) => {
+                    setTimeout(() => {
+                      requestAnimationFrame(() => {
+                        this.t1 = performance.now();
+                        resolve();
+                      });
+                    }, 33); // 33ms = ~30fps
+                  });
                 }
-                this.t1 = performance.now();
-                this.ctx.drawImage(this.video, 0, 0);
-                controller.enqueue(
-                  new VideoFrame(this.canvas, {timestamp: this.t1})
-                );
+                this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
+                controller.enqueue(this.createFrameOutput());
               }
             });
           },
 
           async pull(controller) {
             if (init) {
-              while (
-                performance.now() - this.t1 <
-                1000 / track.getSettings().frameRate
-                ) {
-                await new Promise((r) => requestAnimationFrame(r));
+              // Use requestVideoFrameCallback if available (Safari 15.4+, Chrome 83+)
+              // This syncs with camera fps (~30) instead of display refresh (60fps)
+              // Reduces CPU usage significantly on mobile devices
+              if ('requestVideoFrameCallback' in this.video) {
+                await new Promise((resolve) => {
+                  this.video.requestVideoFrameCallback((now, metadata) => {
+                    this.t1 = now;
+                    resolve();
+                  });
+                });
+              } else {
+                // Fallback: setTimeout + requestAnimationFrame (like stream-poc2)
+                // This is more CPU efficient than a busy-wait while loop
+                await new Promise((resolve) => {
+                  setTimeout(() => {
+                    requestAnimationFrame(() => {
+                      this.t1 = performance.now();
+                      resolve();
+                    });
+                  }, 33); // 33ms = ~30fps
+                });
               }
-              this.t1 = performance.now();
-              this.ctx.drawImage(this.video, 0, 0);
-              controller.enqueue(
-                new VideoFrame(this.canvas, {timestamp: this.t1})
-              );
+              this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
+              controller.enqueue(this.createFrameOutput());
             }
           },
         });
