@@ -829,6 +829,13 @@ function handleStreamConfigs(json) {
 
           mediaDecoders.set(channelName, aacDecoder);
 
+          // DEBUG: Log ASC bytes for diagnostics (critical for cross-browser debugging)
+          if (desc && desc.length > 0) {
+            console.log(`[Audio] AAC ASC bytes for ${channelName}: [${Array.from(desc).map(b => b.toString(16).padStart(2, '0')).join(' ')}], len=${desc.length}`);
+          } else {
+            console.warn(`[Audio] ⚠️ No ASC description for AAC channel ${channelName}`);
+          }
+
           aacDecoder.configure({
             codec: 'mp4a.40.2',
             sampleRate: cfg.sampleRate,
@@ -836,7 +843,7 @@ function handleStreamConfigs(json) {
             description: desc, // AudioSpecificConfig
           }).then(() => {
             aacDecoder.isReadyForAudio = true;
-            console.log(`[Audio] AACDecoder configured for ${channelName} — using ${aacDecoder.usingNative ? 'native WebCodecs' : 'FAAD2 WASM'}`);
+            console.log(`[Audio] AACDecoder configured for ${channelName} — using ${aacDecoder.usingNative ? 'native WebCodecs' : 'FAAD2 WASM'}, state: ${aacDecoder.state}`);
           }).catch((err) => {
             console.error(`[Audio] AACDecoder configure failed for ${channelName}:`, err);
           });
@@ -1206,14 +1213,6 @@ async function handleBinaryPacket(dataBuffer) {
     // replay them in order once the description is processed.
     // (Previously these were hard-dropped, causing silent audio at stream start.)
     if (!audioDecoder.isReadyForAudio) {
-      // if (!audioDecoder._preConfigBuffer) audioDecoder._preConfigBuffer = [];
-      // const MAX_BUFFERED = 20; // ~2 seconds of audio at 100 ms/packet
-      // if (audioDecoder._preConfigBuffer.length < MAX_BUFFERED) {
-      //   // data is a Uint8Array view — copy it before the dataBuffer is reused
-      //   audioDecoder._preConfigBuffer.push({ timestamp, data: data.slice() });
-      // } else if (self._audioPacketCount <= 10) {
-      //   console.warn('[Audio] Pre-config buffer full, dropping audio packet');
-      // }
       return;
     }
 
@@ -1222,16 +1221,35 @@ async function handleBinaryPacket(dataBuffer) {
         'state:', audioDecoder.state, 'ts:', timestamp, 'len:', data.byteLength);
     }
 
-    const chunk = new EncodedAudioChunk({
-      timestamp: timestamp * 1000,
-      type: "key",
-      data,
-    });
+    // For AACDecoder, pass a plain object — the AACDecoder.decode() handles
+    // both native EncodedAudioChunk creation and WASM path internally.
+    // Using EncodedAudioChunk here would double-wrap when NativeAACDecoder
+    // checks instanceof and passes through, but the 'data' inside may be
+    // a view into a shared buffer that gets detached.
+    if (audioDecoder.usingNative !== undefined) {
+      // This is an AACDecoder instance — pass plain object with copied data
+      try {
+        audioDecoder.decode({
+          type: 'key',
+          timestamp: timestamp * 1000,
+          data: data.slice(), // isolated copy — original may be a view
+        });
+      } catch (err) {
+        console.error('[Audio] AAC decode error:', err);
+      }
+    } else {
+      // Opus path — use EncodedAudioChunk as before
+      const chunk = new EncodedAudioChunk({
+        timestamp: timestamp * 1000,
+        type: "key",
+        data,
+      });
 
-    try {
-      audioDecoder.decode(chunk);
-    } catch (err) {
-      console.error('[Audio] decode error:', err);
+      try {
+        audioDecoder.decode(chunk);
+      } catch (err) {
+        console.error('[Audio] decode error:', err);
+      }
     }
   }
 }

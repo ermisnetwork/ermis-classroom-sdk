@@ -164,9 +164,49 @@ export class NativeAACDecoder {
             numberOfChannels: config.numberOfChannels || 2,
         };
         
-        // Add description (AudioSpecificConfig) if provided
+        // Add description (AudioSpecificConfig) if provided.
+        // CRITICAL: Chrome's native AudioDecoder.configure() requires description
+        // as an ArrayBuffer containing raw AudioSpecificConfig (ASC), NOT an
+        // MPEG-4 ES Descriptor wrapper.  Some sources (e.g. native AudioEncoder
+        // decoderConfig, or server-side repackaging) deliver the ASC inside a
+        // full ES_Descriptor (tag 0x03).  Detect and unwrap automatically.
         if (config.description) {
-            decoderConfig.description = config.description;
+            let descBuf; // ArrayBuffer
+            const desc = config.description;
+            if (desc instanceof ArrayBuffer) {
+                descBuf = desc;
+            } else if (desc instanceof Uint8Array) {
+                descBuf = desc.buffer.slice(desc.byteOffset, desc.byteOffset + desc.byteLength);
+            } else if (ArrayBuffer.isView(desc)) {
+                descBuf = desc.buffer.slice(desc.byteOffset, desc.byteOffset + desc.byteLength);
+            } else {
+                descBuf = desc;
+            }
+
+            // ── Unwrap ES Descriptor if present ──────────────────────────
+            // ES_Descriptor starts with tag 0x03.  Inside it, tag 0x04 is
+            // DecoderConfigDescriptor, and inside that, tag 0x05 is
+            // DecoderSpecificInfo whose payload is the raw ASC.
+            const descBytes = new Uint8Array(descBuf);
+            if (descBytes.length > 2 && descBytes[0] === 0x03) {
+                const asc = this._extractASCFromEsds(descBytes);
+                if (asc) {
+                    console.log('[NativeAACDecoder] Unwrapped ES Descriptor → raw ASC:',
+                        Array.from(asc).map(b => b.toString(16).padStart(2, '0')).join(' '),
+                        'length:', asc.length);
+                    descBuf = asc.buffer.slice(asc.byteOffset, asc.byteOffset + asc.byteLength);
+                } else {
+                    console.warn('[NativeAACDecoder] ES Descriptor detected but failed to extract ASC, using as-is');
+                }
+            }
+
+            decoderConfig.description = descBuf;
+            console.log(
+                '[NativeAACDecoder] ASC description:',
+                Array.from(new Uint8Array(decoderConfig.description))
+                    .map(b => b.toString(16).padStart(2, '0')).join(' '),
+                'length:', decoderConfig.description.byteLength,
+            );
         }
         
         this.decoder = new AudioDecoder({
@@ -176,7 +216,7 @@ export class NativeAACDecoder {
                 }
             },
             error: (e) => {
-                console.error('NativeAACDecoder error:', e);
+                console.error('[NativeAACDecoder] Decoder error callback:', e);
                 if (this.onError) {
                     this.onError(e);
                 }
@@ -184,8 +224,18 @@ export class NativeAACDecoder {
         });
         
         await this.decoder.configure(decoderConfig);
+        
+        // Verify configure succeeded — some implementations fail silently
+        if (this.decoder.state !== 'configured') {
+            const errMsg = `[NativeAACDecoder] configure() failed — state is '${this.decoder.state}' instead of 'configured'`;
+            console.error(errMsg);
+            throw new Error(errMsg);
+        }
+        
         this.configured = true;
-        console.log('[AudioCodec] Using native AAC decoder');
+        console.log('[AudioCodec] Using native AAC decoder, state:', this.decoder.state,
+            'config:', decoderConfig.codec, decoderConfig.sampleRate + 'Hz',
+            decoderConfig.numberOfChannels + 'ch');
     }
     
     /**
@@ -194,26 +244,81 @@ export class NativeAACDecoder {
      */
     decode(chunk) {
         if (!this.configured || this.decoder.state !== 'configured') {
-            console.warn('Audio decoder not configured');
+            console.warn('[NativeAACDecoder] decoder not ready, configured:', this.configured,
+                'state:', this.decoder?.state);
             return;
         }
         
         // Convert plain object to EncodedAudioChunk if needed
         if (!(chunk instanceof EncodedAudioChunk)) {
+            // Ensure data is an ArrayBuffer or typed array for EncodedAudioChunk
+            let chunkData = chunk.data;
+            if (chunkData instanceof Uint8Array && chunkData.byteOffset !== 0) {
+                // Slice to get an isolated copy if it's a view into a shared buffer
+                chunkData = chunkData.slice();
+            }
             chunk = new EncodedAudioChunk({
                 type: chunk.type || 'key',
                 timestamp: chunk.timestamp,
-                data: chunk.data,
+                data: chunkData,
             });
         }
         
-        this.decoder.decode(chunk);
+        try {
+            this.decoder.decode(chunk);
+        } catch (e) {
+            console.error('[NativeAACDecoder] decode() threw:', e,
+                'chunk byteLength:', chunk.byteLength,
+                'timestamp:', chunk.timestamp,
+                'decoder state:', this.decoder.state);
+        }
     }
     
     async flush() {
         if (this.decoder && this.decoder.state === 'configured') {
             await this.decoder.flush();
         }
+    }
+
+    /**
+     * Extract raw AudioSpecificConfig from an MPEG-4 ES Descriptor (esds).
+     * Layout: tag 0x03 (ES_Descriptor)
+     *           → tag 0x04 (DecoderConfigDescriptor)
+     *             → tag 0x05 (DecoderSpecificInfo) = raw ASC bytes
+     * @param {Uint8Array} data - Full ES Descriptor bytes
+     * @returns {Uint8Array|null} Raw ASC, or null on parse failure
+     */
+    _extractASCFromEsds(data) {
+        let i = 0;
+        const readTag = () => {
+            if (i >= data.length) return null;
+            const tag = data[i++];
+            // Length uses variable-length encoding: 0x80 bytes extend, last byte < 0x80
+            let len = 0;
+            for (let j = 0; j < 4 && i < data.length; j++) {
+                const b = data[i++];
+                len = (len << 7) | (b & 0x7F);
+                if ((b & 0x80) === 0) break;
+            }
+            return { tag, len };
+        };
+
+        // Tag 0x03: ES_Descriptor
+        const esDesc = readTag();
+        if (!esDesc || esDesc.tag !== 0x03) return null;
+        i += 3; // skip ES_ID (2) + flags (1)
+
+        // Tag 0x04: DecoderConfigDescriptor
+        const dcDesc = readTag();
+        if (!dcDesc || dcDesc.tag !== 0x04) return null;
+        i += 13; // skip objectTypeIndication(1) + streamType(1) + bufferSizeDB(3) + maxBitrate(4) + avgBitrate(4)
+
+        // Tag 0x05: DecoderSpecificInfo → this IS the raw ASC
+        const dsi = readTag();
+        if (!dsi || dsi.tag !== 0x05) return null;
+        if (i + dsi.len > data.length) return null;
+
+        return data.slice(i, i + dsi.len);
     }
     
     close() {

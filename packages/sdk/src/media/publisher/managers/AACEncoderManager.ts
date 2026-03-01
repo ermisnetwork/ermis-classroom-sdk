@@ -300,17 +300,18 @@ export class AACEncoderManager extends EventEmitter<{
         if (!this._decoderConfigSent && msg.metadata?.decoderConfig) {
           this._decoderConfigSent = true;
           const dc = msg.metadata.decoderConfig;
-          this.audioConfig = {
+          const audioConfig: AudioEncoderConfig = {
             codec: dc.codec ?? "mp4a.40.2",
             sampleRate: dc.sampleRate ?? AAC_CONFIG.SAMPLE_RATE,
             numberOfChannels: dc.numberOfChannels ?? AAC_CONFIG.CHANNEL_COUNT,
             ...(dc.description && { description: new Uint8Array(dc.description) }),
           };
-          this.emit("configReady", { channelName: this.channelName, config: this.audioConfig });
+          this.audioConfig = audioConfig;
+          this.emit("configReady", { channelName: this.channelName, config: audioConfig });
           log(
             `[AACEncoderManager] configReady for ${this.channelName}` +
-            (this.audioConfig.description
-              ? ` — ASC: ${Array.from(this.audioConfig.description).map((b) => b.toString(16).padStart(2, "0")).join(" ")}`
+            (audioConfig.description
+              ? ` — ASC: ${Array.from(audioConfig.description).map((b) => b.toString(16).padStart(2, "0")).join(" ")}`
               : ""),
           );
         }
