@@ -153,18 +153,16 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private getPublishChannels(): string[] {
     const channels: string[] = [];
 
-    // Check if native VideoEncoder is available
-    // If not available, we're using WASM encoder which only supports 360p
-    const hasNativeVideoEncoder = typeof VideoEncoder !== 'undefined';
-
-    // Add video channels based on device availability and encoder capability
+    // Add video channels based on device availability
+    // Only publish channels that are in subStreams (already filtered by videoResolutions config)
     if (this.hasVideo) {
-      channels.push(ChannelName.VIDEO_360P);
-
-      // Only add 720p if native encoder is available
-      // WASM encoder (iOS 15) only supports 360p encoding currently
-      if (hasNativeVideoEncoder) {
-        channels.push(ChannelName.VIDEO_720P);
+      for (const sub of this.subStreams) {
+        if (sub.channelName === ChannelName.VIDEO_360P ||
+            sub.channelName === ChannelName.VIDEO_720P ||
+            sub.channelName === ChannelName.VIDEO_1080P ||
+            sub.channelName === ChannelName.VIDEO_1440P) {
+          channels.push(sub.channelName);
+        }
       }
     }
 
@@ -173,7 +171,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       channels.push(ChannelName.MICROPHONE);
     }
 
-    log("[Publisher] Publish channels determined:", channels, "hasNativeVideoEncoder:", hasNativeVideoEncoder);
+    log("[Publisher] Publish channels determined:", channels);
 
     return channels;
   }

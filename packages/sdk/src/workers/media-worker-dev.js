@@ -8,6 +8,10 @@ import raptorqInit, { WasmFecManager } from '../raptorQ/raptorq_wasm.js';
 
 import CommandSender from "./ClientCommand.js";
 
+// ── Jitter Buffer feature flags ──
+const USE_VIDEO_JITTER_BUFFER = false;
+const USE_SCREEN_SHARE_JITTER_BUFFER = false;
+
 let subscribeType = STREAM_TYPE.CAMERA;
 
 let currentVideoChannel = CHANNEL_NAME.VIDEO_360P;
@@ -678,11 +682,11 @@ function isVideoChannel(channelName) {
  * Get the appropriate jitter buffer for a channel, initializing if needed
  */
 function getJitterBufferForChannel(channelName) {
-  if (channelName.startsWith('video_')) {
+  if (USE_VIDEO_JITTER_BUFFER && channelName.startsWith('video_')) {
     if (!videoJitterBuffer) initVideoJitterBuffer();
     return videoJitterBuffer;
   }
-  if (channelName.startsWith('screen_share_') && !channelName.includes('audio')) {
+  if (USE_SCREEN_SHARE_JITTER_BUFFER && channelName.startsWith('screen_share_') && !channelName.includes('audio')) {
     if (!screenShareJitterBuffer) initScreenShareJitterBuffer();
     return screenShareJitterBuffer;
   }
