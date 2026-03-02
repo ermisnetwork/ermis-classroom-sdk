@@ -36,9 +36,9 @@ export interface ErmisClientConfig {
   /** Enable debug logging */
   debug?: boolean;
   /**
-   * Video resolutions to publish. Default: 360p + 720p.
-   * To enable 1080p: [ChannelName.VIDEO_1080P]
-   * To publish only one: [ChannelName.VIDEO_720P]
+   * Video resolutions to publish. Default: [video_360p] only.
+   * To add 720p: [ChannelName.VIDEO_360P, ChannelName.VIDEO_720P]
+   * To publish higher: [ChannelName.VIDEO_360P, ChannelName.VIDEO_1080P]
    */
   videoResolutions?: ChannelName[];
   /**

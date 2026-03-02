@@ -36,6 +36,11 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   private subscriberId: string;
   private protocol: "webrtc" | "webtransport" | "websocket";
   private wasmReady = false;
+  private decoderWorker: Worker | null = null;
+  private decoderChannel: MessageChannel | null = null;
+  // Video decoder worker (iOS 15 — offloads tinyh264 WASM to separate thread)
+  private videoDecoderWorker: Worker | null = null;
+  private videoDecoderChannel: MessageChannel | null = null;
   // private videoFrameCount = 0; // DEBUG: Count video frames
 
   constructor(workerUrl: string, subscriberId: string, protocol: "webrtc" | "webtransport" | "websocket") {
@@ -47,6 +52,26 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
     this.on("wasmReady", () => {
       this.wasmReady = true;
     });
+  }
+
+  /**
+   * Detect if nested workers are unsupported (iOS Safari < 15.5).
+   * When true, the decoder worker must be created from the main thread
+   * and bridged to the media worker via MessagePort.
+   */
+  private needsExternalDecoderWorker(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent;
+    // iPadOS 13+ reports "Macintosh" in UA — detect via maxTouchPoints
+    const isIOS = /iPad|iPhone|iPod/.test(ua) ||
+      (ua.includes('Macintosh') && navigator.maxTouchPoints > 0);
+    const isSafari = /Safari/.test(ua) && !/Chrome|CriOS|FxiOS/.test(ua);
+
+    // Module workers (type: "module") on iOS Safari do not expose the Worker
+    // constructor regardless of Safari version (even 15.5+ which added nested
+    // worker support for classic workers only).  Always use the external
+    // decoder worker bridge for iOS Safari.
+    return isIOS && isSafari;
   }
 
   /**
@@ -81,6 +106,76 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
         });
       };
 
+      // Create external decoder workers for platforms without nested worker
+      // support (iOS 15 Safari).  Workers are created here on the main thread
+      // and bridged to the media worker via MessagePorts.
+      let decoderPort: MessagePort | undefined;
+      let videoDecoderPort: MessagePort | undefined;
+      const transferables: Transferable[] = [channelPort];
+
+      if (this.needsExternalDecoderWorker()) {
+        console.warn('[WorkerManager] Creating external decoder worker (iOS 15 compat)');
+        const timestamp = Date.now();
+        this.decoderWorker = new Worker(
+          `/opus_decoder/decoderWorker.min.js?t=${timestamp}`
+        );
+        this.decoderChannel = new MessageChannel();
+
+        // Relay: media worker (port2) → decoder worker
+        this.decoderChannel.port2.onmessage = (e: MessageEvent) => {
+          if (!this.decoderWorker) return;
+          const data = e.data;
+          const xfer: Transferable[] = [];
+          if (data?.pages?.buffer) xfer.push(data.pages.buffer);
+          this.decoderWorker.postMessage(data, xfer);
+        };
+
+        // Relay: decoder worker → media worker (port2)
+        this.decoderWorker.onmessage = (e: MessageEvent) => {
+          if (!this.decoderChannel) return;
+          const data = e.data;
+          const xfer: Transferable[] = [];
+          if (Array.isArray(data)) {
+            for (const arr of data) {
+              if (arr?.buffer) xfer.push(arr.buffer);
+            }
+          }
+          this.decoderChannel.port2.postMessage(data, xfer);
+        };
+
+        this.decoderWorker.onerror = (e: ErrorEvent) => {
+          console.error('[WorkerManager] Decoder worker error:', e.message);
+        };
+
+        decoderPort = this.decoderChannel.port1;
+        transferables.push(decoderPort);
+
+        // ── Video decoder worker (tinyh264 WASM in separate thread) ──
+        // Offloads synchronous H.264 WASM decoding so it cannot starve
+        // the media worker's event loop (which needs to process audio).
+        log('[WorkerManager] Creating external video decoder worker (iOS 15 compat)');
+        this.videoDecoderWorker = new Worker(
+          `/workers/video-decoder-worker.js?t=${timestamp}`,
+          { type: 'module' }
+        );
+        this.videoDecoderChannel = new MessageChannel();
+
+        // Transfer port2 to the video decoder worker — it will use this
+        // port for all communication with the media worker.
+        this.videoDecoderWorker.postMessage(
+          { type: 'init', port: this.videoDecoderChannel.port2 },
+          [this.videoDecoderChannel.port2]
+        );
+
+        this.videoDecoderWorker.onerror = (e: ErrorEvent) => {
+          console.error('[WorkerManager] Video decoder worker error:', e.message);
+        };
+
+        // port1 goes to the media worker
+        videoDecoderPort = this.videoDecoderChannel.port1;
+        transferables.push(videoDecoderPort);
+      }
+
       // Send init message with subscriberId, subscribeType, and audioEnabled
       // ⚠️ CRITICAL: Worker expects FLAT structure, not nested in 'data'
       this.worker.postMessage(
@@ -91,16 +186,17 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
           audioEnabled: audioEnabled, // Pass audio enabled state to worker
           initialQuality: initialQuality,
           port: channelPort,
+          decoderPort: decoderPort,
+          videoDecoderPort: videoDecoderPort,
           enableLogging,
           protocol: this.protocol,
         },
-        [channelPort]
+        transferables
       );
 
       this.isInitialized = true;
       this.emit("workerReady", undefined);
 
-      log(`Media worker initialized successfully (audioEnabled: ${audioEnabled})`);
     } catch (error) {
       const err = error instanceof Error ? error : new Error("Worker initialization failed");
       this.emit("error", { error: err, context: "init" });
@@ -172,6 +268,10 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
     }
 
     log(`Attaching data channel to worker: ${channelName}`);
+
+    // Set binaryType before transfer — Safari 15 throws TypeMismatchError
+    // when setting binaryType on a transferred RTCDataChannel inside a worker.
+    dataChannel.binaryType = "arraybuffer";
 
     this.worker.postMessage(
       {
@@ -267,6 +367,23 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
    * Terminate the worker
    */
   terminate(): void {
+    if (this.videoDecoderWorker) {
+      this.videoDecoderWorker.terminate();
+      this.videoDecoderWorker = null;
+    }
+    if (this.videoDecoderChannel) {
+      // port2 was transferred to the video decoder worker — already gone.
+      // port1 was transferred to the media worker — already gone.
+      this.videoDecoderChannel = null;
+    }
+    if (this.decoderWorker) {
+      this.decoderWorker.terminate();
+      this.decoderWorker = null;
+    }
+    if (this.decoderChannel) {
+      this.decoderChannel.port2.close();
+      this.decoderChannel = null;
+    }
     if (this.worker) {
       this.worker.terminate();
       this.worker = null;
@@ -284,13 +401,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
     switch (type) {
       case "videoData":
         if (frame) {
-          // this.videoFrameCount++;
-          // if (this.videoFrameCount <= 5 || this.videoFrameCount % 100 === 0) {
-          //   log(`[WorkerManager] 📹 Video frame ${this.videoFrameCount} received from worker`);
-          // }
           this.emit("videoData", { frame });
-        } else {
-          console.warn("[WorkerManager] ⚠️ videoData event received but frame is null/undefined");
         }
         break;
 
@@ -324,11 +435,11 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       case "resuming":
         this.emit("frameResumed", undefined);
         break;
-      
+
       case "raptorq-initialized":
         log("[WorkerManager] RaptorQ WASM module initialized in worker");
         this.emit("wasmReady", undefined);
-        break;  
+        break;
 
       default:
         log(`Unknown worker message type: ${type}`, data);

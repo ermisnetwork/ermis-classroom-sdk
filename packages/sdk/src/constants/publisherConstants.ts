@@ -199,8 +199,8 @@ export function getSubStreams(
       return videoResolutions.includes(sub.channelName);
     }
 
-    // Default behavior: when videoResolutions is NOT specified, exclude 1080p and 1440p (only 360p + 720p)
-    if (!videoResolutions && (sub.channelName === ChannelName.VIDEO_1080P || sub.channelName === ChannelName.VIDEO_1440P)) {
+    // Default behavior: when videoResolutions is NOT specified, only keep 360p
+    if (!videoResolutions && sub.channelName !== ChannelName.VIDEO_360P && videoChannels.has(sub.channelName)) {
       return false;
     }
 

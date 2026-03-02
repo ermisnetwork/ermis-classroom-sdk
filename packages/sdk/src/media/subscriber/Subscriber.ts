@@ -259,6 +259,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     if (this.workerManager) {
       this.workerManager.on("videoData", async ({ frame }) => {
         await this.handleVideoFrame(frame);
+        // // drop frame for avoid memory leak
+        // frame.close();
       });
 
       this.workerManager.on("status", ({ message, isError }) => {
@@ -779,9 +781,9 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       const offer = await rtc.createOffer();
       await rtc.setLocalDescription(offer);
 
-    
+
       const channel = `${this.config.streamId}:${mediaChannel}`;
-      
+
       console.log(`[WebRTC subscriber] Created offer for ${mediaChannel}, sending to server...`);
 
       const response = await fetch(`https://${this.config.host}/meeting/sdp/answer`, {

@@ -6,6 +6,180 @@ import type {
   VideoEncoderObject,
 } from "../../../types/media/publisher.types";
 import { log } from "../../../utils";
+// @ts-ignore - JavaScript module without types
+import { H264Encoder, isNativeH264EncoderSupported } from "../../../codec-polyfill/video-codec-polyfill.js";
+
+// Detect if native VideoEncoder is available
+const HAS_NATIVE_VIDEO_ENCODER = typeof VideoEncoder !== 'undefined';
+
+/**
+ * WorkerEncoderProxy - Proxy that forwards encoding to a Worker thread.
+ * Matches the interface expected by VideoEncoderManager (encode, flush, close,
+ * state, encodeQueueSize) so it can be used as a drop-in replacement for the
+ * local WASM H264Encoder.
+ */
+class WorkerEncoderProxy {
+  private worker: Worker;
+  private name: string;
+  private _state: string = 'unconfigured';
+  private _configureResolve: (() => void) | null = null;
+  private _configureReject: ((err: Error) => void) | null = null;
+  private _flushResolve: (() => void) | null = null;
+  onOutput: ((chunk: any, metadata: any) => void) | null = null;
+  onError: ((error: Error) => void) | null = null;
+
+  constructor(worker: Worker, name: string) {
+    this.worker = worker;
+    this.name = name;
+  }
+
+  async configure(config: any): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      this._configureResolve = resolve;
+      this._configureReject = reject;
+      this.worker.postMessage({
+        type: 'configure',
+        encoderName: this.name,
+        config,
+      });
+    });
+  }
+
+  /**
+   * Encode a frame by extracting RGBA data and transferring to the worker.
+   * Supports ImageData and ImageData-like objects from the MSTP polyfill.
+   *
+   * NOTE: On iOS 15 there is only one WASM encoder (single-instance
+   * limitation), so the buffer transfer is safe — no other encoder will
+   * need the same frame data.
+   */
+  encode(frame: any, forceKeyFrame: boolean = false): void {
+    if (this._state !== 'configured') return;
+
+    let rgbaBuffer: ArrayBuffer;
+    let width: number;
+    let height: number;
+
+    if (frame instanceof ImageData) {
+      // ImageData.data is a live Uint8ClampedArray view — copy for transfer
+      const data = frame.data;
+      if (data.byteOffset === 0 && data.byteLength === data.buffer.byteLength) {
+        rgbaBuffer = data.buffer.slice(0);
+      } else {
+        rgbaBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+      }
+      width = frame.width;
+      height = frame.height;
+    } else if (frame?.type === 'imagedata' && frame.data) {
+      // ImageData-like from MSTP polyfill: { type, data, width, height }
+      const data = frame.data instanceof Uint8ClampedArray
+        ? frame.data
+        : new Uint8ClampedArray(frame.data);
+      if (data.byteOffset === 0 && data.byteLength === data.buffer.byteLength) {
+        rgbaBuffer = data.buffer.slice(0);
+      } else {
+        rgbaBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+      }
+      width = frame.width;
+      height = frame.height;
+    } else {
+      console.warn('[WorkerEncoderProxy] Unsupported frame type, skipping');
+      return;
+    }
+
+    this.worker.postMessage(
+      {
+        type: 'encode',
+        encoderName: this.name,
+        rgbaData: rgbaBuffer,
+        width,
+        height,
+        forceKeyFrame,
+      },
+      [rgbaBuffer]
+    );
+  }
+
+  async flush(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      this._flushResolve = resolve;
+      this.worker.postMessage({
+        type: 'flush',
+        encoderName: this.name,
+      });
+      // Safety timeout — don't hang forever if worker is unresponsive
+      setTimeout(() => {
+        if (this._flushResolve === resolve) {
+          this._flushResolve = null;
+          resolve();
+        }
+      }, 5000);
+    });
+  }
+
+  close(): void {
+    this.worker.postMessage({
+      type: 'close',
+      encoderName: this.name,
+    });
+    this._state = 'closed';
+  }
+
+  get state(): string {
+    return this._state;
+  }
+
+  get encodeQueueSize(): number {
+    return 0; // Encoding happens in the worker, main thread never blocks
+  }
+
+  /**
+   * Called by VideoEncoderManager when a worker message arrives for this encoder.
+   */
+  handleMessage(data: any): void {
+    switch (data.type) {
+      case 'configured':
+        this._state = 'configured';
+        this._configureResolve?.();
+        this._configureResolve = null;
+        this._configureReject = null;
+        break;
+
+      case 'output':
+        if (this.onOutput) {
+          const chunk = data.chunk;
+          // Reconstruct copyTo method (functions cannot be transferred)
+          if (chunk?.data && !chunk.copyTo) {
+            chunk.copyTo = function (dest: ArrayBuffer) {
+              new Uint8Array(dest).set(new Uint8Array(this.data));
+            };
+          }
+          this.onOutput(chunk, data.metadata);
+        }
+        break;
+
+      case 'flushed':
+        this._flushResolve?.();
+        this._flushResolve = null;
+        break;
+
+      case 'closed':
+        this._state = 'closed';
+        break;
+
+      case 'error':
+        if (this._configureReject) {
+          this._configureReject(new Error(data.message));
+          this._configureResolve = null;
+          this._configureReject = null;
+        }
+        if (this.onError) {
+          this.onError(new Error(data.message));
+        }
+        break;
+    }
+  }
+}
 
 /**
  * VideoEncoderManager - Manages video encoding for multiple qualities
@@ -44,6 +218,10 @@ export class VideoEncoderManager extends EventEmitter<{
   private keyframeInterval: number = VIDEO_CONFIG.KEYFRAME_INTERVAL;
   // private chunkCounters = new Map<string, number>(); // DEBUG: Track chunks per encoder
 
+  // Worker-based WASM encoder (iOS 15 — offloads x264 to separate thread)
+  private encoderWorker: Worker | null = null;
+  private workerProxies = new Map<string, WorkerEncoderProxy>();
+
   /**
    * Create video encoder for specific quality
    *
@@ -52,7 +230,118 @@ export class VideoEncoderManager extends EventEmitter<{
    * @param config - Video encoder configuration
    * @param onOutput - Callback for encoded chunks
    * @param onError - Callback for errors
-   * @returns The created VideoEncoder instance
+   * @returns Promise resolving to the created encoder instance (native VideoEncoder or WASM wrapper)
+   */
+  async createEncoderAsync(
+    name: string,
+    channelName: ChannelName,
+    config: VideoEncoderConfig,
+    onOutput: (
+      chunk: EncodedVideoChunk,
+      metadata: EncodedVideoChunkMetadata,
+    ) => void,
+    onError: (error: Error) => void,
+  ): Promise<VideoEncoder | any> {
+    if (this.encoders.has(name)) {
+      throw new Error(`Encoder ${name} already exists`);
+    }
+
+    // Configure encoder with optimal settings
+    // Use Annex B format for WASM decoder compatibility (SPS/PPS inline with start codes)
+    const encoderConfig: VideoEncoderConfig = {
+      ...config,
+      latencyMode: "realtime",
+      hardwareAcceleration: "prefer-hardware",
+      avc: { format: 'annexb' },
+    } as VideoEncoderConfig;
+
+    let encoder: any;
+    let isWasmEncoder = false;
+
+    if (HAS_NATIVE_VIDEO_ENCODER) {
+      // Use native VideoEncoder
+      encoder = new VideoEncoder({
+        output: (chunk: EncodedVideoChunk, metadata?: EncodedVideoChunkMetadata) => {
+          const enrichedMetadata = {
+            ...(metadata || {}),
+            encoderName: name,
+            channelName,
+          } as EncodedVideoChunkMetadata;
+          onOutput(chunk, enrichedMetadata);
+        },
+        error: (error: Error) => {
+          console.error(`[VideoEncoder] ❌ ${name} error:`, error);
+          this.emit("encoderError", { name, error });
+          onError(error);
+        },
+      });
+
+      encoder.configure(encoderConfig);
+      log(`[VideoEncoder] Created native encoder "${name}" for ${channelName}:`, encoderConfig);
+    } else {
+      // Fallback to WASM H264Encoder via Worker thread (iOS 15 Safari, etc.)
+      // Encoding runs in a separate worker to avoid blocking the main thread
+      // with synchronous WASM x264 operations.
+      log(`[VideoEncoder] Native VideoEncoder not available, using Worker-based WASM encoder for "${name}"`);
+
+      // Initialize encoder worker if not already created
+      if (!this.encoderWorker) {
+        this.initEncoderWorker();
+      }
+
+      // Create proxy encoder that communicates with the worker
+      const proxy = new WorkerEncoderProxy(this.encoderWorker!, name);
+      this.workerProxies.set(name, proxy);
+
+      // Set up callbacks (same interface as local WASM encoder)
+      proxy.onOutput = (chunk: any, metadata: any) => {
+        const enrichedMetadata = {
+          ...metadata,
+          encoderName: name,
+          channelName,
+        };
+        onOutput(chunk, enrichedMetadata as EncodedVideoChunkMetadata);
+      };
+      proxy.onError = (error: Error) => {
+        console.error(`[VideoEncoder Worker] ❌ ${name} error:`, error);
+        this.emit("encoderError", { name, error });
+        onError(error);
+      };
+
+      await proxy.configure({
+        width: encoderConfig.width,
+        height: encoderConfig.height,
+        bitrate: encoderConfig.bitrate,
+        framerate: encoderConfig.framerate,
+        keyFrameInterval: 60,
+      });
+
+      encoder = proxy;
+      isWasmEncoder = true;
+      log(`[VideoEncoder] Created Worker encoder "${name}" for ${channelName}:`, encoderConfig);
+    }
+
+    // Store encoder info - wrap WASM encoder to match interface
+    this.encoders.set(name, {
+      encoder: encoder,
+      channelName,
+      config: encoderConfig,
+      metadataReady: false,
+      videoDecoderConfig: null,
+      isWasmEncoder, // Track which type of encoder
+    } as VideoEncoderObject & { isWasmEncoder?: boolean });
+
+    this.emit("encoderCreated", { name, channelName, config: encoderConfig });
+
+    return encoder;
+  }
+
+  /**
+   * Create video encoder (sync version for backwards compatibility)
+   * NOTE: This will throw on browsers without native VideoEncoder (iOS 15)
+   * Use createEncoderAsync for full compatibility
+   *
+   * @deprecated Use createEncoderAsync instead for iOS 15 compatibility
    */
   createEncoder(
     name: string,
@@ -64,26 +353,23 @@ export class VideoEncoderManager extends EventEmitter<{
     ) => void,
     onError: (error: Error) => void,
   ): VideoEncoder {
+    if (!HAS_NATIVE_VIDEO_ENCODER) {
+      throw new Error(
+        "Native VideoEncoder not available. Use createEncoderAsync() for WASM fallback support (iOS 15 Safari)."
+      );
+    }
+
     if (this.encoders.has(name)) {
       throw new Error(`Encoder ${name} already exists`);
     }
 
     const encoder = new VideoEncoder({
       output: (chunk, metadata) => {
-        // DEBUG: Count and log chunks
-        // const count = (this.chunkCounters.get(name) || 0) + 1;
-        // this.chunkCounters.set(name, count);
-        // if (count <= 5 || count % 100 === 0) {
-        //   log(`[VideoEncoder] ✅ ${name} output chunk #${count}, size: ${chunk.byteLength}, type: ${chunk.type}`);
-        // }
-
-        // Add encoder info to metadata
         const enrichedMetadata = {
           ...metadata,
           encoderName: name,
           channelName,
         } as EncodedVideoChunkMetadata;
-
         onOutput(chunk, enrichedMetadata);
       },
       error: (error) => {
@@ -98,7 +384,8 @@ export class VideoEncoderManager extends EventEmitter<{
       ...config,
       latencyMode: config.latencyMode || "realtime",
       hardwareAcceleration: "prefer-hardware",
-    };
+      avc: { format: 'annexb' },
+    } as VideoEncoderConfig;
 
     encoder.configure(encoderConfig);
 
@@ -111,22 +398,53 @@ export class VideoEncoderManager extends EventEmitter<{
       videoDecoderConfig: null,
     });
 
-    log(
-      `[VideoEncoder] Created encoder "${name}" for ${channelName}:`,
-      encoderConfig,
-    );
+    log(`[VideoEncoder] Created encoder "${name}" for ${channelName}:`, encoderConfig);
     this.emit("encoderCreated", { name, channelName, config: encoderConfig });
 
     return encoder;
   }
 
   /**
+   * Initialize the encoder Worker (created once, shared by all WASM encoders).
+   * The worker loads x264 WASM and handles encoding off the main thread.
+   */
+  private initEncoderWorker(): void {
+    const timestamp = Date.now();
+    this.encoderWorker = new Worker(
+      `/workers/video-encoder-worker.js?t=${timestamp}`,
+      { type: 'module' }
+    );
+
+    // Route worker messages to the appropriate proxy
+    this.encoderWorker.onmessage = (e: MessageEvent) => {
+      const data = e.data;
+      if (data.encoderName) {
+        const proxy = this.workerProxies.get(data.encoderName);
+        if (proxy) {
+          proxy.handleMessage(data);
+        }
+      }
+      // 'ready' message has no encoderName — just log it
+      if (data.type === 'ready') {
+        log('[VideoEncoderManager] Encoder worker ready');
+      }
+    };
+
+    this.encoderWorker.onerror = (e: ErrorEvent) => {
+      console.error('[VideoEncoderManager] Encoder worker error:', e.message);
+    };
+
+    log('[VideoEncoderManager] Created encoder worker (WASM offload)');
+  }
+
+  /**
    * Encode video frame across multiple encoders
+   * Supports VideoFrame (native) and ImageData-like objects (iOS 15 fallback)
    *
-   * @param frame - Video frame to encode
+   * @param frame - Video frame to encode (VideoFrame or ImageData-like object)
    * @param encoderNames - Optional list of specific encoders to use
    */
-  async encodeFrame(frame: VideoFrame, encoderNames?: string[]): Promise<void> {
+  async encodeFrame(frame: VideoFrame | any, encoderNames?: string[]): Promise<void> {
     const targetEncoders = encoderNames
       ? Array.from(this.encoders.entries()).filter(([name]) =>
         encoderNames.includes(name),
@@ -135,9 +453,13 @@ export class VideoEncoderManager extends EventEmitter<{
 
     if (targetEncoders.length === 0) {
       console.warn("[VideoEncoder] No encoders available");
-      frame.close();
+      frame.close?.();
       return;
     }
+
+    // Check if this is an iOS 15 fallback frame (ImageData-like object)
+    const isImageDataFallback = frame && frame.type === 'imagedata' && frame.data;
+    const isRealVideoFrame = typeof VideoFrame !== 'undefined' && frame instanceof VideoFrame;
 
     this.frameCounter++;
     const isKeyFrame = this.frameCounter % this.keyframeInterval === 0;
@@ -157,14 +479,24 @@ export class VideoEncoderManager extends EventEmitter<{
       }
 
       try {
-        // Clone frame for all but last encoder
-        const frameToEncode = isLastEncoder ? frame : new VideoFrame(frame);
+        if ((encoderObj as any).isWasmEncoder) {
+          // WASM encoder: pass frame directly (handles both VideoFrame and ImageData-like)
+          // WASM encoder's encode() handles the conversion internally
+          (encoderObj.encoder as any).encode(frame, isKeyFrame);
+        } else if (isRealVideoFrame) {
+          // Native encoder: requires real VideoFrame
+          // Clone frame for all but last encoder
+          const frameToEncode = isLastEncoder ? frame : new VideoFrame(frame);
+          encoderObj.encoder.encode(frameToEncode, { keyFrame: isKeyFrame });
 
-        encoderObj.encoder.encode(frameToEncode, { keyFrame: isKeyFrame });
-
-        // Close cloned frames
-        if (!isLastEncoder) {
-          frameToEncode.close();
+          // Close cloned frames
+          if (!isLastEncoder) {
+            frameToEncode.close();
+          }
+        } else if (isImageDataFallback) {
+          // iOS 15 fallback with native encoder - this shouldn't happen
+          // because native VideoEncoder isn't available on iOS 15
+          console.warn(`[VideoEncoder] ${name}: Native encoder received ImageData fallback - skipping`);
         }
       } catch (error) {
         console.error(
@@ -339,6 +671,7 @@ export class VideoEncoderManager extends EventEmitter<{
       }
 
       this.encoders.delete(name);
+      this.workerProxies.delete(name);
       log(`[VideoEncoder] Closed encoder ${name}`);
       this.emit("encoderClosed", name);
     } catch (error) {
@@ -359,6 +692,14 @@ export class VideoEncoderManager extends EventEmitter<{
     await Promise.all(closePromises);
     this.encoders.clear();
     this.frameCounter = 0;
+
+    // Terminate encoder worker if it exists
+    if (this.encoderWorker) {
+      this.encoderWorker.terminate();
+      this.encoderWorker = null;
+      log("[VideoEncoder] Encoder worker terminated");
+    }
+    this.workerProxies.clear();
 
     log("[VideoEncoder] All encoders closed");
     this.emit("allEncodersClosed");

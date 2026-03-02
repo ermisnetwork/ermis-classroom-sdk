@@ -101,6 +101,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private videoProcessor: VideoProcessor | null = null;
   private audioProcessor: AudioProcessor | null = null;
   private InitAudioRecorder: any = null;
+  private publisherAudioContext: AudioContext | null = null;
   private permissions: ParticipantPermissions;
 
   // Reconnection state
@@ -141,6 +142,38 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         config.onStatusUpdate!(message, isError);
       });
     }
+  }
+
+  /**
+   * Determine available publish channels based on device availability and encoder capabilities
+   * iOS 15 Safari (WASM encoder) only supports video_360p, while native encoder supports both 360p and 720p
+   * 
+   * @returns Array of channel names that the publisher is capable of publishing
+   */
+  private getPublishChannels(): string[] {
+    const channels: string[] = [];
+
+    // Add video channels based on device availability
+    // Only publish channels that are in subStreams (already filtered by videoResolutions config)
+    if (this.hasVideo) {
+      for (const sub of this.subStreams) {
+        if (sub.channelName === ChannelName.VIDEO_360P ||
+          sub.channelName === ChannelName.VIDEO_720P ||
+          sub.channelName === ChannelName.VIDEO_1080P ||
+          sub.channelName === ChannelName.VIDEO_1440P) {
+          channels.push(sub.channelName);
+        }
+      }
+    }
+
+    // Add audio channel if mic is available
+    if (this.hasAudio) {
+      channels.push(ChannelName.MICROPHONE);
+    }
+
+    log("[Publisher] Publish channels determined:", channels);
+
+    return channels;
   }
 
   async init(): Promise<void> {
@@ -198,6 +231,16 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (this.isPublishing) {
       console.warn("[Publisher] Already publishing");
       return;
+    }
+
+    // iOS 15 Safari: AudioContext.resume() must be called synchronously within
+    // the user gesture handler. Create and resume AudioContext BEFORE any await
+    // so the gesture context is preserved. On other browsers this is a no-op.
+    const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      this.publisherAudioContext = new AudioContextClass({ sampleRate: 48000 }) as AudioContext;
+      this.publisherAudioContext!.resume().catch(() => { });
+      log("[Publisher] AudioContext created and resume() called in user gesture");
     }
 
     try {
@@ -305,7 +348,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         constraints.audio = {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
+          autoGainControl: false,
         };
       }
 
@@ -353,7 +396,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       type: this.options.streamType || "camera",
       streamId: this.options.streamId,
       config: {
-        codec: "avc1.640c34",
+        codec: "avc1.42e01f", // Constrained Baseline Profile for WASM compatibility
         width: this.options.width || 1280,
         height: this.options.height || 720,
         framerate: this.options.framerate || 30,
@@ -519,31 +562,48 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (this.hasAudio) {
       const audioConfig = {
         sampleRate: 48000,
-        numberOfChannels: 1,
+        numberOfChannels: 2,
       };
 
-      if (!this.InitAudioRecorder || typeof this.InitAudioRecorder !== 'function') {
-        throw new Error(`InitAudioRecorder is not available or not a function: ${typeof this.InitAudioRecorder}`);
+      if (this.options.audioCodec === "aac") {
+        // AAC path — uses FDK-AAC WASM or native WebCodecs AudioEncoder
+        const aacManager = new AACEncoderManager(ChannelName.MICROPHONE, audioConfig);
+        // audioEncoderManager field is typed AudioEncoderManager | null in Publisher.
+        // We cast via the shared base type to comply until Publisher class is updated.
+        this.audioEncoderManager = aacManager as unknown as AudioEncoderManager;
+
+        this.audioProcessor = new AudioProcessor(
+          aacManager,
+          this.streamManager,
+          ChannelName.MICROPHONE,
+        );
+      } else {
+        // Default Opus path (uses Recorder.js WASM)
+        if (!this.InitAudioRecorder || typeof this.InitAudioRecorder !== "function") {
+          throw new Error(
+            `InitAudioRecorder is not available or not a function: ${typeof this.InitAudioRecorder}`,
+          );
+        }
+
+        this.audioEncoderManager = new AudioEncoderManager(
+          ChannelName.MICROPHONE,
+          audioConfig,
+          this.InitAudioRecorder,
+        );
+
+        this.audioProcessor = new AudioProcessor(
+          this.audioEncoderManager,
+          this.streamManager,
+          ChannelName.MICROPHONE,
+        );
       }
-
-      this.audioEncoderManager = new AudioEncoderManager(
-        ChannelName.MICROPHONE,
-        audioConfig,
-        this.InitAudioRecorder
-      );
-
-      this.audioProcessor = new AudioProcessor(
-        this.audioEncoderManager,
-        this.streamManager,
-        ChannelName.MICROPHONE
-      );
 
       this.audioProcessor.on("encoderError", (error) => {
         console.error("[Publisher] Audio encoder error:", error);
         this.updateStatus("Audio encoder error", true);
       });
 
-      log("[Publisher] Audio processor initialized");
+      log(`[Publisher] Audio processor initialized (codec: ${this.options.audioCodec ?? "opus"})`);
     }
   }
 
@@ -620,7 +680,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         }
 
         const baseConfig = {
-          codec: "avc1.640c34",
+          // codec: "avc1.640c34",
+          // Use Constrained Baseline Profile for WASM decoder compatibility
+          // avc1.42e01f = Constrained Baseline Profile, Level 3.1
+          // Note: High Profile (avc1.640c34) has better compression but tinyh264 doesn't support it
+          codec: "avc1.42e01f",
           width: this.options.width || 1280,
           height: this.options.height || 720,
           framerate: this.options.framerate || 30,
@@ -637,7 +701,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       const audioTrack = this.currentStream.getAudioTracks()[0];
       if (audioTrack) {
         const audioStream = new MediaStream([audioTrack]);
-        await this.audioProcessor.initialize(audioStream);
+        await this.audioProcessor.initialize(audioStream, this.publisherAudioContext ?? undefined);
         await this.audioProcessor.start();
         log("[Publisher] Audio processing started");
       }
@@ -766,7 +830,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
           deviceId: { exact: deviceId },
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
+          autoGainControl: false,
         },
       });
 
@@ -928,6 +992,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       if (this.webRtcManager) {
         await this.webRtcManager.close();
         this.webRtcManager = null;
+      }
+
+      if (this.publisherAudioContext && this.publisherAudioContext.state !== 'closed') {
+        this.publisherAudioContext.close().catch(() => { });
+        this.publisherAudioContext = null;
       }
 
       if (this.currentStream) {
@@ -1108,6 +1177,18 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       throw new Error("Invalid screen MediaStream provided");
     }
 
+    // iOS 15 Safari: pre-resume AudioContext for screen share audio
+    // before any await, same pattern as startPublishing()
+    const hasScreenAudio = screenMediaStream.getAudioTracks().length > 0;
+    let screenAudioContext: AudioContext | undefined;
+    if (hasScreenAudio) {
+      const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AudioContextClass) {
+        screenAudioContext = new AudioContextClass({ sampleRate: 48000 }) as AudioContext;
+        screenAudioContext.resume().catch(() => { });
+      }
+    }
+
     try {
       this.screenStream = screenMediaStream;
 
@@ -1149,7 +1230,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       // Start audio if available
       if (hasAudio) {
-        await this.startScreenAudioStreaming();
+        await this.startScreenAudioStreaming(screenAudioContext);
       }
 
       // Wait for video config to be sent before announcing screen share
@@ -1358,7 +1439,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     log("[Publisher] Screen video processing started with dimensions:", `${screenWidth}x${screenHeight}`);
   }
 
-  private async startScreenAudioStreaming(): Promise<void> {
+  private async startScreenAudioStreaming(audioContext?: AudioContext): Promise<void> {
     if (!this.screenStream || !this.streamManager) return;
 
     const audioTrack = this.screenStream.getAudioTracks()[0];
@@ -1370,7 +1451,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     const audioConfig = {
       sampleRate: 48000,
-      numberOfChannels: 1,
+      numberOfChannels: 2,
     };
 
     // Create audio encoder manager for screen share audio
@@ -1394,7 +1475,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     // Initialize with screen audio stream
     const screenAudioStream = new MediaStream([audioTrack]);
-    await this.screenAudioProcessor.initialize(screenAudioStream);
+    await this.screenAudioProcessor.initialize(screenAudioStream, audioContext);
     await this.screenAudioProcessor.start();
 
     log("[Publisher] Screen audio processing started");

@@ -16,7 +16,7 @@ export const MAX_RECONNECT_ATTEMPTS = 5;
 export const DEFAULT_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
-  autoGainControl: true,
+  autoGainControl: false,
 };
 
 // Export all constants
