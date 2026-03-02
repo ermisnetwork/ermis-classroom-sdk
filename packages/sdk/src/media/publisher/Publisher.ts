@@ -1355,39 +1355,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     await this.waitForViewportStabilization();
 
     // Initialize video encoder manager for screen share
-    let screenSubStreams = getSubStreams("screen_share", {
+    const screenSubStreams = getSubStreams("screen_share", {
       can_publish: this.options.permissions.can_publish,
       can_publish_sources: this.options.permissions.can_publish_sources,
     });
-
-    // Extract actual screen dimensions and calculate dynamic resolutions
-    const { calculateSubStreamResolutions, getVideoTrackDimensions } = await import('../../utils/videoResolutionHelper');
-    const actualDimensions = getVideoTrackDimensions(videoTrack);
-
-    let screenWidth = 1280;
-    let screenHeight = 720;
-
-    if (actualDimensions) {
-      screenWidth = actualDimensions.width;
-      screenHeight = actualDimensions.height;
-      log("[Publisher] Actual screen share dimensions:", `${screenWidth}x${screenHeight}`);
-
-      const { video720p } = calculateSubStreamResolutions(screenWidth, screenHeight);
-      log("[Publisher] Calculated screen share 720p resolution:", `${video720p.width}x${video720p.height}`);
-
-      // Update screenSubStreams with calculated dimensions
-      screenSubStreams = screenSubStreams.map(subStream => {
-        if (subStream.channelName === ChannelName.SCREEN_SHARE_720P) {
-          return { ...subStream, width: video720p.width, height: video720p.height };
-        }
-        return subStream;
-      });
-
-      log("[Publisher] Updated screen share subStreams:", screenSubStreams);
-    } else {
-      log("[Publisher] Could not get actual screen dimensions, using defaults");
-    }
-
     this.screenVideoEncoderManager = new VideoEncoderManager();
 
     // Calculate proportional resolution from actual capture dimensions
@@ -1423,7 +1394,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       this.updateStatus("Screen video processing error", true);
     });
 
-    // Initialize and start video processing with actual dimensions
+    // Initialize and start video processing
     const baseConfig = {
       codec: "avc1.640c34",
       width: screenWidth,
@@ -1436,7 +1407,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     await this.screenVideoProcessor.initialize(videoTrack, baseConfig);
     await this.screenVideoProcessor.start();
 
-    log("[Publisher] Screen video processing started with dimensions:", `${screenWidth}x${screenHeight}`);
+    log("[Publisher] Screen video processing started");
   }
 
   private async startScreenAudioStreaming(audioContext?: AudioContext): Promise<void> {
