@@ -415,7 +415,10 @@ export class WasmAACEncoder {
             const frameSize = this.fdkEncoder.getFrameLength() * encoderChannels;
             
             while (offset < interleaved.length) {
-                const remaining = interleaved.subarray(offset);
+                // Use slice() instead of subarray() — iOS Safari's WASM runtime
+                // rejects TypedArray views with non-zero byteOffset when passed
+                // into WASM memory. slice() creates a fresh ArrayBuffer at byteOffset=0.
+                const remaining = interleaved.slice(offset);
                 const encodedData = this.fdkEncoder.encode(remaining);
                 
                 // Move offset by the amount consumed

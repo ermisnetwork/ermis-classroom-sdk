@@ -213,16 +213,16 @@ const audioInit = {
     try {
       const channelData = [];
    
-      // if mono, duplicate to create stereo
+      // if mono, duplicate to create stereo  
       if (audioData.numberOfChannels === 1) {
         const monoChannel = new Float32Array(audioData.numberOfFrames);
-        audioData.copyTo(monoChannel, { planeIndex: 0 });
+        audioData.copyTo(monoChannel, { planeIndex: 0, format: 'f32-planar' });
         channelData.push(monoChannel);
         channelData.push(new Float32Array(monoChannel));
       } else {
         for (let i = 0; i < audioData.numberOfChannels; i++) {
           const channel = new Float32Array(audioData.numberOfFrames);
-          audioData.copyTo(channel, { planeIndex: i });
+          audioData.copyTo(channel, { planeIndex: i, format: 'f32-planar' });
           channelData.push(channel);
         }
       }

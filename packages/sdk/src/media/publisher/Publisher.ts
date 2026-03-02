@@ -562,7 +562,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (this.hasAudio) {
       const audioConfig = {
         sampleRate: 48000,
-        numberOfChannels: 1,
+        numberOfChannels: 2,
       };
 
       if (this.options.audioCodec === "aac") {
@@ -1398,7 +1398,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     const audioConfig = {
       sampleRate: 48000,
-      numberOfChannels: 1,
+      numberOfChannels: 2,
     };
 
     // Create audio encoder manager for screen share audio

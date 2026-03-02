@@ -33,7 +33,7 @@ self.onmessage = async (e) => {
     // ── Configure ────────────────────────────────────────────────────────────
     case 'configure': {
       try {
-        encoder = new AACEncoder();
+        encoder = new AACEncoder(); 
 
         encoder.onOutput = (chunk, metadata) => {
           // Extract raw bytes regardless of whether chunk is native EncodedAudioChunk
@@ -120,13 +120,17 @@ self.onmessage = async (e) => {
           audioData.close();
         } else {
           // WASM path — WasmAACEncoder.encode() expects object with copyTo()
+          // pcm is a planar buffer: [ch0 × numberOfFrames | ch1 × numberOfFrames | ...]
+          // copyTo must extract only the requested channel plane, not the whole buffer.
           encoder.encode({
             numberOfFrames: msg.numberOfFrames,
             numberOfChannels: msg.numberOfChannels,
             sampleRate: msg.sampleRate,
             timestamp: msg.timestamp,
             copyTo: (dest, { planeIndex }) => {
-              if (planeIndex === 0) dest.set(pcm);
+              const frameSize = msg.numberOfFrames;
+              const start = (planeIndex ?? 0) * frameSize;
+              dest.set(pcm.subarray(start, start + frameSize));
             },
             close: () => {},
           });

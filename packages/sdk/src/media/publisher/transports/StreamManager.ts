@@ -638,22 +638,22 @@ export class StreamManager extends EventEmitter<{
     const frameType = FrameTypeHelper.getFrameType(channelName, chunkType);
 
     let arrayBuffer: ArrayBuffer;
-    
+
     // Handle both native EncodedVideoChunk and WASM encoder chunks
     // Prioritize chunk.data (WASM) as it is direct access and avoids potential copyTo issues
     if (chunk.data) {
-       // WASM encoder chunk - data is already ArrayBuffer or Uint8Array
-       if (chunk.data instanceof ArrayBuffer) {
-         arrayBuffer = chunk.data;
-       } else if (chunk.data instanceof Uint8Array) {
-         arrayBuffer = chunk.data.buffer.slice(
-           chunk.data.byteOffset,
-           chunk.data.byteOffset + chunk.data.byteLength
-         );
-       } else {
-         console.error('[StreamManager] Unknown chunk data type:', typeof chunk.data);
-         return;
-       }
+      // WASM encoder chunk - data is already ArrayBuffer or Uint8Array
+      if (chunk.data instanceof ArrayBuffer) {
+        arrayBuffer = chunk.data;
+      } else if (chunk.data instanceof Uint8Array) {
+        arrayBuffer = chunk.data.buffer.slice(
+          chunk.data.byteOffset,
+          chunk.data.byteOffset + chunk.data.byteLength
+        );
+      } else {
+        console.error('[StreamManager] Unknown chunk data type:', typeof chunk.data);
+        return;
+      }
     } else if (typeof chunk.copyTo === 'function') {
       // Native EncodedVideoChunk - use copyTo method
       try {
@@ -738,6 +738,7 @@ export class StreamManager extends EventEmitter<{
     mediaType: "video" | "audio",
   ): Promise<void> {
     let streamData = this.streams.get(channelName);
+    console.log(`[StreamManager] sendConfig for ${channelName}, streamData:`, streamData, "config", config);
 
     if (!streamData) {
       log(`[StreamManager] Stream ${channelName} not ready yet for config, waiting...`);

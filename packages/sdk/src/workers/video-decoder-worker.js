@@ -182,13 +182,19 @@ function createDecoder(channelName) {
   decoder.onOutput = (frame) => {
     if (!port) return;
 
-    // frame = { format: 'yuv420', yPlane, uPlane, vPlane, width, height }
-    // The Uint8Arrays are already copies (WasmH264Decoder does `new Uint8Array`).
-    // Transfer the underlying ArrayBuffers for zero-copy to media worker.
+    // frame.yPlane/uPlane/vPlane point directly into WasmH264Decoder's
+    // preallocated reuse buffers (_yBuf/_uBuf/_vBuf).  Transferring those
+    // buffers detaches them on the sender side so the decoder can no longer
+    // write into them on the next frame — causing "detached ArrayBuffer" on
+    // iOS Safari.  Slice each plane first to get independent copies that are
+    // safe to transfer without affecting the decoder's internal buffers.
     try {
+      const yPlane = frame.yPlane.slice();
+      const uPlane = frame.uPlane.slice();
+      const vPlane = frame.vPlane.slice();
       port.postMessage(
-        { type: "videoData", channelName, frame },
-        [frame.yPlane.buffer, frame.uPlane.buffer, frame.vPlane.buffer]
+        { type: "videoData", channelName, frame: { ...frame, yPlane, uPlane, vPlane } },
+        [yPlane.buffer, uPlane.buffer, vPlane.buffer]
       );
     } catch {
       // Fallback: structured clone (if transfer fails on some browsers)

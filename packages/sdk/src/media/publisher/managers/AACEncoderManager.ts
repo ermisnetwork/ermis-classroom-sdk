@@ -26,7 +26,7 @@ import { log } from "../../../utils";
 
 const AAC_CONFIG = {
   SAMPLE_RATE: 48000,
-  CHANNEL_COUNT: 1, // mono – mirrors current Opus configuration
+  CHANNEL_COUNT: 2, // mono – mirrors current Opus configuration
   BITRATE: 128_000,
   SAMPLES_PER_FRAME: 1024, // AAC-LC frame size
 } as const;
@@ -61,7 +61,10 @@ export class AACEncoderManager extends EventEmitter<{
   private workerReady = false;
 
   // PCM accumulation buffer
-  private pcmBuffer: Float32Array = new Float32Array(AAC_CONFIG.SAMPLES_PER_FRAME);
+  // Size = SAMPLES_PER_FRAME × CHANNEL_COUNT (planar layout: [ch0...ch0, ch1...ch1])
+  private pcmBuffer: Float32Array = new Float32Array(
+    AAC_CONFIG.SAMPLES_PER_FRAME * AAC_CONFIG.CHANNEL_COUNT,
+  );
   private pcmBufferOffset = 0;
 
   // Timing
@@ -347,22 +350,40 @@ export class AACEncoderManager extends EventEmitter<{
    * Accumulate 128-frame PCM quanta into 1024-sample (one AAC frame) buffers.
    * When full, transfer the buffer to the encoder worker.
    */
+  /**
+   * Accumulate 128-frame PCM quanta into 1024-sample AAC frames.
+   *
+   * pcmBuffer layout is **planar**: [ch0 × 1024, ch1 × 1024, ...]
+   * This matches the WebCodecs AudioData 'f32-planar' format expected by the worker.
+   * For mono, ch1 plane is unused (CHANNEL_COUNT = 1).
+   */
   private _accumulatePCM(channelData: Float32Array[]): void {
     if (!this._isEncoding || !this.workerReady || !this.encoderWorker) return;
 
-    const samples = channelData[0]; // mono: take channel 0
-    if (!samples) return;
+    const ch0 = channelData[0];
+    if (!ch0) return;
+
+    const numChannels = AAC_CONFIG.CHANNEL_COUNT;
+    const frameSize = AAC_CONFIG.SAMPLES_PER_FRAME;
 
     let offset = 0;
-    while (offset < samples.length) {
-      const space = AAC_CONFIG.SAMPLES_PER_FRAME - this.pcmBufferOffset;
-      const toCopy = Math.min(space, samples.length - offset);
+    while (offset < ch0.length) {
+      const space = frameSize - this.pcmBufferOffset;
+      const toCopy = Math.min(space, ch0.length - offset);
 
-      this.pcmBuffer.set(samples.subarray(offset, offset + toCopy), this.pcmBufferOffset);
+      // Write each channel into its own plane inside pcmBuffer.
+      for (let c = 0; c < numChannels; c++) {
+        const src = channelData[c] ?? ch0; // fall back to ch0 if channel missing
+        this.pcmBuffer.set(
+          src.subarray(offset, offset + toCopy),
+          c * frameSize + this.pcmBufferOffset,
+        );
+      }
+
       this.pcmBufferOffset += toCopy;
       offset += toCopy;
 
-      if (this.pcmBufferOffset === AAC_CONFIG.SAMPLES_PER_FRAME) {
+      if (this.pcmBufferOffset === frameSize) {
         // Full frame — transfer to worker.
         const timestamp = this._computeTimestampUs();
         const frame = this.pcmBuffer.slice(); // copy so we can reuse pcmBuffer
@@ -371,13 +392,13 @@ export class AACEncoderManager extends EventEmitter<{
             type: "encode",
             pcm: frame,
             sampleRate: AAC_CONFIG.SAMPLE_RATE,
-            numberOfFrames: AAC_CONFIG.SAMPLES_PER_FRAME,
-            numberOfChannels: AAC_CONFIG.CHANNEL_COUNT,
+            numberOfFrames: frameSize,
+            numberOfChannels: numChannels,
             timestamp,
           },
           [frame.buffer],
         );
-        this.samplesSent += AAC_CONFIG.SAMPLES_PER_FRAME;
+        this.samplesSent += frameSize;
         this.pcmBufferOffset = 0;
       }
     }
