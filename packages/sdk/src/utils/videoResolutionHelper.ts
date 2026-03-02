@@ -171,3 +171,45 @@ export function getVideoTrackDimensions(
         return null;
     }
 }
+
+/**
+ * Calculate proportional screen share resolution based on actual capture dimensions.
+ * Maintains aspect ratio while targeting 720p quality level.
+ * 
+ * @param actualWidth - Actual screen capture video track width
+ * @param actualHeight - Actual screen capture video track height
+ * @returns Object with calculated 720p dimensions for screen share
+ */
+export function calculateScreenShareResolution(
+    actualWidth: number,
+    actualHeight: number
+): { width: number; height: number } {
+    const aspectRatio = actualWidth / actualHeight;
+    const isLandscape = aspectRatio >= 1; // >= to handle square (1:1) videos
+
+    let width: number;
+    let height: number;
+
+    if (isLandscape) {
+        // Landscape (e.g., 16:9): height = 720, width proportional
+        height = 720;
+        width = Math.round(720 * aspectRatio);
+    } else {
+        // Portrait (e.g., 9:16): width = 720, height proportional
+        width = 720;
+        height = Math.round(720 / aspectRatio);
+    }
+
+    // Ensure dimensions are even numbers (required for most video encoders)
+    width = Math.round(width / 2) * 2;
+    height = Math.round(height / 2) * 2;
+
+    log('[VideoResolutionHelper] Calculated screen share resolution:', {
+        actual: `${actualWidth}x${actualHeight}`,
+        aspectRatio: aspectRatio.toFixed(3),
+        isLandscape,
+        screenShare720p: `${width}x${height}`,
+    });
+
+    return { width, height };
+}

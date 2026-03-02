@@ -101,6 +101,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private videoProcessor: VideoProcessor | null = null;
   private audioProcessor: AudioProcessor | null = null;
   private InitAudioRecorder: any = null;
+  private publisherAudioContext: AudioContext | null = null;
   private permissions: ParticipantPermissions;
 
   // Reconnection state
@@ -141,6 +142,38 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         config.onStatusUpdate!(message, isError);
       });
     }
+  }
+
+  /**
+   * Determine available publish channels based on device availability and encoder capabilities
+   * iOS 15 Safari (WASM encoder) only supports video_360p, while native encoder supports both 360p and 720p
+   * 
+   * @returns Array of channel names that the publisher is capable of publishing
+   */
+  private getPublishChannels(): string[] {
+    const channels: string[] = [];
+
+    // Add video channels based on device availability
+    // Only publish channels that are in subStreams (already filtered by videoResolutions config)
+    if (this.hasVideo) {
+      for (const sub of this.subStreams) {
+        if (sub.channelName === ChannelName.VIDEO_360P ||
+          sub.channelName === ChannelName.VIDEO_720P ||
+          sub.channelName === ChannelName.VIDEO_1080P ||
+          sub.channelName === ChannelName.VIDEO_1440P) {
+          channels.push(sub.channelName);
+        }
+      }
+    }
+
+    // Add audio channel if mic is available
+    if (this.hasAudio) {
+      channels.push(ChannelName.MICROPHONE);
+    }
+
+    log("[Publisher] Publish channels determined:", channels);
+
+    return channels;
   }
 
   async init(): Promise<void> {
@@ -198,6 +231,16 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (this.isPublishing) {
       console.warn("[Publisher] Already publishing");
       return;
+    }
+
+    // iOS 15 Safari: AudioContext.resume() must be called synchronously within
+    // the user gesture handler. Create and resume AudioContext BEFORE any await
+    // so the gesture context is preserved. On other browsers this is a no-op.
+    const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      this.publisherAudioContext = new AudioContextClass({ sampleRate: 48000 }) as AudioContext;
+      this.publisherAudioContext!.resume().catch(() => { });
+      log("[Publisher] AudioContext created and resume() called in user gesture");
     }
 
     try {
@@ -305,7 +348,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         constraints.audio = {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
+          autoGainControl: false,
         };
       }
 
@@ -353,7 +396,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       type: this.options.streamType || "camera",
       streamId: this.options.streamId,
       config: {
-        codec: "avc1.640c34",
+        codec: "avc1.42e01f", // Constrained Baseline Profile for WASM compatibility
         width: this.options.width || 1280,
         height: this.options.height || 720,
         framerate: this.options.framerate || 30,
@@ -519,31 +562,48 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (this.hasAudio) {
       const audioConfig = {
         sampleRate: 48000,
-        numberOfChannels: 1,
+        numberOfChannels: 2,
       };
 
-      if (!this.InitAudioRecorder || typeof this.InitAudioRecorder !== 'function') {
-        throw new Error(`InitAudioRecorder is not available or not a function: ${typeof this.InitAudioRecorder}`);
+      if (this.options.audioCodec === "aac") {
+        // AAC path — uses FDK-AAC WASM or native WebCodecs AudioEncoder
+        const aacManager = new AACEncoderManager(ChannelName.MICROPHONE, audioConfig);
+        // audioEncoderManager field is typed AudioEncoderManager | null in Publisher.
+        // We cast via the shared base type to comply until Publisher class is updated.
+        this.audioEncoderManager = aacManager as unknown as AudioEncoderManager;
+
+        this.audioProcessor = new AudioProcessor(
+          aacManager,
+          this.streamManager,
+          ChannelName.MICROPHONE,
+        );
+      } else {
+        // Default Opus path (uses Recorder.js WASM)
+        if (!this.InitAudioRecorder || typeof this.InitAudioRecorder !== "function") {
+          throw new Error(
+            `InitAudioRecorder is not available or not a function: ${typeof this.InitAudioRecorder}`,
+          );
+        }
+
+        this.audioEncoderManager = new AudioEncoderManager(
+          ChannelName.MICROPHONE,
+          audioConfig,
+          this.InitAudioRecorder,
+        );
+
+        this.audioProcessor = new AudioProcessor(
+          this.audioEncoderManager,
+          this.streamManager,
+          ChannelName.MICROPHONE,
+        );
       }
-
-      this.audioEncoderManager = new AudioEncoderManager(
-        ChannelName.MICROPHONE,
-        audioConfig,
-        this.InitAudioRecorder
-      );
-
-      this.audioProcessor = new AudioProcessor(
-        this.audioEncoderManager,
-        this.streamManager,
-        ChannelName.MICROPHONE
-      );
 
       this.audioProcessor.on("encoderError", (error) => {
         console.error("[Publisher] Audio encoder error:", error);
         this.updateStatus("Audio encoder error", true);
       });
 
-      log("[Publisher] Audio processor initialized");
+      log(`[Publisher] Audio processor initialized (codec: ${this.options.audioCodec ?? "opus"})`);
     }
   }
 
@@ -620,7 +680,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         }
 
         const baseConfig = {
-          codec: "avc1.640c34",
+          // codec: "avc1.640c34",
+          // Use Constrained Baseline Profile for WASM decoder compatibility
+          // avc1.42e01f = Constrained Baseline Profile, Level 3.1
+          // Note: High Profile (avc1.640c34) has better compression but tinyh264 doesn't support it
+          codec: "avc1.42e01f",
           width: this.options.width || 1280,
           height: this.options.height || 720,
           framerate: this.options.framerate || 30,
@@ -637,7 +701,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       const audioTrack = this.currentStream.getAudioTracks()[0];
       if (audioTrack) {
         const audioStream = new MediaStream([audioTrack]);
-        await this.audioProcessor.initialize(audioStream);
+        await this.audioProcessor.initialize(audioStream, this.publisherAudioContext ?? undefined);
         await this.audioProcessor.start();
         log("[Publisher] Audio processing started");
       }
@@ -766,7 +830,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
           deviceId: { exact: deviceId },
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
+          autoGainControl: false,
         },
       });
 
@@ -928,6 +992,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       if (this.webRtcManager) {
         await this.webRtcManager.close();
         this.webRtcManager = null;
+      }
+
+      if (this.publisherAudioContext && this.publisherAudioContext.state !== 'closed') {
+        this.publisherAudioContext.close().catch(() => { });
+        this.publisherAudioContext = null;
       }
 
       if (this.currentStream) {
@@ -1108,6 +1177,18 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       throw new Error("Invalid screen MediaStream provided");
     }
 
+    // iOS 15 Safari: pre-resume AudioContext for screen share audio
+    // before any await, same pattern as startPublishing()
+    const hasScreenAudio = screenMediaStream.getAudioTracks().length > 0;
+    let screenAudioContext: AudioContext | undefined;
+    if (hasScreenAudio) {
+      const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AudioContextClass) {
+        screenAudioContext = new AudioContextClass({ sampleRate: 48000 }) as AudioContext;
+        screenAudioContext.resume().catch(() => { });
+      }
+    }
+
     try {
       this.screenStream = screenMediaStream;
 
@@ -1149,7 +1230,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       // Start audio if available
       if (hasAudio) {
-        await this.startScreenAudioStreaming();
+        await this.startScreenAudioStreaming(screenAudioContext);
       }
 
       // Wait for video config to be sent before announcing screen share
@@ -1230,53 +1311,77 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     }
   }
 
+  /**
+   * Wait for viewport to stabilize after getDisplayMedia.
+   * Chrome's sharing indicator bar animates in, causing MULTIPLE resize events.
+   * Debounce: wait until no HEIGHT resize fires for 300ms (bar fully settled).
+   * Only reacts to height changes — ignores width-only resizes (e.g. DevTools, sidebar).
+   * Fallback: if no height resize within 3s, proceed with current dimensions.
+   */
+  private async waitForViewportStabilization(): Promise<void> {
+    const heightBeforeShare = window.innerHeight;
+    await new Promise<void>(resolve => {
+      let debounceTimer: ReturnType<typeof setTimeout>;
+      let lastSeenHeight = heightBeforeShare;
+      const onResize = () => {
+        const currentHeight = window.innerHeight;
+        if (currentHeight === lastSeenHeight) return;
+        lastSeenHeight = currentHeight;
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          window.removeEventListener('resize', onResize);
+          clearTimeout(fallbackTimer);
+          log('[Publisher] Viewport stabilized after resize');
+          resolve();
+        }, 300);
+      };
+      const fallbackTimer = setTimeout(() => {
+        window.removeEventListener('resize', onResize);
+        clearTimeout(debounceTimer);
+        log('[Publisher] Viewport stabilized (fallback timeout)');
+        resolve();
+      }, 3000);
+      window.addEventListener('resize', onResize);
+    });
+  }
+
   private async startScreenVideoCapture(): Promise<void> {
     if (!this.screenStream || !this.streamManager) return;
 
     const videoTrack = this.screenStream.getVideoTracks()[0];
     if (!videoTrack) return;
 
+    // Wait for Chrome's sharing bar to stabilize before reading dimensions
+    await this.waitForViewportStabilization();
+
     // Initialize video encoder manager for screen share
-    let screenSubStreams = getSubStreams("screen_share", {
+    const screenSubStreams = getSubStreams("screen_share", {
       can_publish: this.options.permissions.can_publish,
       can_publish_sources: this.options.permissions.can_publish_sources,
     });
-
-    // Extract actual screen dimensions and calculate dynamic resolutions
-    const { calculateSubStreamResolutions, getVideoTrackDimensions } = await import('../../utils/videoResolutionHelper');
-    const actualDimensions = getVideoTrackDimensions(videoTrack);
-
-    let screenWidth = 1280;
-    let screenHeight = 720;
-
-    if (actualDimensions) {
-      screenWidth = actualDimensions.width;
-      screenHeight = actualDimensions.height;
-      log("[Publisher] Actual screen share dimensions:", `${screenWidth}x${screenHeight}`);
-
-      const { video720p } = calculateSubStreamResolutions(screenWidth, screenHeight);
-      log("[Publisher] Calculated screen share 720p resolution:", `${video720p.width}x${video720p.height}`);
-
-      // Update screenSubStreams with calculated dimensions
-      screenSubStreams = screenSubStreams.map(subStream => {
-        if (subStream.channelName === ChannelName.SCREEN_SHARE_720P) {
-          return { ...subStream, width: video720p.width, height: video720p.height };
-        }
-        return subStream;
-      });
-
-      log("[Publisher] Updated screen share subStreams:", screenSubStreams);
-    } else {
-      log("[Publisher] Could not get actual screen dimensions, using defaults");
-    }
-
     this.screenVideoEncoderManager = new VideoEncoderManager();
 
-    // Create video processor for screen share
+    // Calculate proportional resolution from actual capture dimensions
+    const { calculateScreenShareResolution } = await import('../../utils/videoResolutionHelper');
+    const trackSettings = videoTrack.getSettings();
+    const actualWidth = trackSettings.width || 1920;
+    const actualHeight = trackSettings.height || 1080;
+    log('[Publisher] Screen share dimensions after stabilization:', `${actualWidth}x${actualHeight}`);
+    const { width: screenWidth, height: screenHeight } = calculateScreenShareResolution(actualWidth, actualHeight);
+
+    // Update subStreams with actual proportional dimensions
+    const updatedSubStreams = screenSubStreams.map(subStream => {
+      if (subStream.channelName === ChannelName.SCREEN_SHARE_720P) {
+        return { ...subStream, width: screenWidth, height: screenHeight };
+      }
+      return subStream;
+    });
+
+    // Create video processor for screen share with updated subStreams
     this.screenVideoProcessor = new VideoProcessor(
       this.screenVideoEncoderManager,
       this.streamManager,
-      screenSubStreams as any
+      updatedSubStreams as any
     );
 
     this.screenVideoProcessor.on("encoderError", (error) => {
@@ -1289,23 +1394,23 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       this.updateStatus("Screen video processing error", true);
     });
 
-    // Initialize and start video processing with actual dimensions
+    // Initialize and start video processing
     const baseConfig = {
       codec: "avc1.640c34",
       width: screenWidth,
       height: screenHeight,
-      framerate: 20, // Lower framerate for screen share
-      bitrate: 1000000, // 1 Mbps for screen share
-      latencyMode: "quality" as const, // Smoother encoding, reduces keyframe spikes
+      framerate: 20,
+      bitrate: 1000000,
+      latencyMode: "quality" as const,
     };
 
     await this.screenVideoProcessor.initialize(videoTrack, baseConfig);
     await this.screenVideoProcessor.start();
 
-    log("[Publisher] Screen video processing started with dimensions:", `${screenWidth}x${screenHeight}`);
+    log("[Publisher] Screen video processing started");
   }
 
-  private async startScreenAudioStreaming(): Promise<void> {
+  private async startScreenAudioStreaming(audioContext?: AudioContext): Promise<void> {
     if (!this.screenStream || !this.streamManager) return;
 
     const audioTrack = this.screenStream.getAudioTracks()[0];
@@ -1317,7 +1422,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     const audioConfig = {
       sampleRate: 48000,
-      numberOfChannels: 1,
+      numberOfChannels: 2,
     };
 
     // Create audio encoder manager for screen share audio
@@ -1341,7 +1446,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     // Initialize with screen audio stream
     const screenAudioStream = new MediaStream([audioTrack]);
-    await this.screenAudioProcessor.initialize(screenAudioStream);
+    await this.screenAudioProcessor.initialize(screenAudioStream, audioContext);
     await this.screenAudioProcessor.start();
 
     log("[Publisher] Screen audio processing started");
@@ -2092,35 +2197,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         };
       }
 
-      // Wait for viewport to stabilize after getDisplayMedia.
-      // Chrome's sharing indicator bar animates in, causing MULTIPLE resize events.
-      // Debounce: wait until no HEIGHT resize fires for 300ms (bar fully settled).
-      // Only reacts to height changes — ignores width-only resizes (e.g. DevTools, sidebar).
-      const heightBeforeShare = window.innerHeight;
-      await new Promise<void>(resolve => {
-        let debounceTimer: ReturnType<typeof setTimeout>;
-        let lastSeenHeight = heightBeforeShare;
-        const onResize = () => {
-          const currentHeight = window.innerHeight;
-          // Ignore width-only resizes (DevTools, sidebars, etc.)
-          if (currentHeight === lastSeenHeight) return;
-          lastSeenHeight = currentHeight;
-          // Reset debounce timer on each height change
-          clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(() => {
-            window.removeEventListener('resize', onResize);
-            clearTimeout(fallbackTimer);
-            resolve();
-          }, 300);
-        };
-        // Fallback: if no height resize within 3s, proceed with current dimensions
-        const fallbackTimer = setTimeout(() => {
-          window.removeEventListener('resize', onResize);
-          clearTimeout(debounceTimer);
-          resolve();
-        }, 3000);
-        window.addEventListener('resize', onResize);
-      });
+      // Wait for Chrome's sharing bar to stabilize before reading dimensions
+      await this.waitForViewportStabilization();
 
       this.preCaptureViewportDimensions = {
         width: window.innerWidth,
@@ -2364,28 +2442,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private async recalculateLivestreamResolution(): Promise<void> {
     if (!this.livestreamVideoProcessor || !this.tabStream || !this.streamManager) return;
 
-    // Wait for viewport to stabilize after sharing bar animation
-    await new Promise<void>(resolve => {
-      let debounceTimer: ReturnType<typeof setTimeout>;
-      let lastSeenHeight = window.innerHeight;
-      const onResize = () => {
-        const currentHeight = window.innerHeight;
-        if (currentHeight === lastSeenHeight) return;
-        lastSeenHeight = currentHeight;
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          window.removeEventListener('resize', onResize);
-          clearTimeout(fallbackTimer);
-          resolve();
-        }, 300);
-      };
-      const fallbackTimer = setTimeout(() => {
-        window.removeEventListener('resize', onResize);
-        clearTimeout(debounceTimer);
-        resolve();
-      }, 2000);
-      window.addEventListener('resize', onResize);
-    });
+    // Wait for Chrome's sharing bar to stabilize before reading dimensions
+    await this.waitForViewportStabilization();
 
     // Recalculate resolution from current tab capture track dimensions
     const { calculateLivestreamResolution, getVideoTrackDimensions } =
@@ -2674,31 +2732,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         displayMediaOptions as DisplayMediaStreamOptions
       );
 
-      // Wait for viewport to stabilize after getDisplayMedia (same as captureCurrentTab).
-      // Chrome's sharing indicator bar animates in, causing MULTIPLE resize events.
+      // Wait for Chrome's sharing bar to stabilize before reading dimensions
       if (!this.preCaptureViewportDimensions) {
-        const heightBeforeShare = window.innerHeight;
-        await new Promise<void>(resolve => {
-          let debounceTimer: ReturnType<typeof setTimeout>;
-          let lastSeenHeight = heightBeforeShare;
-          const onResize = () => {
-            const currentHeight = window.innerHeight;
-            if (currentHeight === lastSeenHeight) return;
-            lastSeenHeight = currentHeight;
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-              window.removeEventListener('resize', onResize);
-              clearTimeout(fallbackTimer);
-              resolve();
-            }, 300);
-          };
-          const fallbackTimer = setTimeout(() => {
-            window.removeEventListener('resize', onResize);
-            clearTimeout(debounceTimer);
-            resolve();
-          }, 3000);
-          window.addEventListener('resize', onResize);
-        });
+        await this.waitForViewportStabilization();
         this.preCaptureViewportDimensions = {
           width: window.innerWidth,
           height: window.innerHeight,

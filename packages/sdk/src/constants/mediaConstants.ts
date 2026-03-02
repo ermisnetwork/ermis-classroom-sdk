@@ -87,7 +87,7 @@ export const VIDEO_CONFIG = {
  */
 export const AUDIO_CONFIG = {
   SAMPLE_RATE: 48000,
-  CHANNEL_COUNT: 1,
+  CHANNEL_COUNT: 2,
   OPUS_SAMPLES_PER_CHUNK: 960, // 20ms at 48kHz
   BITRATE: 64000,
 } as const;

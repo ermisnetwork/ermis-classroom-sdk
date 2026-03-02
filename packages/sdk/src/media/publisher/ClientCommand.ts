@@ -219,7 +219,7 @@ export class CommandSender {
     this.heartbeatInterval = setInterval(async () => {
       try {
         await this.sendHeartbeat(streamData);
-        log('[CommandSender] Heartbeat sent');
+        // log('[CommandSender] Heartbeat sent');
       } catch (error) {
         console.error('[CommandSender] Failed to send heartbeat:', error);
       }
