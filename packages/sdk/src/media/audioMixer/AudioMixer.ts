@@ -85,11 +85,11 @@ export class AudioMixer {
       // start playing (autoplay blocked, play() rejected) even after resume().
       // A direct connection to audioContext.destination plays as soon as the
       // AudioContext is in "running" state, regardless of <audio> element state.
-      this.audioContext.destination.channelCount = Math.min(
-        2,
-        this.audioContext.destination.maxChannelCount,
-      );
-      this.mixerNode.connect(this.audioContext.destination);
+      // this.audioContext.destination.channelCount = Math.min(
+      //   2,
+      //   this.audioContext.destination.maxChannelCount,
+      // );
+      // this.mixerNode.connect(this.audioContext.destination);
 
       // Create hidden audio element for mixed audio playback
       this.outputAudioElement = document.createElement("audio");

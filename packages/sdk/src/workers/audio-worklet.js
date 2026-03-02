@@ -183,13 +183,13 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
 
     // Calculate and report buffer health (use first channel as reference)
     const bufferFrames = this.audioBuffers[0] ? this.audioBuffers[0].length : 0;
-    const bufferMs = (bufferFrames / this.sampleRate) * 1000;
-    this.port.postMessage({
-      type: "bufferStatus",
-      bufferMs: bufferMs,
-      isPlaying: this.isPlaying,
-      bufferSamples: bufferFrames,
-    });
+    // const bufferMs = (bufferFrames / this.sampleRate) * 1000;
+    // this.port.postMessage({
+    //   type: "bufferStatus",
+    //   bufferMs: bufferMs,
+    //   isPlaying: this.isPlaying,
+    //   bufferSamples: bufferFrames,
+    // });
 
     // Check for buffer underrun
     if (!this.isPlaying || bufferFrames < outputLength) {

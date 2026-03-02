@@ -206,7 +206,6 @@ const createVideoInit = (channelName) => ({
   },
 });
 
-let audioDataCount = 0;
 const audioInit = {
   output: (audioData) => {
     // Always close AudioData in finally to prevent memory leak even if an error occurs
@@ -229,12 +228,6 @@ const audioInit = {
     
 
       if (workletPort) {
-        audioDataCount++;
-        if (audioDataCount % 100 === 0) {
-          console.log("protocol", protocol, "isWebRTC", isWebRTC)
-          console.log('[Audio] audioDataCount:', audioDataCount);
-          console.log('[Audio] send audio data to worklet:', audioData);
-        }
         // Log first few frames and sample values to verify data integrity
         workletPort.postMessage(
           {

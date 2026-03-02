@@ -158,9 +158,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (this.hasVideo) {
       for (const sub of this.subStreams) {
         if (sub.channelName === ChannelName.VIDEO_360P ||
-            sub.channelName === ChannelName.VIDEO_720P ||
-            sub.channelName === ChannelName.VIDEO_1080P ||
-            sub.channelName === ChannelName.VIDEO_1440P) {
+          sub.channelName === ChannelName.VIDEO_720P ||
+          sub.channelName === ChannelName.VIDEO_1080P ||
+          sub.channelName === ChannelName.VIDEO_1440P) {
           channels.push(sub.channelName);
         }
       }
@@ -348,7 +348,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         constraints.audio = {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
+          autoGainControl: false,
         };
       }
 
@@ -830,7 +830,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
           deviceId: { exact: deviceId },
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
+          autoGainControl: false,
         },
       });
 
