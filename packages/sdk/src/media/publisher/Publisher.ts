@@ -1401,11 +1401,17 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       numberOfChannels: 2,
     };
 
+
     // Create audio encoder manager for screen share audio
-    const screenAudioEncoderManager = new AudioEncoderManager(
+    // const screenAudioEncoderManager = new AudioEncoderManager(
+    //   ChannelName.SCREEN_SHARE_AUDIO,
+    //   audioConfig,
+    //   this.InitAudioRecorder
+    // );
+
+    const screenAudioEncoderManager = new AACEncoderManager(
       ChannelName.SCREEN_SHARE_AUDIO,
-      audioConfig,
-      this.InitAudioRecorder
+      audioConfig
     );
 
     // Create audio processor for screen share
