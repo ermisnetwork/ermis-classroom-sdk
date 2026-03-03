@@ -55,23 +55,34 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   }
 
   /**
-   * Detect if nested workers are unsupported (iOS Safari < 15.5).
-   * When true, the decoder worker must be created from the main thread
-   * and bridged to the media worker via MessagePort.
+   * Detect if the external decoder worker bridge is needed.
+   *
+   * Only iOS 15 Safari requires the bridge:
+   *  - iOS 15 has no VideoDecoder API → WASM tinyh264 must run in a separate
+   *    worker (video-decoder-worker.js) so it doesn't block the media-worker
+   *    event loop that handles audio.
+   *  - iOS 16+ / iOS 18 have native VideoDecoder → the media worker calls
+   *    isNativeH264DecoderSupported() and uses native WebCodecs directly;
+   *    no external WASM worker is needed.
+   *  - Desktop Safari / Chrome — same: native VideoDecoder available.
+   *
+   * We detect by capability (VideoDecoder presence) rather than UA version
+   * string to be future-proof and avoid fragile version parsing.
    */
   private needsExternalDecoderWorker(): boolean {
     if (typeof navigator === 'undefined') return false;
     const ua = navigator.userAgent;
-    // iPadOS 13+ reports "Macintosh" in UA — detect via maxTouchPoints
     const isIOS = /iPad|iPhone|iPod/.test(ua) ||
       (ua.includes('Macintosh') && navigator.maxTouchPoints > 0);
     const isSafari = /Safari/.test(ua) && !/Chrome|CriOS|FxiOS/.test(ua);
 
-    // Module workers (type: "module") on iOS Safari do not expose the Worker
-    // constructor regardless of Safari version (even 15.5+ which added nested
-    // worker support for classic workers only).  Always use the external
-    // decoder worker bridge for iOS Safari.
-    return isIOS && isSafari;
+    if (!isIOS || !isSafari) return false;
+
+    // iOS 15: VideoDecoder is not available → need external WASM worker
+    // iOS 16+ / iOS 18: VideoDecoder available → use native decoder in media-worker
+    const hasVideoDecoder = typeof VideoDecoder !== 'undefined';
+    console.log(`[WorkerManager] iOS Safari detected — VideoDecoder available: ${hasVideoDecoder} → external worker: ${!hasVideoDecoder}`);
+    return !hasVideoDecoder;
   }
 
   /**

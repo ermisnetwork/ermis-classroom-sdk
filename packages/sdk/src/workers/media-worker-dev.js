@@ -135,6 +135,7 @@ async function createPolyfillDecoder(channelName) {
 async function createVideoDecoderWithFallback(channelName) {
   try {
     const nativeSupported = await isNativeH264DecoderSupported();
+    console.log(`[VideoDecoder] Native H264 decoder supported: ${nativeSupported}`, "type of VideoDecoder", typeof VideoDecoder);
     if (nativeSupported) {
       console.log(`[VideoDecoder] ✅ Using NATIVE decoder for ${channelName}`);
       return new VideoDecoder(createVideoInit(channelName));
@@ -1373,10 +1374,9 @@ async function initializeDecoders() {
       if (videoDecoderPort) {
         console.log('[Worker] Screen share video decoding offloaded to external worker');
       } else {
-        mediaDecoders.set(
-          CHANNEL_NAME.SCREEN_SHARE_720P,
-          new VideoDecoder(createVideoInit(CHANNEL_NAME.SCREEN_SHARE_720P))
-        );
+        // Use same native/WASM fallback logic as camera path
+        const screenDecoder = await createVideoDecoderWithFallback(CHANNEL_NAME.SCREEN_SHARE_720P);
+        mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_720P, screenDecoder);
       }
       mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_AUDIO, new OpusAudioDecoder(audioInit));
       proxyConsole.warn(
