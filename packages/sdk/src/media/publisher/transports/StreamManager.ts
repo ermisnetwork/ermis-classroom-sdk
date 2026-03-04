@@ -85,7 +85,8 @@ export class StreamManager extends EventEmitter<{
   public streamId: string;
   private publisherState: PublisherState = { ...DEFAULT_PUBLISHER_STATE };
   private gopSenders = new Map<ChannelName, StreamDataGop>();
-  private readonly GOP_SIZE = 30;
+  private readonly VIDEO_GOP_SIZE = 30;
+  private readonly AUDIO_GOP_SIZE = 50; // ~1s of audio at ~50 packets/sec
 
   constructor(isWebRTC: boolean = false, streamID?: string) {
     super();
@@ -721,7 +722,7 @@ export class StreamManager extends EventEmitter<{
     // use GOP sender if iswebtransport
     if (!this.isWebRTC && gopSender) {
       if (isKeyframe) {
-        await gopSender.startGop(channel, this.GOP_SIZE);
+        await gopSender.startGop(channel, this.VIDEO_GOP_SIZE);
         gopData.currentGopFrames = 0;
       }
 
@@ -784,8 +785,26 @@ export class StreamManager extends EventEmitter<{
     );
 
     // console.log(`[StreamManager] 📤 sendAudioChunk: Sending packet for ${channelName}, seq: ${sequenceNumber}, size: ${packet.length}`);
-    this.sendPacket(channelName, packet, FrameType.AUDIO);
-    // console.log(`[StreamManager] ✅ sendAudioChunk: Packet sent for ${channelName}`);
+
+    // On WebTransport, route audio through GOP-style uni streams to avoid
+    // bidi stream backpressure that permanently blocks audio on Android.
+    const gopData = this.gopSenders.get(channelName);
+    const gopSender = gopData?.gopSender;
+    if (!this.isWebRTC && gopSender) {
+      // Start a new audio "GOP" (batch) every AUDIO_GOP_SIZE frames
+      if (gopData.currentGopFrames >= this.AUDIO_GOP_SIZE || gopData.currentGopFrames === 0) {
+        const channel = channelName === ChannelName.SCREEN_SHARE_AUDIO ? 6 : 5;
+        console.log(`[StreamManager] 🎵 Audio GOP: starting new batch, gopFrames=${gopData.currentGopFrames}, channel=${channel}`);
+        await gopSender.startGop(channel, this.AUDIO_GOP_SIZE);
+        gopData.currentGopFrames = 0;
+      }
+
+      await gopSender.sendFrame(packet, timestamp, FrameType.AUDIO);
+      gopData.currentGopFrames++;
+    } else {
+      console.warn(`[StreamManager] 🎵 Audio NOT using GOP path: isWebRTC=${this.isWebRTC}, gopSender=${!!gopSender}, gopData=${!!gopData}, channel=${channelName}`);
+      await this.sendPacket(channelName, packet, FrameType.AUDIO);
+    }
   }
 
   /**
@@ -977,7 +996,6 @@ export class StreamManager extends EventEmitter<{
         await this.sendViaWebTransport(streamData, packet);
       }
     } catch (error) {
-      // ? thêm log cho trường hợp ban
       // console.error(
       //   `[StreamManager] Error sending packet on ${channelName}:`,
       //   error,
@@ -996,6 +1014,11 @@ export class StreamManager extends EventEmitter<{
   ): Promise<void> {
     if (!streamData.writer) {
       throw new Error("Stream writer not available");
+    }
+
+    if (streamData.writer.desiredSize !== null && streamData.writer.desiredSize <= 0) {
+      console.warn(`[StreamManager] ⚠️ Backpressure | desiredSize: ${streamData.writer.desiredSize} | currentPacketSize: ${packet.length}`);
+      return;
     }
 
     // Wrap packet with length-delimited format (4 bytes length prefix)
