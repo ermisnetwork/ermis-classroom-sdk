@@ -26,3 +26,5 @@ export {
   FrameType,
   TransportPacketType,
 } from '../../types/media/publisher.types';
+
+export { GopStreamHeaderEncoder, FrameHeaderEncoder, } from './utils/FrameCodec';
