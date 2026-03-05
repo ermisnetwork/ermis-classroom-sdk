@@ -312,6 +312,30 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   }
 
   /**
+   * Tell the worker to create a WebTransport session itself using the given URL.
+   * The worker will open the bidi stream for commands AND listen to
+   * incomingUnidirectionalStreams for GOP data — all without DataCloneErrors.
+   */
+  attachWebTransportUrl(
+    url: string,
+    channelName: ChannelName,
+    localStreamId: string,
+  ): void {
+    if (!this.worker || !this.isInitialized) {
+      throw new Error("Worker not initialized");
+    }
+
+    log(`[WorkerManager] Sending attachWebTransportUrl to worker: ${url}`);
+
+    this.worker.postMessage({
+      type: "attachWebTransportUrl",
+      url,
+      channelName,
+      localStreamId,
+    });
+  }
+
+  /**
    * Toggle audio on/off
    */
   toggleAudio(): void {
