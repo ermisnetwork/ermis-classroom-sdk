@@ -794,7 +794,7 @@ export class StreamManager extends EventEmitter<{
       // Start a new audio "GOP" (batch) every AUDIO_GOP_SIZE frames
       if (gopData.currentGopFrames >= this.AUDIO_GOP_SIZE || gopData.currentGopFrames === 0) {
         const channel = channelName === ChannelName.SCREEN_SHARE_AUDIO ? 6 : 5;
-        console.log(`[StreamManager] 🎵 Audio GOP: starting new batch, gopFrames=${gopData.currentGopFrames}, channel=${channel}`);
+        // console.log(`[StreamManager] 🎵 Audio GOP: starting new batch, gopFrames=${gopData.currentGopFrames}, channel=${channel}`);
         await gopSender.startGop(channel, this.AUDIO_GOP_SIZE);
         gopData.currentGopFrames = 0;
       }
@@ -802,7 +802,7 @@ export class StreamManager extends EventEmitter<{
       await gopSender.sendFrame(packet, timestamp, FrameType.AUDIO);
       gopData.currentGopFrames++;
     } else {
-      console.warn(`[StreamManager] 🎵 Audio NOT using GOP path: isWebRTC=${this.isWebRTC}, gopSender=${!!gopSender}, gopData=${!!gopData}, channel=${channelName}`);
+      // console.warn(`[StreamManager] 🎵 Audio NOT using GOP path: isWebRTC=${this.isWebRTC}, gopSender=${!!gopSender}, gopData=${!!gopData}, channel=${channelName}`);
       await this.sendPacket(channelName, packet, FrameType.AUDIO);
     }
   }

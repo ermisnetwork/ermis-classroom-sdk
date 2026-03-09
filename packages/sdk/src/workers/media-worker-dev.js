@@ -307,6 +307,24 @@ self.onmessage = async function (e) {
       }
       break;
 
+    case "attachWebTransportUrl":
+      // Worker creates the WebTransport session itself so we can directly
+      // call incomingUnidirectionalStreams.getReader() following the MDN pattern,
+      // without any postMessage transfer issues.
+      if (e.data.url) {
+        commandSender = new CommandSender({
+          localStreamId: e.data.localStreamId,
+          sendDataFn: sendOverStream,
+          protocol: "webtransport",
+          commandType: "subscriber_command",
+        });
+        proxyConsole.warn(`[Worker] Connecting WebTransport inside worker: ${e.data.url}`);
+        attachWebTransportFromUrl(e.data.url, e.data.channelName).catch((err) => {
+          console.error('[Worker] attachWebTransportFromUrl error:', err);
+        });
+      }
+      break;
+
     case "attachStream":
       if (readable && writable) {
         commandSender = new CommandSender({
@@ -936,6 +954,36 @@ async function attachWebTransportStream(readable, writable, channelName) {
   readStream(webTPStreamReader);
 }
 
+/**
+ * Create a WebTransport session inside the worker from a URL.
+ * This avoids all postMessage DataCloneErrors because the session object
+ * and its incomingUnidirectionalStreams are never transferred across threads.
+ */
+async function attachWebTransportFromUrl(url, channelName) {
+  const transport = new WebTransport(url);
+  await transport.ready;
+  console.log('[WebTransport] Session ready inside worker');
+
+  // ── Bidi stream: used for command send/receive (DecoderConfigs, etc.) ──
+  const bidi = await transport.createBidirectionalStream();
+  webTPStreamReader = bidi.readable.getReader();
+  webTPStreamWriter = bidi.writable.getWriter();
+
+  const options = {
+    audio: subscribeType === STREAM_TYPE.CAMERA ? true : subscriptionAudioEnabled,
+    video: true,
+    initialQuality: subscribeType === STREAM_TYPE.CAMERA ? (initialQuality || channelName) : channelName,
+  };
+  commandSender.initSubscribeChannelStream(subscribeType, options);
+  commandSender.startStream();
+
+  // ── Bidi stream reader: DecoderConfigs + legacy media packets ──
+  readStream(webTPStreamReader);
+
+  // ── Unidirectional streams: one stream per GOP from the node server ──
+  receiveUnidirectional(transport);
+}
+
 async function sendOverStream(frameBytes) {
   if (!webTPStreamWriter) {
     console.error(`[sendOverStream] WebTransport stream writer not found!`);
@@ -970,6 +1018,226 @@ async function readStream(reader) {
     }
   } catch (err) {
     proxyConsole.error(`[readStream] error after ${messageCount} messages:`, err);
+  }
+}
+
+// ======================================
+// GOP Stream Receiver (WebTransport unidirectional streams)
+// ======================================
+
+/**
+ * GopByteReader wraps a ReadableStreamDefaultReader and maintains an internal
+ * byte buffer, allowing exact-size reads across WebTransport chunk boundaries.
+ */
+class GopByteReader {
+  constructor(reader) {
+    this.reader = reader;
+    this.buf = new Uint8Array(0);
+    this.done = false;
+  }
+
+  /**
+   * Read exactly `size` bytes. Returns null if the stream ended.
+   */
+  async readExact(size) {
+    while (this.buf.length < size) {
+      if (this.done) return null;
+      const { value, done } = await this.reader.read();
+      if (done) {
+        this.done = true;
+        // Stream closed before we got enough bytes
+        return this.buf.length >= size ? this._consume(size) : null;
+      }
+      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+      const merged = new Uint8Array(this.buf.length + chunk.length);
+      merged.set(this.buf, 0);
+      merged.set(chunk, this.buf.length);
+      this.buf = merged;
+    }
+    return this._consume(size);
+  }
+
+  _consume(size) {
+    const out = this.buf.slice(0, size);
+    this.buf = this.buf.slice(size);
+    return out;
+  }
+}
+
+/**
+ * Loop over all incoming unidirectional streams from the WebTransport session.
+ * Follows the MDN pattern exactly:
+ *   const reader = transport.incomingUnidirectionalStreams.getReader();
+ *   while (true) { const { done, value } = await reader.read(); ... }
+ */
+async function receiveUnidirectional(transport) {
+  console.log('[GOP] 🎬 receiveUnidirectional: starting GOP stream listener');
+  let gopCount = 0;
+  const reader = transport.incomingUnidirectionalStreams.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      console.warn('[GOP] incomingUnidirectionalStreams closed');
+      break;
+    }
+    // value is a WebTransportReceiveStream (one GOP from the node)
+    gopCount++;
+    // Do NOT await — process each GOP stream in parallel
+    readGopStream(value, gopCount).catch((err) => {
+      proxyConsole.error('[GOP] readGopStream error:', err);
+    });
+  }
+}
+
+/**
+ * Read all frames from a single WebTransportReceiveStream (one GOP).
+ * MDN pattern: const reader = receiveStream.getReader(); reader.read() loop.
+ * Data is fed through GopByteReader for exact-size reads across chunks.
+ *
+ * Wire format (GopStreamSender / GopStreamHeaderEncoder):
+ *  GOP Header: [streamIdLen:2B][streamId:N][channel:1B][gopId:4B][expected:2B]
+ *  Per frame:  [sequence:4B][timestamp:4B][frameType:1B][payloadSize:4B][payload]
+ */
+async function readGopStream(receiveStream, gopIndex) {
+  const byteReader = new GopByteReader(receiveStream.getReader());
+  try {
+    // ── 1. GOP Header ────────────────────────────────────────────────────
+    const streamIdLenBytes = await byteReader.readExact(2);
+    if (!streamIdLenBytes) return;
+    const streamIdLen = new DataView(streamIdLenBytes.buffer).getUint16(0, false);
+
+    const gopMeta = await byteReader.readExact(streamIdLen + 1 + 4 + 2);
+    if (!gopMeta) return;
+
+    const streamId = new TextDecoder().decode(gopMeta.subarray(0, streamIdLen));
+    const dv = new DataView(gopMeta.buffer, gopMeta.byteOffset, gopMeta.byteLength);
+    let off = streamIdLen;
+    const channel        = dv.getUint8(off);       off += 1;
+    const gopId          = dv.getUint32(off, false); off += 4;
+    const expectedFrames = dv.getUint16(off, false);
+
+    if (gopIndex <= 3) {
+      console.log(`[GOP] #${gopIndex} streamId=${streamId} ch=${channel} gopId=${gopId} expected=${expectedFrames}`);
+    }
+
+    // ── 2. Frame loop ────────────────────────────────────────────────────
+    const FRAME_HEADER_SIZE = 13; // sequence(4)+timestamp(4)+frameType(1)+payloadSize(4)
+    let frameCount = 0;
+    while (true) {
+      const headerBytes = await byteReader.readExact(FRAME_HEADER_SIZE);
+      if (!headerBytes) break; // stream ended — normal GOP completion
+
+      const fv = new DataView(headerBytes.buffer, headerBytes.byteOffset, FRAME_HEADER_SIZE);
+      const payloadSize = fv.getUint32(9, false);
+
+      if (payloadSize === 0 || payloadSize > 10_000_000) {
+        console.warn(`[GOP] ch=${channel} gopId=${gopId} implausible payloadSize=${payloadSize}`);
+        break;
+      }
+
+      const payload = await byteReader.readExact(payloadSize);
+      if (!payload) break;
+
+      frameCount++;
+      // Reconstruct full packet: [seq:4][ts:4][frameType:1] + media_payload
+      // handleBinaryPacket() expects this 9-byte prefix to route to the correct decoder.
+      const fullPacket = new Uint8Array(9 + payload.length);
+      fullPacket.set(headerBytes.subarray(0, 9), 0);  // seq + ts + frameType from FrameHeader
+      fullPacket.set(payload, 9);
+      await processIncomingMessage(fullPacket);
+    }
+
+    if (gopIndex <= 3 || frameCount !== expectedFrames) {
+      proxyConsole.log(`[GOP] #${gopIndex} done: ch=${channel} gopId=${gopId} frames=${frameCount}/${expectedFrames}`);
+    }
+  } catch (err) {
+    proxyConsole.error(`[GOP] readGopStream #${gopIndex} error:`, err);
+  }
+}
+
+/**
+ * Handle a single incoming GOP unidirectional stream.
+ *
+ * Wire format written by GopStreamSender / GopStreamHeaderEncoder:
+ *
+ *  GOP Header (variable):
+ *    [streamIdLen: 2B big-endian]
+ *    [streamId:   N bytes UTF-8]
+ *    [channel:    1B]
+ *    [gopId:      4B big-endian]
+ *    [expected:   2B big-endian]
+ *
+ *  Then, for each frame (FrameHeaderEncoder.SIZE = 13):
+ *    [sequence:   4B big-endian]
+ *    [timestamp:  4B big-endian]
+ *    [frameType:  1B]
+ *    [payloadSz:  4B big-endian]
+ *    [payload:    payloadSz bytes]  ← same binary packet format as bidi stream
+ */
+async function handleGopStream(stream, gopIndex) {
+  const reader = stream.getReader();
+  const byteReader = new GopByteReader(reader);
+
+  try {
+    // ── 1. Parse GOP Header ──────────────────────────────────────────────
+    const streamIdLenBytes = await byteReader.readExact(2);
+    if (!streamIdLenBytes) return;
+    const streamIdLen = new DataView(streamIdLenBytes.buffer).getUint16(0, false);
+
+    // streamId(N) + channel(1) + gopId(4) + expectedFrames(2)
+    const gopMeta = await byteReader.readExact(streamIdLen + 1 + 4 + 2);
+    if (!gopMeta) return;
+
+    const streamId = new TextDecoder().decode(gopMeta.subarray(0, streamIdLen));
+    let off = streamIdLen;
+    const dv = new DataView(gopMeta.buffer, gopMeta.byteOffset, gopMeta.byteLength);
+    const channel = dv.getUint8(off); off += 1;
+    const gopId   = dv.getUint32(off, false); off += 4;
+    const expectedFrames = dv.getUint16(off, false);
+
+    if (gopIndex <= 3) {
+      console.log(`[GOP] #${gopIndex} streamId=${streamId} ch=${channel} gopId=${gopId} expected=${expectedFrames}`);
+    }
+
+    // ── 2. Read frames until stream ends ─────────────────────────────────
+    const FRAME_HEADER_SIZE = 13; // 4+4+1+4
+    let frameCount = 0;
+
+    while (true) {
+      const headerBytes = await byteReader.readExact(FRAME_HEADER_SIZE);
+      if (!headerBytes) break; // Stream closed — normal end of GOP
+
+      const fv = new DataView(headerBytes.buffer, headerBytes.byteOffset, FRAME_HEADER_SIZE);
+      // const sequence  = fv.getUint32(0, false); // unused on receiver side
+      // const timestamp = fv.getUint32(4, false); // already in payload packet
+      // const frameType = fv.getUint8(8);         // already in payload packet
+      const payloadSize = fv.getUint32(9, false);
+
+      if (payloadSize === 0 || payloadSize > 10_000_000) {
+        console.warn(`[GOP] ch=${channel} gopId=${gopId} implausible payloadSize=${payloadSize}, skipping frame`);
+        break;
+      }
+
+      const payload = await byteReader.readExact(payloadSize);
+      if (!payload) break;
+
+      frameCount++;
+      // Reconstruct full packet: [seq:4][ts:4][frameType:1] + media_payload
+      // The FrameHeader contains seq/ts/frameType; payload is raw media data.
+      // handleBinaryPacket() expects the 9-byte prefix to route to the correct decoder.
+      const fullPacket = new Uint8Array(9 + payload.length);
+      fullPacket.set(headerBytes.subarray(0, 9), 0);  // seq + ts + frameType from FrameHeader
+      fullPacket.set(payload, 9);
+      await processIncomingMessage(fullPacket);
+    }
+
+    if (gopIndex <= 3 || frameCount !== expectedFrames) {
+      proxyConsole.log(`[GOP] #${gopIndex} done: ch=${channel} gopId=${gopId} frames=${frameCount}/${expectedFrames}`);
+    }
+  } catch (err) {
+    proxyConsole.error(`[GOP] handleGopStream #${gopIndex} error:`, err);
+  } finally {
+    reader.cancel().catch(() => {});
   }
 }
 
