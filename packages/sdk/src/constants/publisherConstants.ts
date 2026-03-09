@@ -118,7 +118,7 @@ export const SUB_STREAMS: Record<string, SubStream> = {
     width: 1280,
     height: 720,
     bitrate: 1_000_000,
-    framerate: 15,
+    framerate: 30,
     channelName: ChannelName.SCREEN_SHARE_720P,
   },
   SCREEN_SHARE_1080P: {
@@ -126,7 +126,7 @@ export const SUB_STREAMS: Record<string, SubStream> = {
     width: 1920,
     height: 1080,
     bitrate: 1_500_000,
-    framerate: 15,
+    framerate: 30,
     channelName: ChannelName.SCREEN_SHARE_1080P,
   },
   LIVESTREAM_720P: {

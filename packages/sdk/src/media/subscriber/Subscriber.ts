@@ -679,36 +679,26 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
    * Worker does NOT use channelName - it only needs readable/writable streams
    */
   private async attachWebTransportStreams(channelName: ChannelName): Promise<void> {
-    // if (!this.transportManager || !this.workerManager) {
-    //   throw new Error("Managers not initialized");
-    // }
     if (!this.workerManager) {
       throw new Error("Managers not initialized");
     }
 
-    log("Attaching WebTransport streams...");
-
-    // Use the subcribeUrl from config (already constructed in Room.ts with correct webtpUrl)
     const webTpUrl = this.config.subcribeUrl;
     if (!webTpUrl) {
       throw new Error("Subscribe URL not provided");
     }
-    log("Trying to connect to WebTransport to subscribe:", webTpUrl);
 
-    log('this.config', this.config);
+    log("Attaching WebTransport streams — worker will create session:", webTpUrl);
 
-    const wt = new WebTransport(webTpUrl);
-    await wt.ready;
-
-    // SINGLE bidirectional stream (no channelName - worker doesn't use it)
-    const mediaStream = await wt.createBidirectionalStream();
-    this.workerManager.attachStream(
-      channelName,  // channelName not used by worker, just for logging
-      mediaStream.readable,
-      mediaStream.writable,
-      this.config.localStreamId
+    // Tell the worker to create the WebTransport session itself.
+    // The worker opens the bidi stream for commands and calls
+    // receiveUnidirectional() for GOP streams — no DataCloneError possible.
+    this.workerManager.attachWebTransportUrl(
+      webTpUrl,
+      channelName,
+      this.config.localStreamId,
     );
-    log("✅ WebTransport stream attached");
+    log("✅ attachWebTransportUrl sent to worker");
   }
 
   /**
