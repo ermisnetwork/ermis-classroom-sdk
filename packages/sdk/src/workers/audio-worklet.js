@@ -14,9 +14,12 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
     super();
     // Store audio samples in planar format - separate arrays for each channel
     this.audioBuffers = []; // Array of arrays, one per channel
-    this.bufferSize = 2048; // Target buffer size in frames
-    this.minBuffer = 2048; // Minimum buffer before playback starts
-    this.maxBuffer = 8192; // Maximum buffer size to prevent memory issues
+    // this.bufferSize = 2048; // Target buffer size in frames
+    // this.minBuffer = 2048; // Minimum buffer before playback starts
+    // this.maxBuffer = 8192; // Maximum buffer size to prevent memory issues
+    this.bufferSize = 2048; // ~42ms at 48kHz — Google Meet-level baseline
+    this.minBuffer = 2048; // Start playback after ~42ms of data
+    this.maxBuffer = 14400; // ~300ms max — absorb network lag spikes
     this.isPlaying = false;
     this.fadeInSamples = 0;
     this.sampleRate = 48000; // Default sample rate, updated on first data packet
@@ -195,10 +198,10 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
     if (!this.isPlaying || bufferFrames < outputLength) {
       if (this.isPlaying) {
         this.isPlaying = false;
-        // Adaptively increase buffer size on underrun to be more resilient
+        // Adaptive increase on underrun — grow buffer to absorb future jitter
         this.adaptiveBufferSize = Math.min(
-          this.maxBuffer,
-          this.adaptiveBufferSize * 1.5
+          Math.ceil(this.adaptiveBufferSize * 1.5),
+          this.maxBuffer
         );
         this.port.postMessage({
           type: "underrun",
@@ -243,12 +246,12 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
       this.audioBuffers[ch].splice(0, outputLength);
     }
 
-    // Adaptively decrease the buffer size if it's consistently too full
-    if (bufferFrames > this.adaptiveBufferSize * 2) {
-      this.adaptiveBufferSize = Math.max(
-        this.minBuffer,
-        this.adaptiveBufferSize * 0.95
-      );
+    // Aggressively drain if buffer is too full to prevent latency buildup
+    if (bufferFrames > this.maxBuffer) {
+      const excess = bufferFrames - this.bufferSize;
+      for (let ch = 0; ch < this.audioBuffers.length; ch++) {
+        this.audioBuffers[ch].splice(0, excess);
+      }
     }
 
     return true;

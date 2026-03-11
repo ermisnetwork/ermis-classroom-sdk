@@ -1065,6 +1065,13 @@ class GopByteReader {
 }
 
 /**
+ * Track the latest GOP ID per channel so that when a new GOP arrives,
+ * older (superseded) GOPs for the same channel stop processing.
+ * Key: channel byte (u8), Value: latest gopId (u32)
+ */
+const activeGopPerChannel = new Map();
+
+/**
  * Loop over all incoming unidirectional streams from the WebTransport session.
  * Follows the MDN pattern exactly:
  *   const reader = transport.incomingUnidirectionalStreams.getReader();
@@ -1094,12 +1101,18 @@ async function receiveUnidirectional(transport) {
  * MDN pattern: const reader = receiveStream.getReader(); reader.read() loop.
  * Data is fed through GopByteReader for exact-size reads across chunks.
  *
+ * When a newer GOP arrives for the same channel, this GOP is superseded:
+ * remaining frames are dropped and the underlying QUIC stream is cancelled.
+ *
  * Wire format (GopStreamSender / GopStreamHeaderEncoder):
  *  GOP Header: [streamIdLen:2B][streamId:N][channel:1B][gopId:4B][expected:2B]
  *  Per frame:  [sequence:4B][timestamp:4B][frameType:1B][payloadSize:4B][payload]
  */
 async function readGopStream(receiveStream, gopIndex) {
-  const byteReader = new GopByteReader(receiveStream.getReader());
+  const rawReader = receiveStream.getReader();
+  const byteReader = new GopByteReader(rawReader);
+  let channel = -1;
+  let gopId = -1;
   try {
     // ── 1. GOP Header ────────────────────────────────────────────────────
     const streamIdLenBytes = await byteReader.readExact(2);
@@ -1112,9 +1125,18 @@ async function readGopStream(receiveStream, gopIndex) {
     const streamId = new TextDecoder().decode(gopMeta.subarray(0, streamIdLen));
     const dv = new DataView(gopMeta.buffer, gopMeta.byteOffset, gopMeta.byteLength);
     let off = streamIdLen;
-    const channel        = dv.getUint8(off);       off += 1;
-    const gopId          = dv.getUint32(off, false); off += 4;
+    channel = dv.getUint8(off); off += 1;
+    gopId = dv.getUint32(off, false); off += 4;
     const expectedFrames = dv.getUint16(off, false);
+
+    // Register this GOP as the active one for its channel.
+    // Any older GOP for this channel will detect it's been superseded.
+    // const prevGopId = activeGopPerChannel.get(channel);
+    activeGopPerChannel.set(channel, gopId);
+
+    // if (prevGopId !== undefined && prevGopId !== gopId) {
+    //   console.log(`[GOP] ch=${channel} new gopId=${gopId} supersedes old gopId=${prevGopId}`);
+    // }
 
     if (gopIndex <= 3) {
       console.log(`[GOP] #${gopIndex} streamId=${streamId} ch=${channel} gopId=${gopId} expected=${expectedFrames}`);
@@ -1130,6 +1152,10 @@ async function readGopStream(receiveStream, gopIndex) {
       const fv = new DataView(headerBytes.buffer, headerBytes.byteOffset, FRAME_HEADER_SIZE);
       const payloadSize = fv.getUint32(9, false);
 
+      // Guard against binary misalignment: if the frame header was read at a wrong
+      // offset, payloadSize will be nonsensical. A real frame is never 0 bytes and
+      // never exceeds 10 MB (typical 1080p keyframe ~100-400 KB). If this fires,
+      // all subsequent reads would also be misaligned → break out of the GOP entirely.
       if (payloadSize === 0 || payloadSize > 10_000_000) {
         console.warn(`[GOP] ch=${channel} gopId=${gopId} implausible payloadSize=${payloadSize}`);
         break;
@@ -1139,6 +1165,15 @@ async function readGopStream(receiveStream, gopIndex) {
       if (!payload) break;
 
       frameCount++;
+
+      // Check if this GOP has been superseded by a newer one.
+      // Without this check, frames from the old GOP can interleave with
+      // the new GOP's frames at the decoder, causing brief corruption.
+      if (activeGopPerChannel.get(channel) !== gopId) {
+        rawReader.cancel().catch(() => {});
+        break;
+      }
+
       // Reconstruct full packet: [seq:4][ts:4][frameType:1] + media_payload
       // handleBinaryPacket() expects this 9-byte prefix to route to the correct decoder.
       const fullPacket = new Uint8Array(9 + payload.length);
@@ -1147,10 +1182,15 @@ async function readGopStream(receiveStream, gopIndex) {
       await processIncomingMessage(fullPacket);
     }
 
-    if (gopIndex <= 3 || frameCount !== expectedFrames) {
-      proxyConsole.log(`[GOP] #${gopIndex} done: ch=${channel} gopId=${gopId} frames=${frameCount}/${expectedFrames}`);
-    }
+    // if (gopIndex <= 3 || frameCount !== expectedFrames) {
+    //   proxyConsole.log(`[GOP] #${gopIndex} done: ch=${channel} gopId=${gopId} frames=${frameCount}/${expectedFrames}`);
+    // }
   } catch (err) {
+    // Suppress errors from cancelled streams (expected when superseded)
+    if (activeGopPerChannel.get(channel) !== gopId) {
+      // This GOP was superseded — cancellation errors are expected
+      return;
+    }
     proxyConsole.error(`[GOP] readGopStream #${gopIndex} error:`, err);
   }
 }
@@ -1213,6 +1253,10 @@ async function handleGopStream(stream, gopIndex) {
       // const frameType = fv.getUint8(8);         // already in payload packet
       const payloadSize = fv.getUint32(9, false);
 
+      // Guard against binary misalignment: if the frame header was read at a wrong
+      // offset, payloadSize will be nonsensical. A real frame is never 0 bytes and
+      // never exceeds 10 MB (typical 1080p keyframe ~100-400 KB). If this fires,
+      // all subsequent reads would also be misaligned → break out of the GOP entirely.
       if (payloadSize === 0 || payloadSize > 10_000_000) {
         console.warn(`[GOP] ch=${channel} gopId=${gopId} implausible payloadSize=${payloadSize}, skipping frame`);
         break;
@@ -1451,8 +1495,26 @@ async function handleBinaryPacket(dataBuffer) {
         decodeVideoExternal(CHANNEL_NAME.SCREEN_SHARE_720P, type, timestamp, data);
       } else {
         let videoDecoderScreenShare720p = mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P);
+        const decoderState = videoDecoderScreenShare720p ? videoDecoderScreenShare720p.state : null;
+
+        if (!videoDecoderScreenShare720p || decoderState === "closed" || decoderState === "unconfigured") {
+          // Recreate decoder when closed (e.g. after decode error from GOP interleaving)
+          if (canRecreateDecoder(CHANNEL_NAME.SCREEN_SHARE_720P)) {
+            videoDecoderScreenShare720p = await createVideoDecoderWithFallback(CHANNEL_NAME.SCREEN_SHARE_720P);
+            mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_720P, videoDecoderScreenShare720p);
+            const configSS720p = mediaConfigs.get(CHANNEL_NAME.SCREEN_SHARE_720P);
+            if (configSS720p) {
+              proxyConsole.log("Recreating screen share 720p decoder with config:", configSS720p);
+              videoDecoderScreenShare720p.configure(configSS720p);
+            }
+            // After recreation, wait for next keyframe
+            setKeyFrameReceived(CHANNEL_NAME.SCREEN_SHARE_720P, false);
+          }
+          return; // Drop this frame — wait for next keyframe after recreation
+        }
 
         try {
+          if (data.byteLength === 0) return;
           const encodedChunk = new EncodedVideoChunk({ timestamp: timestamp * 1000, type, data });
           videoDecoderScreenShare720p.decode(encodedChunk);
         } catch (error) {

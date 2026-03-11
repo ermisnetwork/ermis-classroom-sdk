@@ -1,6 +1,6 @@
 import EventEmitter from "../../../events/EventEmitter";
 import { globalEventBus, GlobalEvents } from "../../../events/GlobalEventBus";
-import { ChannelName, FrameType } from "../../../types/media/publisher.types";
+import { ChannelName, FrameType, getStreamPriority } from "../../../types/media/publisher.types";
 import type {
   StreamData,
   ServerEvent,
@@ -86,7 +86,7 @@ export class StreamManager extends EventEmitter<{
   private publisherState: PublisherState = { ...DEFAULT_PUBLISHER_STATE };
   private gopSenders = new Map<ChannelName, StreamDataGop>();
   private readonly VIDEO_GOP_SIZE = 30;
-  private readonly AUDIO_GOP_SIZE = 50; // ~1s of audio at ~50 packets/sec
+  private readonly AUDIO_GOP_SIZE = 1; // 1 frame per stream — zero HOL blocking, matches server AUDIO_BATCH_SIZE
 
   constructor(isWebRTC: boolean = false, streamID?: string) {
     super();
@@ -722,7 +722,7 @@ export class StreamManager extends EventEmitter<{
     // use GOP sender if iswebtransport
     if (!this.isWebRTC && gopSender) {
       if (isKeyframe) {
-        await gopSender.startGop(channel, this.VIDEO_GOP_SIZE);
+        await gopSender.startGop(channel, this.VIDEO_GOP_SIZE, getStreamPriority(channelName));
         gopData.currentGopFrames = 0;
       }
 
@@ -795,7 +795,7 @@ export class StreamManager extends EventEmitter<{
       if (gopData.currentGopFrames >= this.AUDIO_GOP_SIZE || gopData.currentGopFrames === 0) {
         const channel = channelName === ChannelName.SCREEN_SHARE_AUDIO ? 6 : 5;
         // console.log(`[StreamManager] 🎵 Audio GOP: starting new batch, gopFrames=${gopData.currentGopFrames}, channel=${channel}`);
-        await gopSender.startGop(channel, this.AUDIO_GOP_SIZE);
+        await gopSender.startGop(channel, this.AUDIO_GOP_SIZE, getStreamPriority(channelName));
         gopData.currentGopFrames = 0;
       }
 

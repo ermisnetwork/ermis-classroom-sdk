@@ -33,7 +33,29 @@ let _initialized = false;
  */
 export async function initSdkAssets(sdkAssetsUrl?: string): Promise<void> {
   if (!sdkAssetsUrl) {
-    // No server URL — assets loaded from local paths (Vite plugin)
+    // No server URL — clear any previously cached SDK assets
+    // This prevents stale cache from a previous session (when sdkAssetsUrl was configured)
+    try {
+      const cacheNames = await caches.keys();
+      for (const name of cacheNames) {
+        if (name.startsWith(SDK_CACHE_PREFIX)) {
+          console.log(`[SdkAssetLoader] sdkAssetsUrl not configured — deleting stale cache: ${name}`);
+          await caches.delete(name);
+        }
+      }
+      // Also unregister the service worker if it was previously registered
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const reg of registrations) {
+          if (reg.active?.scriptURL?.includes('sdk-sw.js')) {
+            console.log('[SdkAssetLoader] Unregistering sdk-sw.js service worker');
+            await reg.unregister();
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[SdkAssetLoader] Failed to clear stale caches:', err);
+    }
     return;
   }
 
