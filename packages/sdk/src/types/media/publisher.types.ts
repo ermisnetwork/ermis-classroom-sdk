@@ -59,6 +59,35 @@ export enum ChannelName {
   VIDEO_1440P = "video_1440p",
 }
 
+/**
+ * QUIC stream send priority (WebTransport sendOrder).
+ * Higher value = bytes sent first during congestion.
+ * Order: screen_share_audio > mic_audio > screen_share_video > camera_video
+ */
+export enum StreamPriority {
+  SCREEN_SHARE_AUDIO = 400,
+  MIC_AUDIO = 300,
+  SCREEN_SHARE_VIDEO = 200,
+  CAMERA_VIDEO = 100,
+}
+
+/** Map a ChannelName to its QUIC stream priority. */
+export function getStreamPriority(channelName: ChannelName): StreamPriority {
+  switch (channelName) {
+    case ChannelName.SCREEN_SHARE_AUDIO:
+    case ChannelName.LIVESTREAM_AUDIO:
+      return StreamPriority.SCREEN_SHARE_AUDIO;
+    case ChannelName.MICROPHONE:
+      return StreamPriority.MIC_AUDIO;
+    case ChannelName.SCREEN_SHARE_720P:
+    case ChannelName.SCREEN_SHARE_1080P:
+    case ChannelName.LIVESTREAM_720P:
+      return StreamPriority.SCREEN_SHARE_VIDEO;
+    default:
+      return StreamPriority.CAMERA_VIDEO;
+  }
+}
+
 // Publisher configuration
 export interface PublisherConfig {
   publishUrl: string;

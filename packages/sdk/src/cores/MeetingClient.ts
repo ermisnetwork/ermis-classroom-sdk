@@ -204,13 +204,12 @@ export class ErmisClient extends EventEmitter {
     this._setupEventHandlers();
     this._setupGlobalEventListeners();
 
-    // Pre-fetch SDK assets if sdkAssetsUrl is configured
+    // Pre-fetch SDK assets if sdkAssetsUrl is configured,
+    // or clear stale caches if sdkAssetsUrl is not configured.
     // Store promise so joinRoom() can await it before creating workers
-    if (this.config.sdkAssetsUrl) {
-      this._assetsReady = this.initAssets().catch((err) => {
-        console.warn('[ErmisClient] Asset pre-fetch failed:', err);
-      });
-    }
+    this._assetsReady = this.initAssets().catch((err) => {
+      console.warn('[ErmisClient] Asset pre-fetch failed:', err);
+    });
   }
 
   /**

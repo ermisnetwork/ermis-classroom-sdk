@@ -11,7 +11,31 @@
  */
 
 const SDK_CACHE_PREFIX = 'sdk-assets-v';
-const SDK_PATHS = ['/workers/', '/polyfills/', '/opus_decoder/', '/raptorQ/'];
+const SDK_PATHS = ['/workers/', '/polyfills/', '/opus_decoder/', '/raptorQ/', '/codec-polyfill/'];
+
+
+// Headers required for cross-origin isolation (SharedArrayBuffer, etc.)
+const COEP_HEADERS = {
+  'Cross-Origin-Embedder-Policy': 'credentialless',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+};
+
+/**
+ * Clone a response and inject COEP/COOP headers so the browser
+ * keeps the page cross-origin-isolated even when the SW serves from cache.
+ */
+async function withCoepHeaders(response) {
+  const headers = new Headers(response.headers);
+  for (const [k, v] of Object.entries(COEP_HEADERS)) {
+    headers.set(k, v);
+  }
+  const body = await response.arrayBuffer();
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 // Activate immediately without waiting for existing clients to close
 self.addEventListener('install', (event) => {
@@ -59,10 +83,13 @@ self.addEventListener('fetch', (event) => {
               return new Response(body, {
                 status: cached.status,
                 statusText: cached.statusText,
-                headers: { 'Content-Type': 'application/wasm' },
+                headers: {
+                  'Content-Type': 'application/wasm',
+                  ...COEP_HEADERS,
+                },
               });
             }
-            return cached;
+            return withCoepHeaders(cached);
           }
         }
 
@@ -71,7 +98,7 @@ self.addEventListener('fetch', (event) => {
         try {
           console.log('[sdk-sw] Cache MISS for', url.pathname, '- trying basic fetch');
           const basicResponse = await fetch(event.request);
-          return basicResponse;
+          return withCoepHeaders(basicResponse);
         } catch (basicErr) {
           console.warn('[sdk-sw] Basic fetch also failed for', url.pathname, basicErr);
         }
