@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react"
-import { useErmisClassroom } from "@ermisnetwork/ermis-classroom-react"
+import { useErmisClassroom } from "@ermis-network/ermis-classroom-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { IconLoader2, IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconSettings, IconCopy, IconCheck, IconRefresh, IconPlus, IconDoor } from "@tabler/icons-react"
-import type { RoomData } from "@ermisnetwork/ermis-classroom-sdk"
+import type { RoomData } from "@ermis-network/ermis-classroom-sdk"
 
 interface PreJoinScreenProps {
   onJoined: () => void

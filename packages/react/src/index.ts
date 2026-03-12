@@ -1,7 +1,7 @@
 export { ErmisClassroomContext, ErmisClassroomProvider } from './context';
 
 // Re-export ChannelName from SDK for convenience
-export { ChannelName } from '@ermisnetwork/ermis-classroom-sdk';
+export { ChannelName } from '@ermis-network/ermis-classroom-sdk';
 
 // All hooks
 export {

@@ -7,7 +7,7 @@ The "Pin for Everyone" feature allows hosts/moderators to pin a participant's vi
 The `PinType` enum defines what type of media is being pinned:
 
 ```typescript
-import { PinType } from '@ermisnetwork/ermis-classroom-sdk';
+import { PinType } from '@ermis-network/ermis-classroom-sdk';
 
 // PinType values:
 // PinType.User = 1        - Pin a user's camera video
@@ -24,7 +24,7 @@ import { PinType } from '@ermisnetwork/ermis-classroom-sdk';
 ### Via Participant
 
 ```typescript
-import { PinType } from '@ermisnetwork/ermis-classroom-sdk';
+import { PinType } from '@ermis-network/ermis-classroom-sdk';
 
 const localParticipant = room.localParticipant;
 const targetStreamId = 'target-participant-stream-id';
@@ -46,7 +46,7 @@ await localParticipant.unPinForEveryone(targetStreamId, PinType.ScreenShare);
 ### Via Publisher
 
 ```typescript
-import { PinType } from '@ermisnetwork/ermis-classroom-sdk';
+import { PinType } from '@ermis-network/ermis-classroom-sdk';
 
 const publisher = room.localParticipant.publisher;
 
@@ -93,7 +93,7 @@ console.log(participant.pinType);   // PinType | null
 ### Listening for Pin Events
 
 ```typescript
-import { ROOM_EVENTS, PinType } from '@ermisnetwork/ermis-classroom-sdk';
+import { ROOM_EVENTS, PinType } from '@ermis-network/ermis-classroom-sdk';
 
 // When someone is pinned for everyone
 room.on(ROOM_EVENTS.PARTICIPANT_PINNED_FOR_EVERYONE, (event) => {
@@ -138,7 +138,7 @@ When integrating pin functionality, you need to handle both camera and screen sh
 
 ```tsx
 import { useEffect, useState, useRef } from 'react';
-import { PinType } from '@ermisnetwork/ermis-classroom-sdk';
+import { PinType } from '@ermis-network/ermis-classroom-sdk';
 
 function MeetingRoom() {
   const { currentRoom } = useErmisClassroom();
@@ -211,7 +211,7 @@ function handleUnpinForEveryone(tileId: string) {
 The React provider handles pinType automatically:
 
 ```tsx
-import { useErmisClassroom } from '@ermisnetwork/ermis-classroom-react';
+import { useErmisClassroom } from '@ermis-network/ermis-classroom-react';
 
 function MeetingRoom() {
   const { togglePin } = useErmisClassroom();

@@ -7,7 +7,7 @@ The `Room` class manages participants, media connections, and chat within a meet
 ## Accessing a Room
 
 ```typescript
-import { MeetingClient } from '@ermisnetwork/ermis-classroom-sdk';
+import { MeetingClient } from '@ermis-network/ermis-classroom-sdk';
 
 const client = new MeetingClient({ ... });
 await client.authenticate('user-id');

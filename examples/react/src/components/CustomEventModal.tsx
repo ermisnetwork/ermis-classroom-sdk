@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
-import { useErmisClassroom } from "@ermisnetwork/ermis-classroom-react"
-import { RoomServiceClient } from "@ermisnetwork/ermis-classroom-sdk"
+import { useErmisClassroom } from "@ermis-network/ermis-classroom-react"
+import { RoomServiceClient } from "@ermis-network/ermis-classroom-sdk"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"

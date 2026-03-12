@@ -6,13 +6,13 @@ Install the SDK using your preferred package manager:
 
 ```bash
 # npm
-npm install @ermisnetwork/ermis-classroom-sdk
+npm install @ermis-network/ermis-classroom-sdk
 
 # pnpm (recommended)
-pnpm add @ermisnetwork/ermis-classroom-sdk
+pnpm add @ermis-network/ermis-classroom-sdk
 
 # yarn
-yarn add @ermisnetwork/ermis-classroom-sdk
+yarn add @ermis-network/ermis-classroom-sdk
 ```
 
 ## Vite Plugin (Recommended)
@@ -22,7 +22,7 @@ If using Vite, add the SDK plugin to automatically configure required assets:
 ```typescript
 // vite.config.ts
 import { defineConfig } from 'vite';
-import { ermisClassroomPlugin } from '@ermisnetwork/ermis-classroom-sdk/vite-plugin';
+import { ermisClassroomPlugin } from '@ermis-network/ermis-classroom-sdk/vite-plugin';
 
 export default defineConfig({
   plugins: [
@@ -47,9 +47,9 @@ If not using Vite, copy these files to your public folder:
 
 ```bash
 # Copy from node_modules to public/
-cp -r node_modules/@ermisnetwork/ermis-classroom-sdk/dist/opus_decoder public/
-cp -r node_modules/@ermisnetwork/ermis-classroom-sdk/dist/raptorQ public/
-cp -r node_modules/@ermisnetwork/ermis-classroom-sdk/dist/polyfills public/
+cp -r node_modules/@ermis-network/ermis-classroom-sdk/dist/opus_decoder public/
+cp -r node_modules/@ermis-network/ermis-classroom-sdk/dist/raptorQ public/
+cp -r node_modules/@ermis-network/ermis-classroom-sdk/dist/polyfills public/
 ```
 
 ## TypeScript Configuration
@@ -59,7 +59,7 @@ Add the SDK types to your `tsconfig.json`:
 ```json
 {
   "compilerOptions": {
-    "types": ["@ermisnetwork/ermis-classroom-sdk"]
+    "types": ["@ermis-network/ermis-classroom-sdk"]
   }
 }
 ```

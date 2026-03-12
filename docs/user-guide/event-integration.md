@@ -10,7 +10,7 @@ The SDK provides two ways to listen to events:
 
 ### 1. Direct Room Events (Low-level)
 ```typescript
-import { Room } from '@ermisnetwork/ermis-classroom-sdk'
+import { Room } from '@ermis-network/ermis-classroom-sdk'
 
 room.on('participantRemovedByHost', (event) => {
   console.log('Participant removed:', event)
@@ -19,7 +19,7 @@ room.on('participantRemovedByHost', (event) => {
 
 ### 2. Context Hooks (Recommended for React)
 ```typescript
-import { useErmisClassroom } from '@ermisnetwork/ermis-classroom-react'
+import { useErmisClassroom } from '@ermis-network/ermis-classroom-react'
 
 const { onParticipantRemoved } = useErmisClassroom()
 
@@ -47,7 +47,7 @@ interface ParticipantRemovedEvent {
 
 ```typescript
 import { useEffect, useState } from 'react'
-import { useErmisClassroom } from '@ermisnetwork/ermis-classroom-react'
+import { useErmisClassroom } from '@ermis-network/ermis-classroom-react'
 
 function MeetingRoom({ onNavigateToHome }) {
   const { currentRoom, leaveRoom } = useErmisClassroom()
@@ -297,7 +297,7 @@ navigate('/home') // May not reach here
 
 When integrating into a new application:
 
-- [ ] Install: `@ermisnetwork/ermis-classroom-react`
+- [ ] Install: `@ermis-network/ermis-classroom-react`
 - [ ] Wrap app with `<ErmisClassroomProvider>`
 - [ ] Use `useErmisClassroom()` hook
 - [ ] Listen to required events
@@ -346,7 +346,7 @@ import type {
   Participant,
   Room,
   ParticipantRemovedEvent 
-} from '@ermisnetwork/ermis-classroom-sdk'
+} from '@ermis-network/ermis-classroom-sdk'
 
 const handleRemoved = (event: ParticipantRemovedEvent) => {
   // Fully typed

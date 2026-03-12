@@ -17,7 +17,7 @@ const subscriber = participant?.subscriber;
 For advanced use cases, you can create a Subscriber directly:
 
 ```typescript
-import { Subscriber } from '@ermisnetwork/ermis-classroom-sdk';
+import { Subscriber } from '@ermis-network/ermis-classroom-sdk';
 
 const subscriber = new Subscriber({
   localStreamId: 'my-stream-id',

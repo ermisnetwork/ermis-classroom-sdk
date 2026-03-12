@@ -23,7 +23,7 @@
 ### How do I join a room?
 
 ```typescript
-import { MeetingClient } from '@ermisnetwork/ermis-classroom-sdk';
+import { MeetingClient } from '@ermis-network/ermis-classroom-sdk';
 
 const client = new MeetingClient({
   apiBaseUrl: 'https://api.example.com',

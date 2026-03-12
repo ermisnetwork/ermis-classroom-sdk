@@ -21,17 +21,17 @@ A TypeScript SDK for building real-time video/audio classroom applications using
 ## Installation
 
 ```bash
-npm install @ermisnetwork/ermis-classroom-sdk
+npm install @ermis-network/ermis-classroom-sdk
 # or
-pnpm add @ermisnetwork/ermis-classroom-sdk
+pnpm add @ermis-network/ermis-classroom-sdk
 # or
-yarn add @ermisnetwork/ermis-classroom-sdk
+yarn add @ermis-network/ermis-classroom-sdk
 ```
 
 ## Basic Usage
 
 ```typescript
-import { MeetingClient } from '@ermisnetwork/ermis-classroom-sdk';
+import { MeetingClient } from '@ermis-network/ermis-classroom-sdk';
 
 // Create client
 const client = new MeetingClient({

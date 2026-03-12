@@ -12,7 +12,7 @@ import type {
   ErmisClient,
   ChannelName,
   QualityLevel,
-} from '@ermisnetwork/ermis-classroom-sdk';
+} from '@ermis-network/ermis-classroom-sdk';
 
 /**
  * Configuration for ErmisClassroomProvider
