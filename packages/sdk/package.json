@@ -1,5 +1,5 @@
 {
-  "name": "@ermisnetwork/ermis-classroom-sdk",
+  "name": "@ermis-network/ermis-classroom-sdk",
   "version": "0.1.5",
   "description": "TypeScript SDK for Ermis Classroom - Real-time video conferencing and collaboration",
   "license": "MIT",
@@ -58,7 +58,7 @@
     "directory": "packages/sdk"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
+    "registry": "https://registry.npmjs.org",
     "access": "public"
   },
   "dependencies": {

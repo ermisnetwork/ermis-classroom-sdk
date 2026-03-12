@@ -1,5 +1,5 @@
 {
-  "name": "@ermisnetwork/ermis-classroom-example-react",
+  "name": "@ermis-network/ermis-classroom-example-react",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -10,8 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@ermisnetwork/ermis-classroom-react": "workspace:*",
-    "@ermisnetwork/ermis-classroom-sdk": "workspace:*",
+    "@ermis-network/ermis-classroom-react": "workspace:*",
+    "@ermis-network/ermis-classroom-sdk": "workspace:*",
     "@radix-ui/react-dropdown-menu": "^2.1.2",
     "@radix-ui/react-select": "^2.1.2",
     "@radix-ui/react-slot": "^1.1.0",
