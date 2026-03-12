@@ -14,6 +14,8 @@ import CommandSender, { PublisherState } from "../ClientCommand";
 import { log } from "../../../utils";
 import type { WebRTCManager } from "./WebRTCManager";
 import { GopStreamSender } from "./GopStreamSender";
+import { PublisherNetworkMonitor } from "../../network-monitor/PublisherNetworkMonitor";
+import { AdaptiveMediaController } from "../managers/AdaptiveMediaController";
 
 // Default publisher state - will be updated by Publisher
 const DEFAULT_PUBLISHER_STATE: PublisherState = {
@@ -86,13 +88,28 @@ export class StreamManager extends EventEmitter<{
   private publisherState: PublisherState = { ...DEFAULT_PUBLISHER_STATE };
   private gopSenders = new Map<ChannelName, StreamDataGop>();
   private readonly VIDEO_GOP_SIZE = 30;
-  private readonly AUDIO_GOP_SIZE = 1; // 1 frame per stream — zero HOL blocking, matches server AUDIO_BATCH_SIZE
+  private readonly AUDIO_GOP_SIZE = 50; // 50 frames per stream — ~1 second of audio
+
+  // Network congestion handling (client-side)
+  private _networkMonitor: PublisherNetworkMonitor | null = null;
+  private _adaptiveController: AdaptiveMediaController | null = null;
+  private _writeTimeoutReportTimer: ReturnType<typeof setInterval> | null = null;
+
+  // Audio TX packet loss diagnostics
+  private _audioTxSent = 0;
+  private _audioTxDropped = 0;
+  private _audioTxRetried = 0;
+  private static readonly AUDIO_TX_LOG_INTERVAL = 500;
+
+  // Platform detection — Android MIC needs GOP batching to avoid backpressure
+  private readonly isAndroid: boolean;
 
   constructor(isWebRTC: boolean = false, streamID?: string) {
     super();
     this.isWebRTC = isWebRTC;
     this.streamId = streamID || "default_stream";
-
+    this.isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+    console.log(`[StreamManager] isAndroid: ${this.isAndroid}`);
 
     if (isWebRTC) {
       // Eagerly start the FEC worker so WASM is loaded before the first packet
@@ -264,8 +281,6 @@ export class StreamManager extends EventEmitter<{
     );
   }
 
-
-
   /**
    * Add additional stream (e.g., for screen sharing)
    * Public method to create streams dynamically
@@ -282,6 +297,16 @@ export class StreamManager extends EventEmitter<{
     } else {
       // Create WebTransport bidirectional stream
       await this.createBidirectionalStream(channelName);
+      // Also create GOP sender so media goes through uni-streams (not bidi)
+      if (this.webTransport && !this.gopSenders.has(channelName)) {
+        const gopSender = new GopStreamSender(this.webTransport, this.streamId);
+        this.gopSenders.set(channelName, {
+          gopId: 0,
+          gopSender,
+          currentGopFrames: 0,
+        });
+        console.log(`[StreamManager] Created GOP sender for dynamically added channel: ${channelName}`);
+      }
     }
   }
 
@@ -646,6 +671,12 @@ export class StreamManager extends EventEmitter<{
       return;
     }
 
+    // Adaptive congestion: check if this frame should be skipped
+    // if (this._adaptiveController?.shouldSkipFrame(channelName)) {
+    //   // logged inside AdaptiveMediaController (throttled)
+    //   return;
+    // }
+
     const chunkType: "key" | "delta" = chunk.type === "key" ? "key" : "delta";
     const frameType = FrameTypeHelper.getFrameType(channelName, chunkType);
 
@@ -711,6 +742,12 @@ export class StreamManager extends EventEmitter<{
       case ChannelName.SCREEN_SHARE_AUDIO:
         channel = 6;
         break;
+      case ChannelName.VIDEO_1080P:
+        channel = 9;
+        break;
+      case ChannelName.VIDEO_1440P:
+        channel = 10;
+        break;
       default:
         channel = 2; // Default to Video720p
     }
@@ -735,12 +772,13 @@ export class StreamManager extends EventEmitter<{
 
       gopData.currentGopFrames++;
     } else {
+      console.warn(`[StreamManager] ⚠️ Video fallback to BIDI stream: channel=${channelName} isWebRTC=${this.isWebRTC} gopSender=${!!gopSender} gopData=${!!gopData}`);
       await this.sendPacket(channelName, packet, frameType);
     }
   }
 
   /**
-   * Send audio chunk (EXACT copy from JS handleAudioChunk logic)
+   * Send audio chunk.
    */
   async sendAudioChunk(
     channelName: ChannelName,
@@ -751,10 +789,9 @@ export class StreamManager extends EventEmitter<{
 
     // Wait for stream to be ready if not yet available (fixes Safari timing issue)
     if (!streamData) {
-      // log(`[StreamManager] ⚠️ sendAudioChunk: No stream data for ${channelName}, waiting...`);
       try {
         streamData = await this.waitForStream(channelName, 5000); // 5 second timeout
-        log(`[StreamManager] ✅ Stream ${channelName} is now ready for audio`);
+        log(`[StreamManager] Stream ${channelName} is now ready for audio`);
       } catch (error) {
         console.warn(`[StreamManager] Failed to wait for stream ${channelName} for audio:`, error);
         return;
@@ -764,15 +801,14 @@ export class StreamManager extends EventEmitter<{
     // Additional check for WebRTC DataChannel readiness (Safari fix)
     if (this.isWebRTC && streamData.dataChannel) {
       if (streamData.dataChannel.readyState !== "open") {
-        log(`[StreamManager] ⏭️ sendAudioChunk: DataChannel ${channelName} not open yet, state: ${streamData.dataChannel.readyState}`);
+        log(`[StreamManager] sendAudioChunk: DataChannel ${channelName} not open yet, state: ${streamData.dataChannel.readyState}`);
         return;
       }
-      // log(`[StreamManager] 🔍 sendAudioChunk: DataChannel ${channelName} state: ${streamData.dataChannel.readyState}, bufferedAmount: ${streamData.dataChannel.bufferedAmount}`);
     }
 
     // Skip if config not sent yet
     if (!streamData.configSent) {
-      log(`[StreamManager] ⏭️ sendAudioChunk: Config not sent yet for ${channelName}`);
+      log(`[StreamManager] sendAudioChunk: Config not sent yet for ${channelName}`);
       return;
     }
 
@@ -784,25 +820,58 @@ export class StreamManager extends EventEmitter<{
       sequenceNumber,
     );
 
-    // console.log(`[StreamManager] 📤 sendAudioChunk: Sending packet for ${channelName}, seq: ${sequenceNumber}, size: ${packet.length}`);
-
-    // On WebTransport, route audio through GOP-style uni streams to avoid
-    // bidi stream backpressure that permanently blocks audio on Android.
+    // On WebTransport, route audio through uni-streams.
+    // Android MIC: use 50-frame GOP batch rotation (avoids backpressure on Android WebView).
+    // All other audio: single persistent uni-stream (avoids broadcast race / packet reordering).
     const gopData = this.gopSenders.get(channelName);
     const gopSender = gopData?.gopSender;
     if (!this.isWebRTC && gopSender) {
-      // Start a new audio "GOP" (batch) every AUDIO_GOP_SIZE frames
-      if (gopData.currentGopFrames >= this.AUDIO_GOP_SIZE || gopData.currentGopFrames === 0) {
-        const channel = channelName === ChannelName.SCREEN_SHARE_AUDIO ? 6 : 5;
-        // console.log(`[StreamManager] 🎵 Audio GOP: starting new batch, gopFrames=${gopData.currentGopFrames}, channel=${channel}`);
-        await gopSender.startGop(channel, this.AUDIO_GOP_SIZE, getStreamPriority(channelName));
-        gopData.currentGopFrames = 0;
+      const channel = channelName === ChannelName.SCREEN_SHARE_AUDIO ? 6 : 5;
+      const useGopBatching = this.isAndroid && channelName === ChannelName.MICROPHONE;
+
+      if (useGopBatching) {
+        // Android MIC: rotate stream every AUDIO_GOP_SIZE frames
+        if (gopData.currentGopFrames >= this.AUDIO_GOP_SIZE || gopData.currentGopFrames === 0) {
+          await gopSender.startGopGraceful(channel, this.AUDIO_GOP_SIZE, getStreamPriority(channelName));
+          gopData.currentGopFrames = 0;
+        }
+      } else {
+        // Persistent stream for all other audio
+        await gopSender.ensurePersistentStream(channel, getStreamPriority(channelName));
       }
 
-      await gopSender.sendFrame(packet, timestamp, FrameType.AUDIO);
-      gopData.currentGopFrames++;
+      let sent = await gopSender.sendFrame(packet, timestamp, FrameType.AUDIO);
+      if (sent) {
+        this._audioTxSent++;
+        if (useGopBatching) gopData.currentGopFrames++;
+      } else {
+        // Stream died — reopen and retry
+        this._audioTxRetried++;
+        console.warn(`[Audio TX] SEND FAILED seq=${sequenceNumber}, reopening stream…`);
+        if (useGopBatching) {
+          await gopSender.startGopGraceful(channel, this.AUDIO_GOP_SIZE, getStreamPriority(channelName));
+          gopData.currentGopFrames = 0;
+        } else {
+          await gopSender.ensurePersistentStream(channel, getStreamPriority(channelName));
+        }
+
+        // Retry the failed frame on the new stream
+        sent = await gopSender.sendFrame(packet, timestamp, FrameType.AUDIO);
+        if (sent) {
+          this._audioTxSent++;
+          if (useGopBatching) gopData.currentGopFrames++;
+        } else {
+          this._audioTxDropped++;
+          console.error(`[Audio TX] RETRY FAILED seq=${sequenceNumber} — frame dropped`);
+        }
+      }
+
+      // Periodic summary log
+      const totalAttempts = this._audioTxSent + this._audioTxDropped;
+      if (totalAttempts > 0 && totalAttempts % StreamManager.AUDIO_TX_LOG_INTERVAL === 0) {
+        console.log(`[Audio TX] sent=${this._audioTxSent} dropped=${this._audioTxDropped} retried=${this._audioTxRetried} lastSeq=${sequenceNumber} android=${this.isAndroid}`);
+      }
     } else {
-      // console.warn(`[StreamManager] 🎵 Audio NOT using GOP path: isWebRTC=${this.isWebRTC}, gopSender=${!!gopSender}, gopData=${!!gopData}, channel=${channelName}`);
       await this.sendPacket(channelName, packet, FrameType.AUDIO);
     }
   }
@@ -1017,9 +1086,13 @@ export class StreamManager extends EventEmitter<{
     }
 
     if (streamData.writer.desiredSize !== null && streamData.writer.desiredSize <= 0) {
-      console.warn(`[StreamManager] ⚠️ Backpressure | desiredSize: ${streamData.writer.desiredSize} | currentPacketSize: ${packet.length}`);
+      // Report backpressure to monitor (buffer full = real congestion)
+      this._networkMonitor?.reportBackpressure(true);
       return;
     }
+
+    // Report successful write (no backpressure)
+    this._networkMonitor?.reportBackpressure(false);
 
     // Wrap packet with length-delimited format (4 bytes length prefix)
     const len = packet.length;
@@ -1323,6 +1396,20 @@ export class StreamManager extends EventEmitter<{
       this.fecWorkerReady = false;
       this.fecWorkerReadyPromise = null;
       log('[StreamManager] FEC worker terminated');
+    }
+
+    // Stop network monitoring
+    if (this._writeTimeoutReportTimer) {
+      clearInterval(this._writeTimeoutReportTimer);
+      this._writeTimeoutReportTimer = null;
+    }
+    if (this._networkMonitor) {
+      this._networkMonitor.stop();
+      this._networkMonitor = null;
+    }
+    if (this._adaptiveController) {
+      this._adaptiveController.destroy();
+      this._adaptiveController = null;
     }
 
     log("[StreamManager] All streams closed");
