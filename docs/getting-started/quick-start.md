@@ -5,7 +5,7 @@ Build a simple video call application!
 ## 1. Create a MeetingClient
 
 ```typescript
-import { MeetingClient } from '@ermisnetwork/ermis-classroom-sdk';
+import { MeetingClient } from '@ermis-network/ermis-classroom-sdk';
 
 const client = new MeetingClient({
   apiBaseUrl: 'https://your-api.com',
@@ -109,7 +109,7 @@ await client.logout();
 ## Complete Example
 
 ```typescript
-import { MeetingClient } from '@ermisnetwork/ermis-classroom-sdk';
+import { MeetingClient } from '@ermis-network/ermis-classroom-sdk';
 
 async function main() {
   // Create client

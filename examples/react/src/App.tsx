@@ -2,7 +2,7 @@ import { useState } from "react"
 import { AuthScreen } from "./screens/AuthScreen"
 import { PreJoinScreen } from "./screens/PreJoinScreen"
 import { MeetingRoom } from "./screens/MeetingRoom"
-import { ErmisClassroomProvider, ChannelName as _ } from '@ermisnetwork/ermis-classroom-react';
+import { ErmisClassroomProvider, ChannelName as _ } from '@ermis-network/ermis-classroom-react';
 import { CustomEventModal } from "./components/CustomEventModal"
 import { useAppContext } from "@/components/AppContext.tsx";
 

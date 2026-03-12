@@ -25,7 +25,7 @@ async function getDevices() {
 The SDK provides a `MediaDeviceManager` for easier device management:
 
 ```typescript
-import { MediaDeviceManager } from '@ermisnetwork/ermis-classroom-sdk';
+import { MediaDeviceManager } from '@ermis-network/ermis-classroom-sdk';
 
 const deviceManager = new MediaDeviceManager();
 

@@ -17,7 +17,7 @@ This guide covers how to use the Ermis Classroom SDK in your applications.
 ### Complete Flow
 
 ```typescript
-import { MeetingClient } from '@ermisnetwork/ermis-classroom-sdk';
+import { MeetingClient } from '@ermis-network/ermis-classroom-sdk';
 
 // 1. Create client
 const client = new MeetingClient({

@@ -1,4 +1,4 @@
-# @ermisnetwork/ermis-classroom-sdk
+# @ermis-network/ermis-classroom-sdk
 
 TypeScript SDK for Ermis Classroom - Real-time video conferencing and collaboration platform.
 
@@ -48,8 +48,8 @@ This SDK consists of two packages:
 
 | Package | Description |
 |---------|-------------|
-| `@ermisnetwork/ermis-classroom-sdk` | Core SDK - works with any framework or vanilla JS/TS |
-| `@ermisnetwork/ermis-classroom-react` | React bindings - hooks and components for React apps |
+| `@ermis-network/ermis-classroom-sdk` | Core SDK - works with any framework or vanilla JS/TS |
+| `@ermis-network/ermis-classroom-react` | React bindings - hooks and components for React apps |
 
 ## System Requirements
 
@@ -62,13 +62,13 @@ This SDK consists of two packages:
 ### For React Projects (Recommended)
 
 ```bash
-npm install @ermisnetwork/ermis-classroom-sdk @ermisnetwork/ermis-classroom-react
+npm install @ermis-network/ermis-classroom-sdk @ermis-network/ermis-classroom-react
 ```
 
 ### For Vanilla JS/TS Projects
 
 ```bash
-npm install @ermisnetwork/ermis-classroom-sdk
+npm install @ermis-network/ermis-classroom-sdk
 ```
 
 ## Static Files Setup
@@ -87,7 +87,7 @@ Use the built-in Vite plugin to automatically copy static files:
 // vite.config.ts
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { copySDKStaticFiles } from '@ermisnetwork/ermis-classroom-sdk/vite-plugin';
+import { copySDKStaticFiles } from '@ermis-network/ermis-classroom-sdk/vite-plugin';
 
 export default defineConfig({
   plugins: [
@@ -102,10 +102,10 @@ export default defineConfig({
 Manually copy the files to your static/public folder:
 
 ```bash
-cp -r node_modules/@ermisnetwork/ermis-classroom-sdk/src/workers public/
-cp -r node_modules/@ermisnetwork/ermis-classroom-sdk/src/raptorQ public/
-cp -r node_modules/@ermisnetwork/ermis-classroom-sdk/src/polyfills public/
-cp -r node_modules/@ermisnetwork/ermis-classroom-sdk/src/opus_decoder public/
+cp -r node_modules/@ermis-network/ermis-classroom-sdk/src/workers public/
+cp -r node_modules/@ermis-network/ermis-classroom-sdk/src/raptorQ public/
+cp -r node_modules/@ermis-network/ermis-classroom-sdk/src/polyfills public/
+cp -r node_modules/@ermis-network/ermis-classroom-sdk/src/opus_decoder public/
 ```
 
 ---
@@ -132,7 +132,7 @@ Wrap your app with `ErmisClassroomProvider`:
 
 ```tsx
 // App.tsx
-import { ErmisClassroomProvider } from '@ermisnetwork/ermis-classroom-react';
+import { ErmisClassroomProvider } from '@ermis-network/ermis-classroom-react';
 
 function App() {
   return (
@@ -156,7 +156,7 @@ Use `useErmisClassroom` hook to authenticate users:
 ```tsx
 // AuthScreen.tsx
 import { useState } from 'react';
-import { useErmisClassroom } from '@ermisnetwork/ermis-classroom-react';
+import { useErmisClassroom } from '@ermis-network/ermis-classroom-react';
 
 function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [userId, setUserId] = useState('');
@@ -197,7 +197,7 @@ Setup camera/microphone preview and select devices before joining:
 ```tsx
 // PreJoinScreen.tsx
 import { useState, useEffect, useRef } from 'react';
-import { useErmisClassroom } from '@ermisnetwork/ermis-classroom-react';
+import { useErmisClassroom } from '@ermis-network/ermis-classroom-react';
 
 function PreJoinScreen({ onJoined }: { onJoined: () => void }) {
   const [roomCode, setRoomCode] = useState('');
@@ -293,7 +293,7 @@ Display participants, handle media controls, and screen sharing:
 ```tsx
 // MeetingRoom.tsx
 import { useEffect, useRef, useMemo } from 'react';
-import { useErmisClassroom, useMediaDevices } from '@ermisnetwork/ermis-classroom-react';
+import { useErmisClassroom, useMediaDevices } from '@ermis-network/ermis-classroom-react';
 
 function MeetingRoom({ onLeft }: { onLeft: () => void }) {
   const {
@@ -447,7 +447,7 @@ const handleLeave = async () => {
 If not using React, you can use the core SDK directly:
 
 ```typescript
-import { ErmisClient, ROOM_EVENTS } from '@ermisnetwork/ermis-classroom-sdk';
+import { ErmisClient, ROOM_EVENTS } from '@ermis-network/ermis-classroom-sdk';
 
 // 1. Create client
 const client = new ErmisClient({
@@ -555,7 +555,7 @@ For detailed API documentation, see:
 ### Room Events
 
 ```typescript
-import { ROOM_EVENTS } from '@ermisnetwork/ermis-classroom-sdk';
+import { ROOM_EVENTS } from '@ermis-network/ermis-classroom-sdk';
 
 // Lifecycle
 ROOM_EVENTS.JOINING                    // Room joining
@@ -609,7 +609,7 @@ import {
   ROOM_EVENTS,
   MEETING_EVENTS,
   VERSION,
-} from '@ermisnetwork/ermis-classroom-sdk';
+} from '@ermis-network/ermis-classroom-sdk';
 
 import type {
   // Types
@@ -622,7 +622,7 @@ import type {
   ParticipantRole,
   ChatMessage,
   CustomEventData,
-} from '@ermisnetwork/ermis-classroom-sdk';
+} from '@ermis-network/ermis-classroom-sdk';
 ```
 
 ---

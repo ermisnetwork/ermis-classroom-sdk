@@ -1,4 +1,4 @@
-# VCR Integration SDK (API Key) – `@ermisnetwork/vcr-client`
+# VCR Integration SDK (API Key) – `@ermis-network/vcr-client`
 
 **Version:** 1.1.0  
 **Last Updated:** 2026-01-27
@@ -10,11 +10,11 @@ TypeScript SDK cho VCR API dùng **API Key** (header `x-api-key`). Hỗ trợ qu
 ## 📦 Cài đặt
 
 ```bash
-npm install @ermisnetwork/vcr-client
+npm install @ermis-network/vcr-client
 # hoặc
-pnpm add @ermisnetwork/vcr-client
+pnpm add @ermis-network/vcr-client
 # hoặc
-yarn add @ermisnetwork/vcr-client
+yarn add @ermis-network/vcr-client
 ```
 
 ---
@@ -22,7 +22,7 @@ yarn add @ermisnetwork/vcr-client
 ## 🚀 Quick Start
 
 ```typescript
-import { createVCRClient } from '@ermisnetwork/vcr-client';
+import { createVCRClient } from '@ermis-network/vcr-client';
 
 // Khởi tạo client
 const client = createVCRClient({
@@ -70,7 +70,7 @@ interface VCRClientConfig {
 ### Ví dụ khởi tạo
 
 ```typescript
-import { createVCRClient, VCRClient } from '@ermisnetwork/vcr-client';
+import { createVCRClient, VCRClient } from '@ermis-network/vcr-client';
 
 // Cách 1: Factory function
 const client = createVCRClient({
@@ -111,7 +111,7 @@ Quản lý sự kiện/lớp học.
 **Ví dụ:**
 
 ```typescript
-import type { CreateEventParams, EventSettings } from '@ermisnetwork/vcr-client';
+import type { CreateEventParams, EventSettings } from '@ermis-network/vcr-client';
 
 const payload: CreateEventParams = {
   title: 'Math 101',
@@ -150,7 +150,7 @@ Quản lý học viên/người tham gia và moderation.
 **Ví dụ:**
 
 ```typescript
-import type { CreateRegistrantParams, RegistrantRole } from '@ermisnetwork/vcr-client';
+import type { CreateRegistrantParams, RegistrantRole } from '@ermis-network/vcr-client';
 
 // Thêm 1 học viên
 const registrant = await client.registrants.create(event._id, {
@@ -223,7 +223,7 @@ enum DocumentType {
 **Ví dụ:**
 
 ```typescript
-import type { UploadDocumentOptions, EventDocument, DocumentType } from '@ermisnetwork/vcr-client';
+import type { UploadDocumentOptions, EventDocument, DocumentType } from '@ermis-network/vcr-client';
 
 // Upload (Browser)
 const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -400,7 +400,7 @@ import type {
   PaginatedResponse,
   ApiResponse,
   PaginationMeta,
-} from '@ermisnetwork/vcr-client';
+} from '@ermis-network/vcr-client';
 ```
 
 ---
@@ -417,7 +417,7 @@ import {
   NotFoundError,
   RateLimitError,
   ServerError,
-} from '@ermisnetwork/vcr-client';
+} from '@ermis-network/vcr-client';
 
 try {
   await client.events.get('invalid-id');
@@ -460,8 +460,8 @@ try {
 ## 📊 Ví dụ End-to-End
 
 ```typescript
-import { createVCRClient, VCRError } from '@ermisnetwork/vcr-client';
-import type { CreateEventParams, CreateRegistrantParams } from '@ermisnetwork/vcr-client';
+import { createVCRClient, VCRError } from '@ermis-network/vcr-client';
+import type { CreateEventParams, CreateRegistrantParams } from '@ermis-network/vcr-client';
 
 async function main() {
   // 1. Khởi tạo client

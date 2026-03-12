@@ -16,7 +16,7 @@ const publisher = room.localParticipant?.publisher;
 For advanced use cases, you can create a Publisher directly:
 
 ```typescript
-import { Publisher } from '@ermisnetwork/ermis-classroom-sdk';
+import { Publisher } from '@ermis-network/ermis-classroom-sdk';
 
 const publisher = new Publisher({
   streamId: 'my-stream-id',
@@ -98,7 +98,7 @@ await publisher.lowerHand();
 Pin a participant's video for all viewers (host/co-host only):
 
 ```typescript
-import { PinType } from '@ermisnetwork/ermis-classroom-sdk';
+import { PinType } from '@ermis-network/ermis-classroom-sdk';
 
 // Pin a participant for everyone by their stream ID (default: PinType.User)
 await publisher.pinForEveryone('target-stream-id');

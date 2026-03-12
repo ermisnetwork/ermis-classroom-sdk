@@ -1,5 +1,5 @@
 import {useState} from "react"
-import {useErmisClassroom} from "@ermisnetwork/ermis-classroom-react"
+import {useErmisClassroom} from "@ermis-network/ermis-classroom-react"
 import {Button} from "@/components/ui/button"
 import {Input} from "@/components/ui/input"
 import {Card, CardContent, CardDescription, CardHeader, CardTitle} from "@/components/ui/card"

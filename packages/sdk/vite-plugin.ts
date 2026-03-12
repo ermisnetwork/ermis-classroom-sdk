@@ -28,7 +28,7 @@ export function copySDKStaticFiles(options: CopySDKFilesOptions = {}): Plugin {
   };
 
   const findSdkPath = (projectRoot: string): string | null => {
-    const nodeModulesPath = join(projectRoot, 'node_modules/@ermisnetwork/ermis-classroom-sdk/src');
+    const nodeModulesPath = join(projectRoot, 'node_modules/@ermis-network/ermis-classroom-sdk/src');
     if (existsSync(nodeModulesPath)) {
       isMonorepo = false;
       return nodeModulesPath;

@@ -3,7 +3,7 @@
  */
 
 import { useMemo } from 'react';
-import type { Room } from '@ermisnetwork/ermis-classroom-sdk';
+import type { Room } from '@ermis-network/ermis-classroom-sdk';
 import { useErmisClassroom } from './useErmisClassroom';
 
 /**

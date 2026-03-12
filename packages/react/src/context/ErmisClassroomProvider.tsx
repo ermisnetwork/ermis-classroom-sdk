@@ -14,7 +14,7 @@ import ErmisClassroom, {
   PinType,
   globalEventBus,
   GlobalEvents,
-} from '@ermisnetwork/ermis-classroom-sdk';
+} from '@ermis-network/ermis-classroom-sdk';
 import { ErmisClassroomContext } from './ErmisClassroomContext';
 import type { ErmisClassroomContextValue, ErmisClassroomProviderProps, ScreenShareData, } from '../types';
 

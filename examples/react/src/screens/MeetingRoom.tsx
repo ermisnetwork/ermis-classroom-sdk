@@ -7,14 +7,14 @@ import {
   type ParticipantData,
   type ScreenShareData as LayoutScreenShareData,
   type TileData,
-} from "@ermisnetwork/ermis-classroom-react"
+} from "@ermis-network/ermis-classroom-react"
 import { Button } from "@/components/ui/button"
 import {
   IconMicrophone, IconMicrophoneOff, IconVideo, IconVideoOff, IconPhoneOff, IconScreenShare, IconHandStop, IconScreenShareOff, IconPin, IconPinnedOff, IconChevronUp, IconUsers, IconDoorExit, IconPlayerStop, IconUserMinus, IconBan, IconBroadcast, IconBroadcastOff, IconPlayerRecord, IconPlayerRecordFilled, IconPlayerPause, IconPlayerPlay
 } from "@tabler/icons-react"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { cn } from "@/lib/utils"
-import { log, PinType } from "@ermisnetwork/ermis-classroom-sdk"
+import { log, PinType } from "@ermis-network/ermis-classroom-sdk"
 
 interface MeetingRoomProps {
   onLeft: () => void

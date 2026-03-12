@@ -14,6 +14,6 @@ export default defineConfig({
   clean: true,
   target: 'es2020',
   outDir: 'dist',
-  external: ['react', '@ermisnetwork/ermis-classroom-sdk'],
+  external: ['react', '@ermis-network/ermis-classroom-sdk'],
 });
 

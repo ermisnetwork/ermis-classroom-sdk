@@ -77,7 +77,7 @@ participant.togglePin();
 ### Pin for Everyone (Host/Co-host Only)
 
 ```typescript
-import { PinType } from '@ermisnetwork/ermis-classroom-sdk';
+import { PinType } from '@ermis-network/ermis-classroom-sdk';
 
 // Pin a participant for all viewers (default: PinType.User)
 await participant.pinForEveryone('target-stream-id');

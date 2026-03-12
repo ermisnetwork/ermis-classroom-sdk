@@ -20,7 +20,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@ermisnetwork/ermis-classroom-react": ["../../packages/react/dist/index.d.ts"]
+      "@ermis-network/ermis-classroom-react": ["../../packages/react/dist/index.d.ts"]
     }
   },
   "include": ["src"]
