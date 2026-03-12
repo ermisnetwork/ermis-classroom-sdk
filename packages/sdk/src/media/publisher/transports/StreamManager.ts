@@ -14,8 +14,8 @@ import CommandSender, { PublisherState } from "../ClientCommand";
 import { log } from "../../../utils";
 import type { WebRTCManager } from "./WebRTCManager";
 import { GopStreamSender } from "./GopStreamSender";
-import { PublisherNetworkMonitor } from "../../network-monitor/PublisherNetworkMonitor";
-import { AdaptiveMediaController } from "../managers/AdaptiveMediaController";
+// import { PublisherNetworkMonitor } from "../../network-monitor/PublisherNetworkMonitor";
+// import { AdaptiveMediaController } from "../managers/AdaptiveMediaController";
 
 // Default publisher state - will be updated by Publisher
 const DEFAULT_PUBLISHER_STATE: PublisherState = {
@@ -91,8 +91,8 @@ export class StreamManager extends EventEmitter<{
   private readonly AUDIO_GOP_SIZE = 50; // 50 frames per stream — ~1 second of audio
 
   // Network congestion handling (client-side)
-  private _networkMonitor: PublisherNetworkMonitor | null = null;
-  private _adaptiveController: AdaptiveMediaController | null = null;
+  // private _networkMonitor: PublisherNetworkMonitor | null = null;
+  // private _adaptiveController: AdaptiveMediaController | null = null;
   private _writeTimeoutReportTimer: ReturnType<typeof setInterval> | null = null;
 
   // Audio TX packet loss diagnostics
@@ -1087,12 +1087,12 @@ export class StreamManager extends EventEmitter<{
 
     if (streamData.writer.desiredSize !== null && streamData.writer.desiredSize <= 0) {
       // Report backpressure to monitor (buffer full = real congestion)
-      this._networkMonitor?.reportBackpressure(true);
+      // this._networkMonitor?.reportBackpressure(true);
       return;
     }
 
     // Report successful write (no backpressure)
-    this._networkMonitor?.reportBackpressure(false);
+    // this._networkMonitor?.reportBackpressure(false);
 
     // Wrap packet with length-delimited format (4 bytes length prefix)
     const len = packet.length;
@@ -1403,14 +1403,14 @@ export class StreamManager extends EventEmitter<{
       clearInterval(this._writeTimeoutReportTimer);
       this._writeTimeoutReportTimer = null;
     }
-    if (this._networkMonitor) {
-      this._networkMonitor.stop();
-      this._networkMonitor = null;
-    }
-    if (this._adaptiveController) {
-      this._adaptiveController.destroy();
-      this._adaptiveController = null;
-    }
+    // if (this._networkMonitor) {
+    //   this._networkMonitor.stop();
+    //   this._networkMonitor = null;
+    // }
+    // if (this._adaptiveController) {
+    //   this._adaptiveController.destroy();
+    //   this._adaptiveController = null;
+    // }
 
     log("[StreamManager] All streams closed");
   }
