@@ -1,5 +1,5 @@
 {
-  "name": "@ermisnetwork/vcr-client",
+  "name": "@ermis-network/vcr-client",
   "version": "0.0.8",
   "description": "TypeScript Client for Virtual Classroom API with full type support and API key authentication",
   "license": "MIT",
@@ -51,7 +51,7 @@
     "directory": "packages/vcr-client"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
+    "registry": "https://registry.npmjs.org",
     "access": "public"
   }
 }

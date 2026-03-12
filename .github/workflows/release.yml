@@ -24,8 +24,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          registry-url: 'https://npm.pkg.github.com'
-          scope: '@ermisnetwork'
+          registry-url: 'https://registry.npmjs.org'
+          scope: '@ermis-network'
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -92,62 +92,61 @@ jobs:
           body: |
             ## 📦 Packages Released
 
-            ### @ermisnetwork/ermis-classroom-sdk v${{ steps.version.outputs.version }}
+            ### @ermis-network/ermis-classroom-sdk v${{ steps.version.outputs.version }}
             TypeScript SDK for Ermis Classroom - Real-time video conferencing and collaboration
 
             **Installation:**
             ```bash
-            npm install @ermisnetwork/ermis-classroom-sdk@${{ steps.version.outputs.version }}
+            npm install @ermis-network/ermis-classroom-sdk@${{ steps.version.outputs.version }}
             # or
-            pnpm add @ermisnetwork/ermis-classroom-sdk@${{ steps.version.outputs.version }}
+            pnpm add @ermis-network/ermis-classroom-sdk@${{ steps.version.outputs.version }}
             # or
-            yarn add @ermisnetwork/ermis-classroom-sdk@${{ steps.version.outputs.version }}
+            yarn add @ermis-network/ermis-classroom-sdk@${{ steps.version.outputs.version }}
             ```
 
-            ### @ermisnetwork/vcr-client v${{ steps.version.outputs.version }}
+            ### @ermis-network/vcr-client v${{ steps.version.outputs.version }}
             TypeScript Client for Virtual Classroom API with full type support
 
             **Installation:**
             ```bash
-            npm install @ermisnetwork/vcr-client@${{ steps.version.outputs.version }}
+            npm install @ermis-network/vcr-client@${{ steps.version.outputs.version }}
             # or
-            pnpm add @ermisnetwork/vcr-client@${{ steps.version.outputs.version }}
+            pnpm add @ermis-network/vcr-client@${{ steps.version.outputs.version }}
             # or
-            yarn add @ermisnetwork/vcr-client@${{ steps.version.outputs.version }}
+            yarn add @ermis-network/vcr-client@${{ steps.version.outputs.version }}
             ```
 
-            ### @ermisnetwork/ermis-classroom-react v${{ steps.version.outputs.version }}
+            ### @ermis-network/ermis-classroom-react v${{ steps.version.outputs.version }}
             React hooks and components for Ermis Classroom SDK
 
             **Installation:**
             ```bash
-            npm install @ermisnetwork/ermis-classroom-react@${{ steps.version.outputs.version }}
+            npm install @ermis-network/ermis-classroom-react@${{ steps.version.outputs.version }}
             # or
-            pnpm add @ermisnetwork/ermis-classroom-react@${{ steps.version.outputs.version }}
+            pnpm add @ermis-network/ermis-classroom-react@${{ steps.version.outputs.version }}
             # or
-            yarn add @ermisnetwork/ermis-classroom-react@${{ steps.version.outputs.version }}
+            yarn add @ermis-network/ermis-classroom-react@${{ steps.version.outputs.version }}
             ```
 
-      - name: Setup .npmrc for GitHub Packages
+      - name: Setup .npmrc for npm
         run: |
-          echo "@ermisnetwork:registry=https://npm.pkg.github.com" > .npmrc
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
 
-      - name: Publish @ermisnetwork/ermis-classroom-sdk
+      - name: Publish @ermis-network/ermis-classroom-sdk
         run: |
           cd packages/sdk
           npm publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish @ermisnetwork/vcr-client
+      - name: Publish @ermis-network/vcr-client
         run: |
           cd packages/vcr-client
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish @ermisnetwork/ermis-classroom-react
+      - name: Publish @ermis-network/ermis-classroom-react
         run: |
           cd packages/react
           npm publish --access public
@@ -162,14 +161,14 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Package | Version | Registry |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|---------|----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| @ermisnetwork/ermis-classroom-sdk | ${{ steps.version.outputs.version }} | GitHub Packages |" >> $GITHUB_STEP_SUMMARY
-          echo "| @ermisnetwork/vcr-client | ${{ steps.version.outputs.version }} | GitHub Packages |" >> $GITHUB_STEP_SUMMARY
-          echo "| @ermisnetwork/ermis-classroom-react | ${{ steps.version.outputs.version }} | GitHub Packages |" >> $GITHUB_STEP_SUMMARY
+          echo "| @ermis-network/ermis-classroom-sdk | ${{ steps.version.outputs.version }} | npm |" >> $GITHUB_STEP_SUMMARY
+          echo "| @ermis-network/vcr-client | ${{ steps.version.outputs.version }} | npm |" >> $GITHUB_STEP_SUMMARY
+          echo "| @ermis-network/ermis-classroom-react | ${{ steps.version.outputs.version }} | npm |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Installation" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "pnpm add @ermisnetwork/ermis-classroom-sdk@${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "pnpm add @ermisnetwork/vcr-client@${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "pnpm add @ermisnetwork/ermis-classroom-react@${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "pnpm add @ermis-network/ermis-classroom-sdk@${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "pnpm add @ermis-network/vcr-client@${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "pnpm add @ermis-network/ermis-classroom-react@${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY

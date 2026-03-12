@@ -29,10 +29,10 @@ importers:
 
   examples/react:
     dependencies:
-      '@ermisnetwork/ermis-classroom-react':
+      '@ermis-network/ermis-classroom-react':
         specifier: workspace:*
         version: link:../../packages/react
-      '@ermisnetwork/ermis-classroom-sdk':
+      '@ermis-network/ermis-classroom-sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
       '@radix-ui/react-dropdown-menu':
@@ -118,7 +118,7 @@ importers:
         specifier: ^3.35.0
         version: 3.35.0(react@18.3.1)
     devDependencies:
-      '@ermisnetwork/ermis-classroom-sdk':
+      '@ermis-network/ermis-classroom-sdk':
         specifier: workspace:*
         version: link:../sdk
       '@types/react':

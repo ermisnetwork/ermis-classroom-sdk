@@ -1,6 +1,6 @@
 {
   "private": true,
-  "name": "@ermisnetwork/ermis-classroom",
+  "name": "@ermis-network/ermis-classroom",
   "version": "0.2.0",
   "license": "MIT",
   "pnpm": {
@@ -13,11 +13,11 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "build:sdk": "turbo run build --filter=@ermisnetwork/ermis-classroom-sdk...",
-    "build:example-react": "turbo run build --filter=@ermisnetwork/ermis-classroom-example-vite-react...",
+    "build:sdk": "turbo run build --filter=@ermis-network/ermis-classroom-sdk...",
+    "build:example-react": "turbo run build --filter=@ermis-network/ermis-classroom-example-vite-react...",
     "dev": "turbo run dev",
-    "dev:sdk": "turbo run dev --filter=@ermisnetwork/ermis-classroom-sdk...",
-    "dev:example-react": "turbo run dev --filter=@ermisnetwork/ermis-classroom-example-vite-react...",
+    "dev:sdk": "turbo run dev --filter=@ermis-network/ermis-classroom-sdk...",
+    "dev:example-react": "turbo run dev --filter=@ermis-network/ermis-classroom-example-vite-react...",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
