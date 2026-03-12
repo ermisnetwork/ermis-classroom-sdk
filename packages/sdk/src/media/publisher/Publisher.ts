@@ -679,12 +679,15 @@ export class Publisher extends EventEmitter<PublisherEvents> {
           log("[Publisher] Could not get actual video dimensions, using default subStreams config");
         }
 
+        // Determine codec from the max resolution across all sub-streams
+        // (this.options.width/height is capture resolution, not target encoder resolution)
+        const maxSubStreamWidth = Math.max(...this.subStreams.filter(s => s.width).map(s => s.width!), 0);
+        const maxSubStreamHeight = Math.max(...this.subStreams.filter(s => s.height).map(s => s.height!), 0);
+        // avc1.42e01f = Constrained Baseline Profile, Level 3.1 (max 1280x720)
+        // avc1.640c34 = High Profile, Level 5.2 (supports up to 4K)
+        const isHighRes = maxSubStreamWidth > 1280 || maxSubStreamHeight > 720;
         const baseConfig = {
-          // codec: "avc1.640c34",
-          // Use Constrained Baseline Profile for WASM decoder compatibility
-          // avc1.42e01f = Constrained Baseline Profile, Level 3.1
-          // Note: High Profile (avc1.640c34) has better compression but tinyh264 doesn't support it
-          codec: "avc1.42e01f",
+          codec: isHighRes ? "avc1.640c34" : "avc1.42e01f",
           width: this.options.width || 1280,
           height: this.options.height || 720,
           framerate: this.options.framerate || 30,

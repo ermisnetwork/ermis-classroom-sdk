@@ -14,19 +14,35 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
     super();
     // Store audio samples in planar format - separate arrays for each channel
     this.audioBuffers = []; // Array of arrays, one per channel
-    // this.bufferSize = 2048; // Target buffer size in frames
-    // this.minBuffer = 2048; // Minimum buffer before playback starts
-    // this.maxBuffer = 8192; // Maximum buffer size to prevent memory issues
-    this.bufferSize = 2048; // ~42ms at 48kHz — Google Meet-level baseline
+    this.bufferSize = 2048; // ~42ms at 48kHz — baseline target
     this.minBuffer = 2048; // Start playback after ~42ms of data
     this.maxBuffer = 14400; // ~300ms max — absorb network lag spikes
     this.isPlaying = false;
-    this.fadeInSamples = 0;
     this.sampleRate = 48000; // Default sample rate, updated on first data packet
     this.numberOfChannels = 2; // Default channels, updated on first data packet
-    this.fadeInLength = 480; // 10ms fade-in at 48kHz to prevent clicks
     this.adaptiveBufferSize = this.bufferSize;
-    
+
+    // ── Underrun grace period ──
+    // Allow up to GRACE_BLOCKS consecutive empty blocks before declaring underrun.
+    // A single missing audio packet (~20ms) spans ~1 process() block at 128 samples;
+    // 2-block grace absorbs it without stopping playback.
+    this.GRACE_BLOCKS = 2;
+    this.emptyBlockCount = 0;
+
+    // ── Adaptive decay ──
+    // After stable playback (no underruns for DECAY_INTERVAL blocks),
+    // shrink adaptiveBufferSize 10% toward baseline to reduce latency.
+    this.DECAY_INTERVAL = 1875; // ~5s at 128 samples/block, 48kHz
+    this.blocksSinceUnderrun = 0;
+
+    // ── Micro-crossfade: 1ms ──
+    // Only activates on resume after real underrun (not during normal playback).
+    // 1ms is below human temporal resolution for loudness (~10-20ms) so it's
+    // completely inaudible, but prevents the click from silence→audio transition.
+    this.MICRO_FADE_LEN = 48; // ~1ms at 48kHz
+    this.microFadePos = -1;   // -1 = inactive
+    this.useMicroFade = false; // Set false to disable all volume modification
+
     console.log('[Audio Worklet] AudioWorklet loaded');
     let counter = 0;
     // Listen for messages from the main thread
@@ -66,7 +82,7 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
             ) {
               this.sampleRate = workerSampleRate;
               this.numberOfChannels = workerChannels;
-              this.fadeInLength = Math.round(workerSampleRate / 100);
+              this.MICRO_FADE_LEN = Math.round(workerSampleRate / 1000); // 1ms
               this.resizeBuffers(workerChannels);
             }
 
@@ -102,9 +118,7 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
    * @param {number} numberOfChannels - Number of audio channels
    */
   resizeBuffers(numberOfChannels) {
-    // Clear existing buffers
     this.audioBuffers = [];
-    // Create a separate buffer for each channel
     for (let i = 0; i < numberOfChannels; i++) {
       this.audioBuffers.push([]);
     }
@@ -112,11 +126,8 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
 
   /**
    * Adds planar channel data directly to separate channel buffers.
-   * @param {Array<Float32Array>} channelData - An array where each element is a Float32Array
-   * representing a channel's audio samples.
    */
   addAudioData(channelData) {
-    // Ensure there's data to process
     if (
       !channelData ||
       channelData.length === 0 ||
@@ -125,22 +136,18 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
       return;
     }
 
-    const numSamples = channelData[0].length;
     const numChannels = channelData.length;
 
-    // Ensure we have enough buffer arrays
     while (this.audioBuffers.length < numChannels) {
       this.audioBuffers.push([]);
     }
 
-    // Add data directly to each channel buffer
     for (let ch = 0; ch < numChannels; ch++) {
-      // Convert Float32Array to regular array and append
       const channelArray = Array.from(channelData[ch]);
       this.audioBuffers[ch].push(...channelArray);
     }
 
-    // Trim buffers if they grow too large (check first channel as reference)
+    // Trim buffers if they grow too large
     if (this.audioBuffers[0] && this.audioBuffers[0].length > this.maxBuffer) {
       const excess = this.audioBuffers[0].length - this.maxBuffer;
       for (let ch = 0; ch < this.audioBuffers.length; ch++) {
@@ -154,7 +161,9 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
       : 0;
     if (!this.isPlaying && currentBufferSize >= this.adaptiveBufferSize) {
       this.isPlaying = true;
-      this.fadeInSamples = 0; // Reset fade-in for smooth start
+      this.emptyBlockCount = 0;
+      // Activate 1ms micro-crossfade to prevent click on resume
+      this.microFadePos = 0;
       this.port.postMessage({ type: "playbackStarted" });
     }
   }
@@ -167,81 +176,118 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
       this.audioBuffers[ch] = [];
     }
     this.isPlaying = false;
-    this.fadeInSamples = 0;
+    this.emptyBlockCount = 0;
+    this.blocksSinceUnderrun = 0;
+    this.microFadePos = -1;
     this.adaptiveBufferSize = this.bufferSize;
     proxyConsole.log("Audio processor reset.");
   }
 
   /**
-   * Main processing loop called by the audio engine.
-   * @param {Array<Array<Float32Array>>} inputs - Input audio data (not used in this processor)
-   * @param {Array<Array<Float32Array>>} outputs - Output audio buffers to be filled
-   * @param {Object} parameters - Audio parameters from the AudioWorkletGlobalScope
-   * @returns {boolean} - Returns true to keep the processor alive.
+   * Main processing loop.
+   * Samples are output at original level. Only a 1ms (~48 sample) micro-crossfade
+   * is applied when resuming after a real underrun — inaudible to humans but
+   * prevents the click artifact from a sudden silence→audio transition.
    */
   process(inputs, outputs, parameters) {
     const output = outputs[0];
     const outputChannels = output.length;
-    const outputLength = output[0].length; // Samples per channel for this block
+    const outputLength = output[0].length;
 
-    // Calculate and report buffer health (use first channel as reference)
     const bufferFrames = this.audioBuffers[0] ? this.audioBuffers[0].length : 0;
-    // const bufferMs = (bufferFrames / this.sampleRate) * 1000;
-    // this.port.postMessage({
-    //   type: "bufferStatus",
-    //   bufferMs: bufferMs,
-    //   isPlaying: this.isPlaying,
-    //   bufferSamples: bufferFrames,
-    // });
 
-    // Check for buffer underrun
-    if (!this.isPlaying || bufferFrames < outputLength) {
-      if (this.isPlaying) {
-        this.isPlaying = false;
-        // Adaptive increase on underrun — grow buffer to absorb future jitter
-        this.adaptiveBufferSize = Math.min(
-          Math.ceil(this.adaptiveBufferSize * 1.5),
-          this.maxBuffer
-        );
-        this.port.postMessage({
-          type: "underrun",
-          newBufferSize: this.adaptiveBufferSize,
-        });
-      }
-      // Output silence if there's not enough data
+    // ── Not yet playing: wait for buffer to fill ──
+    if (!this.isPlaying) {
       for (let channel = 0; channel < outputChannels; channel++) {
         output[channel].fill(0);
       }
-      return true; // Keep processor alive
+      return true;
     }
 
-    // Copy data directly from planar buffers to output buffers
+    // ── Buffer too low for this block ──
+    if (bufferFrames < outputLength) {
+      this.emptyBlockCount++;
+
+      if (this.emptyBlockCount <= this.GRACE_BLOCKS) {
+        // Grace period: output silence but DON'T stop playback
+        for (let channel = 0; channel < outputChannels; channel++) {
+          output[channel].fill(0);
+        }
+        return true;
+      }
+
+      // Real underrun: exceeded grace period → stop playback
+      this.isPlaying = false;
+      this.emptyBlockCount = 0;
+      this.blocksSinceUnderrun = 0;
+      this.adaptiveBufferSize = Math.min(
+        Math.ceil(this.adaptiveBufferSize * 1.5),
+        this.maxBuffer
+      );
+      this.port.postMessage({
+        type: "underrun",
+        newBufferSize: this.adaptiveBufferSize,
+      });
+      for (let channel = 0; channel < outputChannels; channel++) {
+        output[channel].fill(0);
+      }
+      return true;
+    }
+
+    // ── We have data: reset grace counter ──
+    this.emptyBlockCount = 0;
+    this.blocksSinceUnderrun++;
+
+    // ── Adaptive decay: shrink buffer threshold toward baseline when stable ──
+    if (
+      this.blocksSinceUnderrun > 0 &&
+      this.blocksSinceUnderrun % this.DECAY_INTERVAL === 0 &&
+      this.adaptiveBufferSize > this.bufferSize
+    ) {
+      const prev = this.adaptiveBufferSize;
+      this.adaptiveBufferSize = Math.max(
+        this.bufferSize,
+        Math.floor(this.adaptiveBufferSize * 0.9)
+      );
+      if (this.adaptiveBufferSize !== prev) {
+        this.port.postMessage({
+          type: "bufferDecay",
+          newBufferSize: this.adaptiveBufferSize,
+        });
+      }
+    }
+
+    // ── Copy samples to output ──
+    // During micro-crossfade (first 1ms after resume), apply a tiny ramp
+    // to prevent click. After that, samples pass through unmodified.
     for (let channel = 0; channel < outputChannels; channel++) {
-      // If we have data for this channel, use it; otherwise output silence
       if (
         channel < this.audioBuffers.length &&
         this.audioBuffers[channel].length >= outputLength
       ) {
-        for (let i = 0; i < outputLength; i++) {
-          // Apply fade-in when playback starts or resumes to prevent clicks
-          let fadeMultiplier = 1.0;
-          if (this.fadeInSamples < this.fadeInLength) {
-            fadeMultiplier = this.fadeInSamples / this.fadeInLength;
-            if (channel === 0) {
-              // Only increment once per frame
-              this.fadeInSamples++;
+        if (this.useMicroFade && this.microFadePos >= 0 && this.microFadePos < this.MICRO_FADE_LEN) {
+          // Micro-crossfade active (1ms ramp — inaudible)
+          for (let i = 0; i < outputLength; i++) {
+            if (this.microFadePos < this.MICRO_FADE_LEN) {
+              output[channel][i] = this.audioBuffers[channel][i] * (this.microFadePos / this.MICRO_FADE_LEN);
+              if (channel === 0) this.microFadePos++;
+            } else {
+              output[channel][i] = this.audioBuffers[channel][i];
             }
           }
-
-          output[channel][i] = this.audioBuffers[channel][i] * fadeMultiplier;
+        } else {
+          // Direct copy — zero modification
+          for (let i = 0; i < outputLength; i++) {
+            output[channel][i] = this.audioBuffers[channel][i];
+          }
+          if (this.microFadePos >= this.MICRO_FADE_LEN) this.microFadePos = -1;
         }
       } else {
-        // Output silence for missing channels
         output[channel].fill(0);
       }
     }
 
-    // Remove the processed samples from the beginning of each channel buffer
+    // Remove the processed samples
     for (let ch = 0; ch < this.audioBuffers.length; ch++) {
       this.audioBuffers[ch].splice(0, outputLength);
     }

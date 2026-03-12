@@ -378,6 +378,8 @@ self.onmessage = async function (e) {
       break;
 
     case "resumeStream":
+      if (self._audioReorderBuffer) self._audioReorderBuffer.reset();
+      self._lastAudioSeq = undefined;
       if (commandSender) commandSender.resumeStream();
       break;
 
@@ -791,7 +793,12 @@ function handleStreamConfigs(json) {
 
         // Native VideoDecoder in Annex B mode doesn't need description
         // WASM decoder needs description for SPS/PPS parsing
-        if (!isNativeDecoder && desc && desc.length > 0) {
+        // NOTE: Check hasNativeVideoDecoder (API availability) rather than
+        // isNativeDecoder (instance check), because 1080p/1440p decoders
+        // haven't been created yet when config arrives. Using isNativeDecoder
+        // would incorrectly include the 3-byte annexb description, which
+        // causes native VideoDecoder to fail with "Failed to parse avcC".
+        if (!hasNativeVideoDecoder && desc && desc.length > 0) {
           videoConfig.description = desc;
         }
 
@@ -1022,6 +1029,139 @@ async function readStream(reader) {
 }
 
 // ======================================
+// Audio Reorder Buffer
+// ======================================
+
+/**
+ * Lightweight reorder buffer for audio packets.
+ *
+ * The server broadcasts audio from overlapping GOP tasks, which can cause
+ * small out-of-order delivery (typically 2-packet swaps at batch boundaries).
+ * This buffer collects a small window of packets and emits them sorted by
+ * sequence number, restoring correct order before decoding.
+ *
+ * Design:
+ *  - BUFFER_SIZE = 3: sufficient for the observed 2-packet swap pattern
+ *  - FLUSH_TIMEOUT = 60ms (~3 audio frames at 20ms): ensures packets are
+ *    not held indefinitely if a true loss occurs
+ *  - When the buffer is full OR the next expected seq arrives, packets are
+ *    flushed in order immediately (zero added latency in the common path)
+ */
+class AudioReorderBuffer {
+  constructor(onEmit) {
+    this._onEmit = onEmit;      // callback(seq, timestamp, data) for each ordered packet
+    this._buffer = [];           // [{seq, timestamp, data}, ...]
+    this._nextExpectedSeq = -1;  // -1 = not initialized
+    this._flushTimer = null;
+    this.BUFFER_SIZE = 3;
+    this.FLUSH_TIMEOUT_MS = 60;
+  }
+
+  /**
+   * Push a packet into the reorder buffer.
+   * @param {number} seq - sequence number
+   * @param {number} timestamp - media timestamp
+   * @param {Uint8Array} data - audio payload
+   */
+  push(seq, timestamp, data) {
+    // First packet: initialize expected sequence
+    if (this._nextExpectedSeq === -1) {
+      this._nextExpectedSeq = seq;
+    }
+
+    // Insert into buffer (keep sorted by seq for efficient flush)
+    this._buffer.push({ seq, timestamp, data });
+
+    // Try to flush consecutive packets starting from _nextExpectedSeq
+    this._tryFlush();
+
+    // If buffer still has items, set a timeout to force-flush
+    // (handles true packet loss — don't hold packets forever)
+    this._resetTimer();
+  }
+
+  /** Emit all consecutive packets starting from _nextExpectedSeq. */
+  _tryFlush() {
+    if (!this._onEmit || this._buffer.length === 0) return;
+
+    // Sort buffer by sequence number
+    this._buffer.sort((a, b) => a.seq - b.seq);
+
+    // Emit consecutive packets from the front
+    while (this._buffer.length > 0) {
+      const head = this._buffer[0];
+
+      if (head.seq === this._nextExpectedSeq) {
+        // Expected packet — emit immediately
+        this._buffer.shift();
+        this._nextExpectedSeq = head.seq + 1;
+        this._onEmit(head.seq, head.timestamp, head.data);
+      } else if (head.seq < this._nextExpectedSeq) {
+        // Duplicate or late packet we already emitted — drop
+        this._buffer.shift();
+      } else if (this._buffer.length >= this.BUFFER_SIZE) {
+        // Buffer full but expected seq hasn't arrived — it's truly lost.
+        // Skip to the smallest seq in the buffer and emit from there.
+        this._nextExpectedSeq = head.seq;
+        // Continue the loop to emit this packet
+      } else {
+        // Gap exists but buffer isn't full yet — wait for more packets
+        break;
+      }
+    }
+  }
+
+  /** Reset the flush timeout timer. */
+  _resetTimer() {
+    if (this._flushTimer !== null) {
+      clearTimeout(this._flushTimer);
+      this._flushTimer = null;
+    }
+    if (this._buffer.length > 0) {
+      this._flushTimer = setTimeout(() => {
+        this._forceFlush();
+      }, this.FLUSH_TIMEOUT_MS);
+    }
+  }
+
+  /** Force-flush all buffered packets (timeout path). */
+  _forceFlush() {
+    this._flushTimer = null;
+    if (!this._onEmit || this._buffer.length === 0) return;
+
+    this._buffer.sort((a, b) => a.seq - b.seq);
+    while (this._buffer.length > 0) {
+      const pkt = this._buffer.shift();
+      if (pkt.seq >= this._nextExpectedSeq) {
+        this._nextExpectedSeq = pkt.seq + 1;
+        this._onEmit(pkt.seq, pkt.timestamp, pkt.data);
+      }
+      // else: stale duplicate — drop
+    }
+  }
+
+  /** Reset state (e.g. on stream restart). */
+  reset() {
+    this._buffer = [];
+    this._nextExpectedSeq = -1;
+    if (this._flushTimer !== null) {
+      clearTimeout(this._flushTimer);
+      this._flushTimer = null;
+    }
+  }
+
+  /** Destroy the buffer — clears timer and prevents any further callbacks. */
+  destroy() {
+    if (this._flushTimer !== null) {
+      clearTimeout(this._flushTimer);
+      this._flushTimer = null;
+    }
+    this._buffer = [];
+    this._onEmit = null;
+  }
+}
+
+// ======================================
 // GOP Stream Receiver (WebTransport unidirectional streams)
 // ======================================
 
@@ -1070,6 +1210,8 @@ class GopByteReader {
  * Key: channel byte (u8), Value: latest gopId (u32)
  */
 const activeGopPerChannel = new Map();
+
+
 
 /**
  * Loop over all incoming unidirectional streams from the WebTransport session.
@@ -1182,9 +1324,7 @@ async function readGopStream(receiveStream, gopIndex) {
       await processIncomingMessage(fullPacket);
     }
 
-    // if (gopIndex <= 3 || frameCount !== expectedFrames) {
-    //   proxyConsole.log(`[GOP] #${gopIndex} done: ch=${channel} gopId=${gopId} frames=${frameCount}/${expectedFrames}`);
-    // }
+
   } catch (err) {
     // Suppress errors from cancelled streams (expected when superseded)
     if (activeGopPerChannel.get(channel) !== gopId) {
@@ -1235,9 +1375,9 @@ async function handleGopStream(stream, gopIndex) {
     const gopId   = dv.getUint32(off, false); off += 4;
     const expectedFrames = dv.getUint16(off, false);
 
-    if (gopIndex <= 3) {
-      console.log(`[GOP] #${gopIndex} streamId=${streamId} ch=${channel} gopId=${gopId} expected=${expectedFrames}`);
-    }
+    // if (gopIndex <= 3) {
+    //   console.log(`[GOP] #${gopIndex} streamId=${streamId} ch=${channel} gopId=${gopId} expected=${expectedFrames}`);
+    // }
 
     // ── 2. Read frames until stream ends ─────────────────────────────────
     const FRAME_HEADER_SIZE = 13; // 4+4+1+4
@@ -1334,11 +1474,6 @@ async function handleBinaryPacket(dataBuffer) {
   // If transfer to an external worker is needed, decodeVideoExternal() will do
   // a targeted slice() of just that path.
   const data = new Uint8Array(dataBuffer, 9);
-
-  // DEBUG: Only log screen share packets (frameType 4 or 5)
-  // if (frameType === 4 || frameType === 5) {
-  //   console.warn(`[Worker] 📺 SCREEN_SHARE packet: frameType=${frameType}, seq=${sequenceNumber}, size=${data.byteLength}`);
-  // }
 
   // ── Video frame types ──
   // When videoDecoderPort is set (iOS 15), all video decoding is offloaded
@@ -1549,36 +1684,114 @@ async function handleBinaryPacket(dataBuffer) {
         'state:', audioDecoder.state, 'ts:', timestamp, 'len:', data.byteLength);
     }
 
-    // For AACDecoder, pass a plain object — the AACDecoder.decode() handles
-    // both native EncodedAudioChunk creation and WASM path internally.
-    // Using EncodedAudioChunk here would double-wrap when NativeAACDecoder
-    // checks instanceof and passes through, but the 'data' inside may be
-    // a view into a shared buffer that gets detached.
-    if (audioDecoder.usingNative !== undefined) {
-      // This is an AACDecoder instance — pass plain object with copied data
-      try {
-        audioDecoder.decode({
-          type: 'key',
-          timestamp: timestamp * 1000,
-          data: data.slice(), // isolated copy — original may be a view
-        });
-      } catch (err) {
-        console.error('[Audio] AAC decode error:', err);
-      }
-    } else {
-      // Opus path — use EncodedAudioChunk as before
-      const chunk = new EncodedAudioChunk({
-        timestamp: timestamp * 1000,
-        type: "key",
-        data,
-      });
+    // ── Audio delivery ──
+    // With single persistent uni-stream (both publisher→server and server→subscriber),
+    // QUIC guarantees in-order delivery, so reorder buffer is unnecessary.
+    const AUDIO_REORDER_ENABLED = false;
+    if (!AUDIO_REORDER_ENABLED) {
+      // Direct path — no buffering, lower latency
+      if (!self._audioRxTotal) { self._audioRxTotal = 0; self._audioRxLost = 0; }
+      self._audioRxTotal++;
 
-      try {
-        audioDecoder.decode(chunk);
-      } catch (err) {
-        console.error('[Audio] decode error:', err);
+      // Seq gap detection
+      if (self._lastAudioSeq === undefined) {
+        self._lastAudioSeq = sequenceNumber;
+      } else {
+        const expected = self._lastAudioSeq + 1;
+        if (sequenceNumber !== expected) {
+          const lost = sequenceNumber - expected;
+          if (lost > 0) self._audioRxLost += lost;
+          console.warn(`[Audio RX] PACKET LOSS: expected=${expected}, got=${sequenceNumber}, lost=${lost}`);
+        }
+        self._lastAudioSeq = sequenceNumber;
       }
+
+      // Periodic summary
+      if (self._audioRxTotal % 500 === 0) {
+        const lossRate = self._audioRxLost > 0 ? ((self._audioRxLost / (self._audioRxTotal + self._audioRxLost)) * 100).toFixed(2) : '0.00';
+        console.log(`[Audio RX] total=${self._audioRxTotal} lost=${self._audioRxLost} rate=${lossRate}% lastSeq=${sequenceNumber}`);
+      }
+
+      // Decode directly
+      const decoder = mediaDecoders.get(
+        subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_AUDIO : CHANNEL_NAME.SCREEN_SHARE_AUDIO
+      );
+      if (!decoder || !decoder.isReadyForAudio) return;
+
+      if (decoder.usingNative !== undefined) {
+        try {
+          decoder.decode({ type: 'key', timestamp: timestamp * 1000, data: data.slice() });
+        } catch (err) { console.error('[Audio] AAC decode error:', err); }
+      } else {
+        try {
+          decoder.decode(new EncodedAudioChunk({ timestamp: timestamp * 1000, type: 'key', data: data.slice() }));
+        } catch (err) { console.error('[Audio] decode error:', err); }
+      }
+      return;
     }
+
+    // ── Reorder buffer path (AUDIO_REORDER_ENABLED = true) ──
+    // Lazily create the reorder buffer on first audio packet.
+    // The onEmit callback fires packets in correct sequence order.
+    if (!self._audioReorderBuffer) {
+      self._audioReorderBuffer = new AudioReorderBuffer((seq, ts, audioPayload) => {
+        // ── Packet loss detection (after reordering) ──
+        if (!self._audioRxTotal) { self._audioRxTotal = 0; self._audioRxLost = 0; }
+        self._audioRxTotal++;
+        if (self._lastAudioSeq === undefined) {
+          self._lastAudioSeq = seq;
+        } else {
+          const expected = self._lastAudioSeq + 1;
+          if (seq !== expected) {
+            const lost = seq - expected;
+            self._audioRxLost += lost;
+            console.warn(`[Audio RX] PACKET LOSS: expected=${expected}, got=${seq}, lost=${lost}`);
+          }
+          self._lastAudioSeq = seq;
+        }
+
+        // Periodic summary log
+        if (self._audioRxTotal % 500 === 0) {
+          const lossRate = self._audioRxLost > 0 ? ((self._audioRxLost / (self._audioRxTotal + self._audioRxLost)) * 100).toFixed(2) : '0.00';
+          console.log(`[Audio RX] total=${self._audioRxTotal} lost=${self._audioRxLost} rate=${lossRate}% lastSeq=${seq}`);
+        }
+
+        // Resolve decoder at emit time (may have been recreated)
+        const decoder = mediaDecoders.get(
+          subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_AUDIO : CHANNEL_NAME.SCREEN_SHARE_AUDIO
+        );
+        if (!decoder || !decoder.isReadyForAudio) return;
+
+        if (decoder.usingNative !== undefined) {
+          // AACDecoder path — pass plain object with copied data
+          try {
+            decoder.decode({
+              type: 'key',
+              timestamp: ts * 1000,
+              data: audioPayload, // already an isolated copy from push()
+            });
+          } catch (err) {
+            console.error('[Audio] AAC decode error:', err);
+          }
+        } else {
+          // Opus path — use EncodedAudioChunk
+          try {
+            decoder.decode(new EncodedAudioChunk({
+              timestamp: ts * 1000,
+              type: "key",
+              data: audioPayload,
+            }));
+          } catch (err) {
+            console.error('[Audio] decode error:', err);
+          }
+        }
+      });
+      console.log('[Audio] 🔄 AudioReorderBuffer initialized (bufferSize=3, timeout=60ms)');
+    }
+
+    // Push into reorder buffer — data.slice() creates an isolated copy
+    // since `data` is a view into the shared dataBuffer
+    self._audioReorderBuffer.push(sequenceNumber, timestamp, data.slice());
   }
 }
 
@@ -1890,6 +2103,13 @@ function stopAll() {
     videoJitterBuffer.destroy();
     videoJitterBuffer = null;
   }
+
+  // Destroy audio reorder buffer (prevent lingering flush timer + post-destroy callbacks)
+  if (self._audioReorderBuffer) {
+    self._audioReorderBuffer.destroy();
+    self._audioReorderBuffer = null;
+  }
+  self._lastAudioSeq = undefined;
 
   if (workletPort) {
     workletPort.postMessage({ type: "stop" });
