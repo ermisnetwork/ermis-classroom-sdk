@@ -957,8 +957,10 @@ export class ErmisClient extends EventEmitter {
   private _setupGlobalEventListeners(): void {
     // Handle server events
     const handleServerEvent = async (event: any) => {
-      log('[MeetingClient] Received SERVER_EVENT from globalEventBus:', event);
-      // Server events are already handled by Room, just log for debugging
+      // Skip noisy high-frequency events from logging
+      if (event?.type !== 'arrival_feedback' && event?.type !== 'pong') {
+        log('[MeetingClient] Received SERVER_EVENT from globalEventBus:', event);
+      }
     };
 
     // Handle local stream ready

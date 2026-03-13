@@ -155,8 +155,8 @@ const SUB_STREAMS = {
     name: "video_360p",
     width: 640,
     height: 360,
-    bitrate: 400_000,
-    framerate: 30,
+    bitrate: 150_000,
+    framerate: 15,
     channelName: CHANNEL_NAME.VIDEO_360P,
   },
   VIDEO_720P: {

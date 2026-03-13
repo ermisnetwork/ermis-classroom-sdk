@@ -227,6 +227,12 @@ export interface VideoEncoderObject {
   config: VideoEncoderConfig;
   metadataReady: boolean;
   videoDecoderConfig?: VideoDecoderConfig | null;
+  /** Stored for encoder recreation after crash/close */
+  onOutput?: (chunk: EncodedVideoChunk, metadata?: EncodedVideoChunkMetadata) => void;
+  /** Stored for encoder recreation after crash/close */
+  onError?: (error: Error) => void;
+  /** Whether this is a WASM worker encoder (iOS 15) */
+  isWasmEncoder?: boolean;
 }
 
 // Audio recorder options

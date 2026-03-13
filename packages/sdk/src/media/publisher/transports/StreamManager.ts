@@ -14,8 +14,7 @@ import CommandSender, { PublisherState } from "../ClientCommand";
 import { log } from "../../../utils";
 import type { WebRTCManager } from "./WebRTCManager";
 import { GopStreamSender } from "./GopStreamSender";
-// import { PublisherNetworkMonitor } from "../../network-monitor/PublisherNetworkMonitor";
-// import { AdaptiveMediaController } from "../managers/AdaptiveMediaController";
+import type { AdaptiveMediaController } from "../congestion/AdaptiveMediaController";
 
 // Default publisher state - will be updated by Publisher
 const DEFAULT_PUBLISHER_STATE: PublisherState = {
@@ -91,9 +90,15 @@ export class StreamManager extends EventEmitter<{
   private readonly AUDIO_GOP_SIZE = 50; // 50 frames per stream — ~1 second of audio
 
   // Network congestion handling (client-side)
-  // private _networkMonitor: PublisherNetworkMonitor | null = null;
-  // private _adaptiveController: AdaptiveMediaController | null = null;
+  private _adaptiveController: AdaptiveMediaController | null = null;
   private _writeTimeoutReportTimer: ReturnType<typeof setInterval> | null = null;
+  private _arrivalFeedbackCallback: ((feedback: any) => void) | null = null;
+
+  // Central write failure tracking (10s sliding window)
+  // Tracks ALL write attempts and failures across all senders
+  private _centralWriteAttempts: number[] = []; // timestamps
+  private _centralWriteFailures: number[] = []; // timestamps
+  private static readonly FAILURE_WINDOW_MS = 5_000;
 
   // Audio TX packet loss diagnostics
   private _audioTxSent = 0;
@@ -444,7 +449,20 @@ export class StreamManager extends EventEmitter<{
 
           try {
             const event = JSON.parse(messageStr);
-            log(`[StreamManager] Received server event:`, event);
+            if (event.type !== 'arrival_feedback' && event.type !== 'pong') {
+              log(`[StreamManager] Received server event:`, event);
+            }
+
+            // Route arrival_feedback directly to GCC engine
+            if (event.type === "arrival_feedback" && this._arrivalFeedbackCallback) {
+              this._arrivalFeedbackCallback(event);
+            }
+
+            // Route pong for app-level RTT measurement
+            if (event.type === "pong" && event.ts && this._arrivalFeedbackCallback) {
+              const appRttMs = Date.now() - event.ts;
+              this._arrivalFeedbackCallback({ type: "app_rtt", rtt_ms: appRttMs, seq: event.seq });
+            }
 
             // Emit to global event bus
             globalEventBus.emit(GlobalEvents.SERVER_EVENT, event);
@@ -469,7 +487,7 @@ export class StreamManager extends EventEmitter<{
    * Only for MEETING_CONTROL channel
    * Uses StreamManager's streams map to get data channel by channel name
    */
-  private setupEventDataChannelListener(channelName: ChannelName): void {
+   private setupEventDataChannelListener(channelName: ChannelName): void {
     const streamData = this.streams.get(channelName);
     if (!streamData || !streamData.dataChannel) {
       console.error(`[StreamManager] Cannot setup event listener: data channel not found for ${channelName}`);
@@ -483,7 +501,22 @@ export class StreamManager extends EventEmitter<{
       try {
         const messageStr = new TextDecoder().decode(data);
         const serverEvent = JSON.parse(messageStr);
-        log(`[StreamManager] Received server event via data channel (${channelName}):`, serverEvent);
+
+        // Skip logging noisy high-frequency events
+        if (serverEvent.type !== 'arrival_feedback' && serverEvent.type !== 'pong') {
+          log(`[StreamManager] Received server event via data channel (${channelName}):`, serverEvent);
+        }
+
+        // Route arrival_feedback directly to GCC engine (same as WebTransport path)
+        if (serverEvent.type === "arrival_feedback" && this._arrivalFeedbackCallback) {
+          this._arrivalFeedbackCallback(serverEvent);
+        }
+
+        // Route pong for app-level RTT measurement (same as WebTransport path)
+        if (serverEvent.type === "pong" && serverEvent.ts && this._arrivalFeedbackCallback) {
+          const appRttMs = Date.now() - serverEvent.ts;
+          this._arrivalFeedbackCallback({ type: "app_rtt", rtt_ms: appRttMs, seq: serverEvent.seq });
+        }
 
         // Emit to global event bus
         globalEventBus.emit(GlobalEvents.SERVER_EVENT, serverEvent);
@@ -672,10 +705,9 @@ export class StreamManager extends EventEmitter<{
     }
 
     // Adaptive congestion: check if this frame should be skipped
-    // if (this._adaptiveController?.shouldSkipFrame(channelName)) {
-    //   // logged inside AdaptiveMediaController (throttled)
-    //   return;
-    // }
+    if (this._adaptiveController?.shouldSkipFrame(channelName)) {
+      return;
+    }
 
     const chunkType: "key" | "delta" = chunk.type === "key" ? "key" : "delta";
     const frameType = FrameTypeHelper.getFrameType(channelName, chunkType);
@@ -764,11 +796,18 @@ export class StreamManager extends EventEmitter<{
       }
 
       // Send frame
-      await gopSender.sendFrame(
+      const sent = await gopSender.sendFrame(
         packet,
         chunk.timestamp,
         frameType
       );
+
+      // Track write result centrally for congestion detection
+      if (sent) {
+        this._recordCentralWrite(false);
+      } else {
+        this._recordCentralWrite(true);
+      }
 
       gopData.currentGopFrames++;
     } else {
@@ -843,10 +882,12 @@ export class StreamManager extends EventEmitter<{
       let sent = await gopSender.sendFrame(packet, timestamp, FrameType.AUDIO);
       if (sent) {
         this._audioTxSent++;
+        this._recordCentralWrite(false);
         if (useGopBatching) gopData.currentGopFrames++;
       } else {
         // Stream died — reopen and retry
         this._audioTxRetried++;
+        this._recordCentralWrite(true);
         console.warn(`[Audio TX] SEND FAILED seq=${sequenceNumber}, reopening stream…`);
         if (useGopBatching) {
           await gopSender.startGopGraceful(channel, this.AUDIO_GOP_SIZE, getStreamPriority(channelName));
@@ -859,9 +900,11 @@ export class StreamManager extends EventEmitter<{
         sent = await gopSender.sendFrame(packet, timestamp, FrameType.AUDIO);
         if (sent) {
           this._audioTxSent++;
+          this._recordCentralWrite(false);
           if (useGopBatching) gopData.currentGopFrames++;
         } else {
           this._audioTxDropped++;
+          this._recordCentralWrite(true);
           console.error(`[Audio TX] RETRY FAILED seq=${sequenceNumber} — frame dropped`);
         }
       }
@@ -1246,6 +1289,72 @@ export class StreamManager extends EventEmitter<{
     }
 
     return streamData.writer !== null;
+  }
+
+  /**
+   * Set the adaptive media controller for frame skipping during congestion.
+   */
+  setAdaptiveController(controller: AdaptiveMediaController | null): void {
+    this._adaptiveController = controller;
+  }
+
+  /**
+   * Abort the current GOP stream for a channel, immediately discarding
+   * any buffered video frames in the QUIC write buffer.
+   * Called by AdaptiveMediaController when pausing a channel during congestion
+   * to prevent stale frames from clogging bandwidth.
+   */
+  async abortGopForChannel(channelName: ChannelName): Promise<void> {
+    const gopData = this.gopSenders.get(channelName);
+    if (gopData?.gopSender) {
+      await gopData.gopSender.abortCurrentGop('Congestion pause — flushing buffer');
+      gopData.currentGopFrames = 0;
+      console.log(`[StreamManager] Aborted GOP for ${channelName} — buffer flushed`);
+    }
+  }
+
+  /**
+   * Set callback to receive arrival_feedback events from Meeting Node.
+   * Used by Publisher to route feedback directly to GCC engine.
+   */
+  setArrivalFeedbackCallback(cb: ((feedback: any) => void) | null): void {
+    this._arrivalFeedbackCallback = cb;
+  }
+
+  /**
+   * Get the current backpressure ratio (0.0–1.0) for congestion detection.
+   * Uses the CENTRAL write failure tracker that counts ALL GOP + audio write
+   * failures across the last 10 seconds. This survives GopStreamSender abort/recreate.
+   */
+  getBackpressureStats(): number {
+    const now = Date.now();
+    const cutoff = now - StreamManager.FAILURE_WINDOW_MS;
+    this._pruneCentralWindow(cutoff);
+
+    if (this._centralWriteAttempts.length === 0) return 0;
+    return this._centralWriteFailures.length / this._centralWriteAttempts.length;
+  }
+
+  /** Record a write attempt (success or failure) in the central tracker. */
+  private _recordCentralWrite(failed: boolean): void {
+    const now = Date.now();
+    this._centralWriteAttempts.push(now);
+    if (failed) {
+      this._centralWriteFailures.push(now);
+    }
+    // Prune old entries
+    const cutoff = now - StreamManager.FAILURE_WINDOW_MS;
+    this._pruneCentralWindow(cutoff);
+  }
+
+  /** Remove entries older than cutoff from central sliding windows. */
+  private _pruneCentralWindow(cutoff: number): void {
+    while (this._centralWriteAttempts.length > 0 && this._centralWriteAttempts[0] < cutoff) {
+      this._centralWriteAttempts.shift();
+    }
+    while (this._centralWriteFailures.length > 0 && this._centralWriteFailures[0] < cutoff) {
+      this._centralWriteFailures.shift();
+    }
   }
 
   /**

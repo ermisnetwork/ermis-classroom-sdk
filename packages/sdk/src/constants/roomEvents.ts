@@ -8,6 +8,9 @@ export const ROOM_EVENTS = {
   ROOM_ENDED: 'roomEnded',
   ERROR: 'error',
 
+  // Network quality events
+  NETWORK_QUALITY_CHANGED: 'networkQualityChanged',
+
   // Participant events
   PARTICIPANT_ADDED: 'participantAdded',
   PARTICIPANT_JOINED: 'participantJoined',
