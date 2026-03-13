@@ -48,6 +48,7 @@ export class VideoProcessor extends EventEmitter<{
   cameraStateChanged: boolean;
   encoderReconfigured: { encoderName: string; config: Partial<VideoEncoderConfig> };
   processingError: unknown;
+  trackEnded: { reason: string };
 }> {
   private videoEncoderManager: VideoEncoderManager;
   private streamManager: StreamManager;
@@ -59,6 +60,8 @@ export class VideoProcessor extends EventEmitter<{
   private cameraEnabled = true;
   private frameCounter = 0;
   private videoTrack: MediaStreamTrack | null = null;
+  private processFramesRestartCount = 0;
+  private static readonly MAX_RESTART_ATTEMPTS = 3;
 
   // Config capture mode - temporarily encode frames to get video config even when camera is off
   private isCapturingConfig = false;
@@ -153,6 +156,14 @@ export class VideoProcessor extends EventEmitter<{
       );
 
       this.videoReader = this.videoProcessor.readable.getReader();
+
+      // Listen for track ending (Safari can kill tracks during lag/background)
+      videoTrack.onended = () => {
+        if (this.isProcessing) {
+          console.warn('[VideoProcessor] ⚠️ Video track ended unexpectedly while processing!');
+          this.emit('trackEnded', { reason: 'MediaStreamTrack ended (Safari lag/background)' });
+        }
+      };
 
       this.emit("initialized", { subStreams: this.subStreams });
     } catch (error) {
@@ -266,8 +277,6 @@ export class VideoProcessor extends EventEmitter<{
           break;
         }
 
-        // log("[VideoProcessor] Frame read:", result.value);
-
         const frame = result.value;
         frameCount++;
 
@@ -286,7 +295,6 @@ export class VideoProcessor extends EventEmitter<{
         }
 
         // Determine if we should encode this frame
-        // Encode if: camera is enabled OR we're capturing config and haven't completed yet
         const shouldEncode = this.cameraEnabled || (this.isCapturingConfig && !this.configCaptureComplete);
 
         if (!shouldEncode) {
@@ -316,11 +324,33 @@ export class VideoProcessor extends EventEmitter<{
         }
       }
       log("[VideoProcessor] processFrames() ended, total frames:", frameCount);
+      // Reset restart counter on clean exit
+      this.processFramesRestartCount = 0;
     } catch (error) {
       console.error("[VideoProcessor] Frame processing error:", error);
       this.emit("processingError", error);
+
+      // Auto-restart: if we're still supposed to be processing, this was an
+      // unexpected crash (not an intentional stop). Retry up to MAX_RESTART_ATTEMPTS.
+      if (this.isProcessing && this.processFramesRestartCount < VideoProcessor.MAX_RESTART_ATTEMPTS) {
+        this.processFramesRestartCount++;
+        console.warn(
+          `[VideoProcessor] 🔄 Auto-restarting processFrames() (attempt ${this.processFramesRestartCount}/${VideoProcessor.MAX_RESTART_ATTEMPTS})`,
+        );
+        await new Promise((r) => setTimeout(r, 500));
+        if (this.isProcessing) {
+          this.processFrames();
+          return; // Don't set isProcessing = false
+        }
+      }
     } finally {
-      this.isProcessing = false;
+      // Only set isProcessing to false if we're NOT auto-restarting
+      if (this.processFramesRestartCount >= VideoProcessor.MAX_RESTART_ATTEMPTS || !this.isProcessing) {
+        this.isProcessing = false;
+        if (this.processFramesRestartCount >= VideoProcessor.MAX_RESTART_ATTEMPTS) {
+          console.error('[VideoProcessor] ❌ Max restart attempts reached, giving up');
+        }
+      }
     }
   }
 
@@ -627,5 +657,17 @@ export class VideoProcessor extends EventEmitter<{
         console.error(`[VideoProcessor] Failed to resend config for ${subStream.name}:`, error);
       }
     }
+  }
+
+  /**
+   * Request a keyframe for a specific channel.
+   * Used by AdaptiveMediaController when resuming a channel from paused state,
+   * so a new GOP stream opens immediately with a keyframe.
+   *
+   * @param channelName - The channel to force a keyframe on
+   */
+  requestKeyframeForChannel(channelName: ChannelName): void {
+    this.videoEncoderManager.requestKeyframeByChannel(channelName);
+    log(`[VideoProcessor] Keyframe requested for channel ${channelName} (resume from pause)`);
   }
 }

@@ -1290,6 +1290,48 @@ export class Room extends EventEmitter {
   }
 
   /**
+   * Get current GCC network quality stats from the publisher.
+   * Returns null values if publisher or congestion control is not active.
+   */
+  getNetworkQuality(): { stats: any; allocation: any } {
+    if (!this.localParticipant?.publisher) {
+      return { stats: null, allocation: null };
+    }
+    return this.localParticipant.publisher.getNetworkQuality();
+  }
+
+  /**
+   * Register a callback for network quality changes.
+   * Fires when quality transitions between tiers (EXCELLENT/GOOD/POOR/CRITICAL).
+   * Use this to show/hide lag notifications in the UI.
+   *
+   * @param listener - Callback receiving quality change data
+   * @returns Unsubscribe function
+   *
+   * @example
+   * ```typescript
+   * const unsub = room.onNetworkQualityChanged((data) => {
+   *   if (data.quality === 'POOR' || data.quality === 'CRITICAL') {
+   *     showLagNotification(data.quality);
+   *   } else {
+   *     hideLagNotification();
+   *   }
+   * });
+   * ```
+   */
+  onNetworkQualityChanged(listener: (data: {
+    quality: string;
+    previousQuality: string;
+    signals: { rtt: string; backpressure: string; silence: string };
+    rttMs: number;
+    backpressureRate: number;
+  }) => void): () => void {
+    const handler = (data: any) => listener(data);
+    this.on("networkQualityChanged", handler);
+    return () => this.off("networkQualityChanged", handler);
+  }
+
+  /**
    * Start screen sharing for local participant
    */
   async startScreenShare(): Promise<MediaStream> {
@@ -2359,7 +2401,10 @@ export class Room extends EventEmitter {
   private _setupGlobalEventListeners(): void {
     // Bind handlers to preserve 'this' context
     const handleServerEvent = async (event: ServerEvent) => {
-      log("[Room] Received serverEvent from GlobalEventBus:", event);
+      // Skip noisy high-frequency events from logging
+      if ((event as any).type !== 'arrival_feedback' && (event as any).type !== 'pong') {
+        log("[Room] Received serverEvent from GlobalEventBus:", event);
+      }
       await this._handleServerEvent(event);
     };
 
@@ -2445,6 +2490,14 @@ export class Room extends EventEmitter {
       });
     };
 
+    // Network quality change handler
+    const handleNetworkQualityChanged = (data: any) => {
+      this.emit("networkQualityChanged", {
+        room: this,
+        ...data,
+      });
+    };
+
     // Subscriber reconnection handlers
     const handleSubscriberReconnecting = (data: any) => {
       const participant = Array.from(this.participants.values()).find(
@@ -2501,6 +2554,7 @@ export class Room extends EventEmitter {
     globalEventBus.on(GlobalEvents.PUBLISHER_RECONNECTED, handlePublisherReconnected);
     globalEventBus.on(GlobalEvents.PUBLISHER_RECONNECTION_FAILED, handlePublisherReconnectionFailed);
     globalEventBus.on(GlobalEvents.PUBLISHER_CONNECTION_HEALTH_CHANGED, handlePublisherConnectionHealthChanged);
+    globalEventBus.on(GlobalEvents.NETWORK_QUALITY_CHANGED, handleNetworkQualityChanged);
 
     // Subscribe to Subscriber reconnection events
     globalEventBus.on(GlobalEvents.SUBSCRIBER_RECONNECTING, handleSubscriberReconnecting);
@@ -2519,6 +2573,7 @@ export class Room extends EventEmitter {
       () => globalEventBus.off(GlobalEvents.PUBLISHER_RECONNECTED, handlePublisherReconnected),
       () => globalEventBus.off(GlobalEvents.PUBLISHER_RECONNECTION_FAILED, handlePublisherReconnectionFailed),
       () => globalEventBus.off(GlobalEvents.PUBLISHER_CONNECTION_HEALTH_CHANGED, handlePublisherConnectionHealthChanged),
+      () => globalEventBus.off(GlobalEvents.NETWORK_QUALITY_CHANGED, handleNetworkQualityChanged),
       // Subscriber reconnection cleanups
       () => globalEventBus.off(GlobalEvents.SUBSCRIBER_RECONNECTING, handleSubscriberReconnecting),
       () => globalEventBus.off(GlobalEvents.SUBSCRIBER_RECONNECTED, handleSubscriberReconnected),

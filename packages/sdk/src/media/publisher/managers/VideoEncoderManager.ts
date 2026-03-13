@@ -258,42 +258,41 @@ export class VideoEncoderManager extends EventEmitter<{
     let encoder: any;
     let isWasmEncoder = false;
 
+    // Wrap output callback to enrich metadata with encoder/channel names
+    const wrappedOnOutput = (chunk: EncodedVideoChunk, metadata?: EncodedVideoChunkMetadata) => {
+      const enrichedMetadata = {
+        ...(metadata || {}),
+        encoderName: name,
+        channelName,
+      } as EncodedVideoChunkMetadata;
+      onOutput(chunk, enrichedMetadata);
+    };
+    const wrappedOnError = (error: Error) => {
+      console.error(`[VideoEncoder] ❌ ${name} error:`, error);
+      this.emit("encoderError", { name, error });
+      onError(error);
+    };
+
     if (HAS_NATIVE_VIDEO_ENCODER) {
       // Use native VideoEncoder
       encoder = new VideoEncoder({
-        output: (chunk: EncodedVideoChunk, metadata?: EncodedVideoChunkMetadata) => {
-          const enrichedMetadata = {
-            ...(metadata || {}),
-            encoderName: name,
-            channelName,
-          } as EncodedVideoChunkMetadata;
-          onOutput(chunk, enrichedMetadata);
-        },
-        error: (error: Error) => {
-          console.error(`[VideoEncoder] ❌ ${name} error:`, error);
-          this.emit("encoderError", { name, error });
-          onError(error);
-        },
+        output: wrappedOnOutput,
+        error: wrappedOnError,
       });
 
       encoder.configure(encoderConfig);
       log(`[VideoEncoder] Created native encoder "${name}" for ${channelName}:`, encoderConfig);
     } else {
       // Fallback to WASM H264Encoder via Worker thread (iOS 15 Safari, etc.)
-      // Encoding runs in a separate worker to avoid blocking the main thread
-      // with synchronous WASM x264 operations.
       log(`[VideoEncoder] Native VideoEncoder not available, using Worker-based WASM encoder for "${name}"`);
 
-      // Initialize encoder worker if not already created
       if (!this.encoderWorker) {
         this.initEncoderWorker();
       }
 
-      // Create proxy encoder that communicates with the worker
       const proxy = new WorkerEncoderProxy(this.encoderWorker!, name);
       this.workerProxies.set(name, proxy);
 
-      // Set up callbacks (same interface as local WASM encoder)
       proxy.onOutput = (chunk: any, metadata: any) => {
         const enrichedMetadata = {
           ...metadata,
@@ -302,11 +301,7 @@ export class VideoEncoderManager extends EventEmitter<{
         };
         onOutput(chunk, enrichedMetadata as EncodedVideoChunkMetadata);
       };
-      proxy.onError = (error: Error) => {
-        console.error(`[VideoEncoder Worker] ❌ ${name} error:`, error);
-        this.emit("encoderError", { name, error });
-        onError(error);
-      };
+      proxy.onError = wrappedOnError;
 
       await proxy.configure({
         width: encoderConfig.width,
@@ -321,15 +316,17 @@ export class VideoEncoderManager extends EventEmitter<{
       log(`[VideoEncoder] Created Worker encoder "${name}" for ${channelName}:`, encoderConfig);
     }
 
-    // Store encoder info - wrap WASM encoder to match interface
+    // Store encoder info + callbacks for recreation after crash
     this.encoders.set(name, {
       encoder: encoder,
       channelName,
       config: encoderConfig,
       metadataReady: false,
       videoDecoderConfig: null,
-      isWasmEncoder, // Track which type of encoder
-    } as VideoEncoderObject & { isWasmEncoder?: boolean });
+      isWasmEncoder,
+      onOutput: wrappedOnOutput,
+      onError: wrappedOnError,
+    } as VideoEncoderObject);
 
     this.emit("encoderCreated", { name, channelName, config: encoderConfig });
 
@@ -533,6 +530,17 @@ export class VideoEncoderManager extends EventEmitter<{
     };
 
     try {
+      // Check encoder state — if closed (Safari kills encoders during lag),
+      // recreate instead of trying to reconfigure a dead encoder
+      const encoderState = encoderObj.encoder.state;
+      if (encoderState === 'closed') {
+        console.warn(
+          `[VideoEncoder] ⚠️ ${name} is CLOSED — recreating encoder`,
+        );
+        await this._recreateEncoder(name, encoderObj, newConfig);
+        return;
+      }
+
       // Flush existing frames
       await encoderObj.encoder.flush();
 
@@ -544,9 +552,67 @@ export class VideoEncoderManager extends EventEmitter<{
       log(`[VideoEncoder] Reconfigured ${name}:`, newConfig);
       this.emit("encoderReconfigured", { name, config: newConfig });
     } catch (error) {
-      console.error(`[VideoEncoder] Failed to reconfigure ${name}:`, error);
-      throw error;
+      // If reconfigure fails (encoder in bad state), try recreation
+      console.warn(
+        `[VideoEncoder] ⚠️ ${name} reconfigure failed, attempting recreation:`,
+        error,
+      );
+      try {
+        await this._recreateEncoder(name, encoderObj, newConfig);
+      } catch (recreateError) {
+        console.error(
+          `[VideoEncoder] ❌ ${name} recreation also failed:`,
+          recreateError,
+        );
+        throw recreateError;
+      }
     }
+  }
+
+  /**
+   * Recreate a native VideoEncoder that has been closed or errored.
+   * Uses the stored onOutput/onError callbacks from the original creation.
+   * WASM encoders are NOT recreated (worker handles its own lifecycle).
+   */
+  private async _recreateEncoder(
+    name: string,
+    encoderObj: VideoEncoderObject,
+    config: VideoEncoderConfig,
+  ): Promise<void> {
+    if (encoderObj.isWasmEncoder) {
+      console.warn(`[VideoEncoder] ${name} is WASM — cannot recreate, skipping`);
+      return;
+    }
+
+    if (!encoderObj.onOutput || !encoderObj.onError) {
+      console.error(`[VideoEncoder] ${name} missing stored callbacks — cannot recreate`);
+      return;
+    }
+
+    // Create fresh native VideoEncoder
+    const newEncoder = new VideoEncoder({
+      output: encoderObj.onOutput,
+      error: encoderObj.onError,
+    });
+
+    const encoderConfig: VideoEncoderConfig = {
+      ...config,
+      latencyMode: 'realtime',
+      hardwareAcceleration: 'prefer-hardware',
+      avc: { format: 'annexb' },
+    } as VideoEncoderConfig;
+
+    newEncoder.configure(encoderConfig);
+
+    // Replace old encoder in the map
+    encoderObj.encoder = newEncoder as any;
+    encoderObj.config = encoderConfig;
+    encoderObj.metadataReady = false;
+
+    console.log(
+      `[VideoEncoder] ✅ ${name} RECREATED successfully (was closed/errored)`,
+    );
+    this.emit('encoderReconfigured', { name, config: encoderConfig });
   }
 
   /**
@@ -826,5 +892,22 @@ export class VideoEncoderManager extends EventEmitter<{
     // By setting it to keyframeInterval - 1, the next encodeFrame will produce a keyframe
     this.frameCounter = this.keyframeInterval - 1;
     log(`[VideoEncoder] Keyframe requested for ${name}, next frame will be keyframe`);
+  }
+
+  /**
+   * Request a keyframe for a specific channel name.
+   * Finds the encoder registered for this channel and forces the next frame
+   * to be a keyframe. Used by AdaptiveMediaController when resuming from pause.
+   *
+   * @param channelName - Channel name (e.g. ChannelName.VIDEO_360P)
+   */
+  requestKeyframeByChannel(channelName: string): void {
+    for (const [name, encoderObj] of this.encoders) {
+      if (encoderObj.channelName === channelName) {
+        this.requestKeyframe(name);
+        return;
+      }
+    }
+    console.warn(`[VideoEncoder] No encoder found for channel ${channelName}`);
   }
 }

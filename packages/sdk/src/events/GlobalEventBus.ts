@@ -31,6 +31,7 @@ export enum GlobalEvents {
   PUBLISHER_RECONNECTED = "publisher:reconnected",
   PUBLISHER_RECONNECTION_FAILED = "publisher:reconnectionFailed",
   PUBLISHER_CONNECTION_HEALTH_CHANGED = "publisher:connectionHealthChanged",
+  NETWORK_QUALITY_CHANGED = "publisher:networkQualityChanged",
 
   // Subscriber media events
   REMOTE_STREAM_READY = "subscriber:remoteStreamReady",
@@ -104,6 +105,17 @@ export interface GlobalEventMap extends Record<string, unknown> {
   [GlobalEvents.PUBLISHER_RECONNECTED]: { streamId?: string };
   [GlobalEvents.PUBLISHER_RECONNECTION_FAILED]: { streamId?: string; reason: string };
   [GlobalEvents.PUBLISHER_CONNECTION_HEALTH_CHANGED]: { streamId?: string; isHealthy: boolean };
+  [GlobalEvents.NETWORK_QUALITY_CHANGED]: {
+    quality: string;
+    previousQuality: string;
+    signals: {
+      rtt: string;
+      backpressure: string;
+      silence: string;
+    };
+    rttMs: number;
+    backpressureRate: number;
+  };
 
   // Subscriber events
   [GlobalEvents.REMOTE_STREAM_READY]: {

@@ -21,6 +21,8 @@ import { AudioProcessor } from "./processors/AudioProcessor";
 import { LivestreamAudioMixer } from "../audioMixer/LivestreamAudioMixer";
 import { log } from "../../utils";
 import { SUB_STREAMS } from "../../constants/publisherConstants";
+import { NetworkQualityMonitor, type GCCStats, type ArrivalFeedback } from "./congestion/NetworkQualityMonitor";
+import { AdaptiveMediaController, type AllocationSummary } from "./congestion/AdaptiveMediaController";
 
 interface PublisherEvents extends Record<string, unknown> {
   statusUpdate: { message: string; isError: boolean };
@@ -127,6 +129,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private mixedAudioStream: MediaStream | null = null;
   // Store viewport dimensions BEFORE getDisplayMedia popup changes them
   private preCaptureViewportDimensions: { width: number; height: number } | null = null;
+
+  // Adaptive congestion control
+  private networkQualityMonitor: NetworkQualityMonitor | null = null;
+  private adaptiveMediaController: AdaptiveMediaController | null = null;
 
   constructor(config: PublisherConfig) {
     super();
@@ -288,6 +294,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Send initial state to server so other clients know the mic/camera status
       // This is important when user joins with mic/camera already disabled
       await this.sendInitialState();
+
+      // Start adaptive congestion control
+      this.startCongestionControl();
 
       // Start connection health monitoring
       this.startConnectionHealthMonitoring();
@@ -952,6 +961,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     try {
       this.updateStatus("Stopping publisher...");
 
+      // Stop congestion control monitoring
+      this.stopCongestionControl();
+
       // Stop connection health monitoring
       this.stopConnectionHealthMonitoring();
 
@@ -1387,6 +1399,22 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       updatedSubStreams as any
     );
 
+    // Register screen share channels with congestion controller for GCC monitoring
+    if (this.adaptiveMediaController) {
+      for (const sub of updatedSubStreams) {
+        if (sub.bitrate && sub.framerate) {
+          this.adaptiveMediaController.registerChannel(sub.channelName, sub.bitrate, sub.framerate);
+        }
+      }
+      this.adaptiveMediaController.setScreenVideoProcessor(this.screenVideoProcessor);
+
+      // Update monitor's initial bitrate to include screen share demand
+      const totalBitrate = this.adaptiveMediaController.getTotalRegisteredBitrate();
+      this.networkQualityMonitor?.updateInitialBitrate(totalBitrate);
+
+      log("[Publisher] Screen share channels registered with GCC allocator");
+    }
+
     this.screenVideoProcessor.on("encoderError", (error) => {
       console.error("[Publisher] Screen video encoder error:", error);
       this.updateStatus("Screen video encoder error", true);
@@ -1471,6 +1499,19 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       if (this.screenVideoProcessor) {
         await this.screenVideoProcessor.stop();
         this.screenVideoProcessor = null;
+      }
+
+      // Unregister screen share channels from congestion controller
+      if (this.adaptiveMediaController) {
+        this.adaptiveMediaController.unregisterChannel(ChannelName.SCREEN_SHARE_720P);
+        this.adaptiveMediaController.unregisterChannel(ChannelName.SCREEN_SHARE_AUDIO);
+        this.adaptiveMediaController.setScreenVideoProcessor(null);
+
+        // Update monitor's initial bitrate to exclude screen share demand
+        const totalBitrate = this.adaptiveMediaController.getTotalRegisteredBitrate();
+        this.networkQualityMonitor?.updateInitialBitrate(totalBitrate);
+
+        log("[Publisher] Screen share channels unregistered from GCC allocator");
       }
 
       // Close video encoder manager
@@ -1762,6 +1803,129 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     });
     this.updateStatus("WebRTC reconnection failed", true);
     throw lastError;
+  }
+
+  // ---- GCC Congestion Control (draft-ietf-rmcat-gcc-02) ----
+
+  /**
+   * Start GCC-based congestion control.
+   * Called after publishing starts successfully.
+   */
+  private startCongestionControl(): void {
+    // Create GCC engine
+    this.networkQualityMonitor = new NetworkQualityMonitor();
+
+    // Create bitrate allocator and register video channels
+    this.adaptiveMediaController = new AdaptiveMediaController();
+    this.adaptiveMediaController.setVideoProcessor(this.videoProcessor);
+
+    // Calculate initial total bitrate from substream configs
+    let initialBitrate = 0;
+    for (const sub of this.subStreams) {
+      if (sub.bitrate && sub.framerate) {
+        this.adaptiveMediaController.registerChannel(
+          sub.channelName,
+          sub.bitrate,
+          sub.framerate,
+        );
+        initialBitrate += sub.bitrate;
+      }
+    }
+
+    // Wire up: GCC target bitrate → allocate across channels
+    this.networkQualityMonitor.on("targetBitrateChanged", ({ targetBitrate }) => {
+      this.adaptiveMediaController?.applyTargetBitrate(targetBitrate);
+    });
+
+    // Wire up: quality change → global event bus for UI notifications
+    //          + immediate video pause on POOR/CRITICAL to free bandwidth for audio
+    this.networkQualityMonitor.on("networkQualityChanged", (data) => {
+      globalEventBus.emit(GlobalEvents.NETWORK_QUALITY_CHANGED, {
+        quality: data.quality,
+        previousQuality: data.previousQuality,
+        signals: data.signals,
+        rttMs: data.rttMs,
+        backpressureRate: data.backpressureRate,
+      });
+
+      // Immediate video kill: when quality drops to POOR/CRITICAL, pause all
+      // video channels NOW to free 100% bandwidth for audio. Don't wait for
+      // the targetBitrateChanged → applyTargetBitrate flow — that path goes
+      // through proportional allocation which may still give video some budget.
+      if (data.quality === 'POOR' || data.quality === 'CRITICAL') {
+        this.adaptiveMediaController?.pauseAllVideo();
+        console.log(
+          `[Publisher] ⚡ Quality=${data.quality} — paused ALL video to protect audio`,
+        );
+      }
+    });
+
+    // Set the adaptive controller on StreamManager so it can skip frames
+    if (this.streamManager) {
+      this.streamManager.setAdaptiveController(this.adaptiveMediaController);
+
+      // Wire GOP abort: when controller pauses a channel, abort its GOP stream
+      // to flush buffered video frames and stop clogging bandwidth
+      this.adaptiveMediaController.setGopAbortCallback((channelName) =>
+        this.streamManager!.abortGopForChannel(channelName)
+      );
+
+      // Route arrival_feedback and app_rtt from StreamManager → GCC engine
+      this.streamManager.setArrivalFeedbackCallback((feedback) => {
+        if (feedback.type === 'app_rtt') {
+          this.networkQualityMonitor?.onAppRtt(feedback.rtt_ms, feedback.seq);
+        } else {
+          this.onArrivalFeedback(feedback);
+        }
+      });
+
+      // Provide local write failure rate as loss signal
+      // (since Node doesn't have per-frame tracking yet)
+      const sm = this.streamManager;
+      this.networkQualityMonitor.setLocalLossProvider(() => sm.getBackpressureStats());
+    }
+
+    this.networkQualityMonitor.start(initialBitrate > 0 ? initialBitrate : undefined);
+    log("[Publisher] GCC congestion control started");
+  }
+
+  /**
+   * Stop GCC congestion control and clean up.
+   */
+  private stopCongestionControl(): void {
+    if (this.networkQualityMonitor) {
+      this.networkQualityMonitor.stop();
+      this.networkQualityMonitor.removeAllListeners();
+      this.networkQualityMonitor = null;
+    }
+    if (this.adaptiveMediaController) {
+      this.adaptiveMediaController.dispose();
+      this.adaptiveMediaController = null;
+    }
+    if (this.streamManager) {
+      this.streamManager.setAdaptiveController(null);
+      this.streamManager.setArrivalFeedbackCallback(null);
+    }
+    log("[Publisher] GCC congestion control stopped");
+  }
+
+  /**
+   * Get current GCC stats for monitoring UI.
+   * Returns null if congestion control is not active.
+   */
+  getNetworkQuality(): { stats: GCCStats | null; allocation: AllocationSummary | null } {
+    return {
+      stats: this.networkQualityMonitor?.getStats() ?? null,
+      allocation: this.adaptiveMediaController?.getAllocationSummary() ?? null,
+    };
+  }
+
+  /**
+   * Feed an ArrivalFeedback message from Meeting Node.
+   * Called when the MeetingControl bidi stream receives an arrival_feedback event.
+   */
+  onArrivalFeedback(feedback: ArrivalFeedback): void {
+    this.networkQualityMonitor?.onArrivalFeedback(feedback);
   }
 
   /**

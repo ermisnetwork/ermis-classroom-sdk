@@ -50,6 +50,7 @@ export class CommandSender {
   private commandType: string;
   private HEARTBEAT_INTERVAL_MS: number;
   private heartbeatInterval: ReturnType<typeof setInterval> | null;
+  private _rttSeq = 0;
 
   constructor(config: CommandSenderConfig) {
     this.sendData = config.sendDataFn;
@@ -211,6 +212,17 @@ export class CommandSender {
     );
   }
 
+  /** Send RTT measurement ping with timestamp and sequence number. */
+  async sendRttPing(streamData: StreamData): Promise<void> {
+    const seq = this._rttSeq++;
+    await this._sendPublisherCommand(
+      ChannelName.MEETING_CONTROL,
+      streamData,
+      'rtt_ping',
+      { ts: Date.now(), seq },
+    );
+  }
+
   startHeartbeat(streamData: StreamData): void {
     this.stopHeartbeat();
 
@@ -219,7 +231,8 @@ export class CommandSender {
     this.heartbeatInterval = setInterval(async () => {
       try {
         await this.sendHeartbeat(streamData);
-        // log('[CommandSender] Heartbeat sent');
+        // Also send RTT ping for app-level RTT measurement
+        await this.sendRttPing(streamData);
       } catch (error) {
         console.error('[CommandSender] Failed to send heartbeat:', error);
       }
