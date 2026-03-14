@@ -4,6 +4,7 @@ import type {
   TransportManagerEvents,
 } from "../../../types/media/transport.types";
 import { log } from "../../../utils";
+import { TRANSPORT } from "../../../constants/transportConstants";
 
 /**
  * WebTransportManager - Manages WebTransport connection lifecycle
@@ -32,9 +33,9 @@ export class WebTransportManager extends EventEmitter<
   private config: WebTransportConfig;
   private isConnected = false;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 1000;
-  private connectionTimeout = 10000;
+  private maxReconnectAttempts: number = TRANSPORT.MAX_RECONNECT_ATTEMPTS;
+  private reconnectDelay: number = TRANSPORT.RECONNECT_BASE_DELAY;
+  private connectionTimeout: number = TRANSPORT.CONNECTION_TIMEOUT;
 
   constructor(config: WebTransportConfig) {
     super();
@@ -247,7 +248,7 @@ export class WebTransportManager extends EventEmitter<
         // Wait for closure, but don't block indefinitely if it fails
         await Promise.race([
           this.transport.closed,
-          new Promise(resolve => setTimeout(resolve, 500))
+          new Promise(resolve => setTimeout(resolve, TRANSPORT.CLOSE_TIMEOUT))
         ]);
       } catch (e: any) {
         // Ignore errors if session is already closed

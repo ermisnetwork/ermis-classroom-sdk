@@ -21,7 +21,7 @@ import { VideoProcessor } from "./processors/VideoProcessor";
 import { AudioProcessor } from "./processors/AudioProcessor";
 import { ConnectionStatus } from "../../types/core/ermisClient.types";
 import { log, BrowserDetection } from "../../utils";
-import { ChannelName, getDataChannelId } from "../../constants";
+import { ChannelName, TRANSPORT } from "../../constants";
 
 // Event type definitions
 interface SubscriberEvents extends Record<string, unknown> {
@@ -103,7 +103,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     streamOutputEnabled: boolean;
     streamMode: StreamMode;
     audioEnabled: boolean;
-    initialQuality: "video_360p" | "video_720p" | "video_1080p" | "video_1440p";
+    initialQuality: "cam_360p" | "cam_720p" | "cam_1080p" | "cam_1440p";
     onStatus?: (msg: string, isError: boolean) => void;
   };
   private subscriberId: string;
@@ -131,8 +131,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   // Reconnection state
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 3;
-  private baseReconnectDelay = 1000; // 1 second
-  private maxReconnectDelay = 10000; // 10 seconds
+  private baseReconnectDelay: number = TRANSPORT.RECONNECT_BASE_DELAY;
+  private maxReconnectDelay: number = TRANSPORT.MAX_RECONNECT_DELAY;
   private isReconnecting = false;
 
   constructor(config: SubscriberConfig) {
@@ -158,7 +158,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
           : true,
       streamMode: config.streamMode || "single",
       audioEnabled: config.audioEnabled ?? true,
-      initialQuality: config.initialQuality || "video_360p",
+      initialQuality: config.initialQuality || "cam_360p",
       onStatus: config.onStatus,
     };
 
@@ -398,8 +398,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       if (this.protocol === "webrtc" && this.workerManager) {
         log("[Subscriber] Waiting for WASM ready from WorkerManager...");
         try {
-          await this.workerManager.waitForWasmReady(5000);
-          console.log("[Subscriber] WASM ready");
+          await this.workerManager.waitForWasmReady(TRANSPORT.WASM_READY_TIMEOUT);
+          log("[Subscriber] WASM ready");
         } catch (wasmError) {
           // Don't fail the entire subscriber start — WASM may still init in background
           console.warn("[Subscriber] WASM ready timeout, continuing anyway:", wasmError);
@@ -409,11 +409,11 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       // Attach streams to worker (WebTransport, WebRTC, or WebSocket) with retry
       await this.attachStreamsWithRetry();
 
-      // Switch to initial quality if not default (video_360p)
+      // Switch to initial quality if not default (cam_360p)
       // Moved to worker init: initialQuality is now passed to worker during initialization
       // so it sends the correct quality in init_channel_stream command
       /*
-      if (this.config.initialQuality !== "video_360p") {
+      if (this.config.initialQuality !== "cam_360p") {
         log(`[Subscriber] Switching to initial quality: ${this.config.initialQuality}`);
         this.workerManager.switchBitrate(this.config.initialQuality);
       }
@@ -501,7 +501,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   /**
    * Switch video quality/bitrate
    */
-  switchBitrate(quality: "video_360p" | "video_720p" | "video_1080p" | "video_1440p"): void {
+  switchBitrate(quality: "cam_360p" | "cam_720p" | "cam_1080p" | "cam_1440p"): void {
     if (!this.workerManager) {
       return;
     }
@@ -649,7 +649,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     try {
       if (this.protocol === "webtransport") {
         if (this.subscribeType === "camera") {
-          this.attachWebTransportStreams(ChannelName.VIDEO_360P);
+          this.attachWebTransportStreams(ChannelName.CAM_360P);
         } else if (this.subscribeType === "screen_share") {
           this.attachWebTransportStreams(ChannelName.SCREEN_SHARE_720P);
         }
@@ -658,7 +658,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       } else if (this.protocol === "webrtc") {
         if (this.subscribeType === "camera") {
           this.attachDataChannel(this.config.initialQuality as ChannelName);
-          this.attachDataChannel(ChannelName.MICROPHONE);
+          this.attachDataChannel(ChannelName.MIC_48K);
         } else if (this.subscribeType === "screen_share") {
           this.attachDataChannel(ChannelName.SCREEN_SHARE_720P);
           if (this.config.audioEnabled) {
@@ -737,7 +737,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       });
 
       rtc.oniceconnectionstatechange = () => {
-        console.log(`[ICE] State: ${rtc.iceConnectionState}`);
+        log(`[ICE] State: ${rtc.iceConnectionState}`);
 
         if (rtc.iceConnectionState === 'failed' ||
           rtc.iceConnectionState === 'disconnected') {
@@ -756,7 +756,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       };
 
       dataChannel.onclose = () => {
-        console.log(`[Subscriber] Data channel ${mediaChannel} closed`);
+        log(`[Subscriber] Data channel ${mediaChannel} closed`);
         console.error(`[Subscriber] Closed: ${mediaChannel}`, {
           readyState: dataChannel.readyState,
           iceConnectionState: rtc.iceConnectionState,
@@ -765,7 +765,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         });
       };
 
-      console.log(`Data channel created for ${mediaChannel}, id:`, dataChannel.id);
+      log(`Data channel created for ${mediaChannel}, id:`, dataChannel.id);
       this.workerManager.attachDataChannel(mediaChannel, dataChannel);
 
       const offer = await rtc.createOffer();
@@ -774,7 +774,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
       const channel = `${this.config.streamId}:${mediaChannel}`;
 
-      console.log(`[WebRTC subscriber] Created offer for ${mediaChannel}, sending to server...`);
+      log(`[WebRTC subscriber] Created offer for ${mediaChannel}, sending to server...`);
 
       const response = await fetch(`https://${this.config.host}/meeting/sdp/answer`, {
         method: "POST",
@@ -795,7 +795,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       const answer = await response.json();
       await rtc.setRemoteDescription(answer);
 
-      console.log(`[WebRTC] Channel ${mediaChannel} setup completed`);
+      log(`[WebRTC] Channel ${mediaChannel} setup completed`);
 
       return { rtc, dataChannel };
     } catch (error: any) {

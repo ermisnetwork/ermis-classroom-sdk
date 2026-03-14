@@ -609,7 +609,7 @@ export class VideoEncoderManager extends EventEmitter<{
     encoderObj.config = encoderConfig;
     encoderObj.metadataReady = false;
 
-    console.log(
+    log(
       `[VideoEncoder] ✅ ${name} RECREATED successfully (was closed/errored)`,
     );
     this.emit('encoderReconfigured', { name, config: encoderConfig });
@@ -899,7 +899,7 @@ export class VideoEncoderManager extends EventEmitter<{
    * Finds the encoder registered for this channel and forces the next frame
    * to be a keyframe. Used by AdaptiveMediaController when resuming from pause.
    *
-   * @param channelName - Channel name (e.g. ChannelName.VIDEO_360P)
+   * @param channelName - Channel name (e.g. ChannelName.CAM_360P)
    */
   requestKeyframeByChannel(channelName: string): void {
     for (const [name, encoderObj] of this.encoders) {

@@ -70,7 +70,7 @@ class CommandSender {
    */
   async initSubscribeChannelStream(subscriberType, options = {}) {
     const defaultQuality =
-      subscriberType === STREAM_TYPE.SCREEN_SHARE ? CHANNEL_NAME.SCREEN_SHARE_720P : CHANNEL_NAME.VIDEO_360P;
+      subscriberType === STREAM_TYPE.SCREEN_SHARE ? CHANNEL_NAME.SCREEN_SHARE_720P : CHANNEL_NAME.CAM_360P;
 
     const initQuality = options.initialQuality || defaultQuality;
 
@@ -85,7 +85,7 @@ class CommandSender {
       video: videoEnabled,
       quality: initQuality,
     };
-    console.log('[ClientCommand] initSubscribeChannelStream:', { subscriberType, audioEnabled, videoEnabled, initQuality });
+    // Command data ready
     await this._sendSubscriberCommand("init_channel_stream", commandData);
   }
 

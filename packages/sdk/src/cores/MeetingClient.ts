@@ -23,6 +23,7 @@ import {
 import { MediaDeviceManager } from '../media/devices/MediaDeviceManager';
 import { ConnectionStatus as ConnectionStatusConst } from '../constants/connectionStatus';
 import { ParticipantRoles, VERSION } from '../constants';
+import { AUDIO_CONFIG } from '../constants/mediaConstants';
 import { BrowserDetection, log } from '../utils';
 import { initSdkAssets } from '../utils/SdkAssetLoader';
 
@@ -196,8 +197,8 @@ export class ErmisClient extends EventEmitter {
         bitrate: 1_500_000,
       },
       defaultAudioConfig: {
-        sampleRate: 48000,
-        channels: 2,
+        sampleRate: AUDIO_CONFIG.SAMPLE_RATE,
+        channels: AUDIO_CONFIG.CHANNEL_COUNT,
       },
     };
 
@@ -958,7 +959,7 @@ export class ErmisClient extends EventEmitter {
     // Handle server events
     const handleServerEvent = async (event: any) => {
       // Skip noisy high-frequency events from logging
-      if (event?.type !== 'arrival_feedback' && event?.type !== 'pong') {
+      if (event?.type !== 'pong') {
         log('[MeetingClient] Received SERVER_EVENT from globalEventBus:', event);
       }
     };

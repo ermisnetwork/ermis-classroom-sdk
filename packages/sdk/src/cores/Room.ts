@@ -43,7 +43,7 @@ export class Room extends EventEmitter {
   private apiClient: any; // TODO: Type this properly when ApiClient is converted
   private mediaConfig: MediaConfig;
   private videoResolutions?: ChannelName[];
-  private subscriberInitQuality?: "video_360p" | "video_720p" | "video_1080p" | "video_1440p";
+  private subscriberInitQuality?: "cam_360p" | "cam_720p" | "cam_1080p" | "cam_1440p";
 
   // Participants management
   participants = new Map<string, Participant>(); // streamId -> Participant
@@ -505,16 +505,16 @@ export class Room extends EventEmitter {
    * room.updateParticipantPermission(streamId, { can_publish_sources: [["mic_48k", false]] })
    * 
    * // Disable camera
-   * room.updateParticipantPermission(streamId, { can_publish_sources: [["video_360p", false], ["video_720p", false]] })
+   * room.updateParticipantPermission(streamId, { can_publish_sources: [["cam_360p", false], ["cam_720p", false]] })
    * 
    * // Mute mic + disable camera
    * room.updateParticipantPermission(streamId, { 
-   *   can_publish_sources: [["mic_48k", false], ["video_360p", false], ["video_720p", false]] 
+   *   can_publish_sources: [["mic_48k", false], ["cam_360p", false], ["cam_720p", false]] 
    * })
    * 
    * // Re-enable mic + camera
    * room.updateParticipantPermission(streamId, { 
-   *   can_publish_sources: [["mic_48k", true], ["video_360p", true], ["video_720p", true]] 
+   *   can_publish_sources: [["mic_48k", true], ["cam_360p", true], ["cam_720p", true]] 
    * })
    */
   async updateParticipantPermission(
@@ -763,7 +763,7 @@ export class Room extends EventEmitter {
     const participantByStream = this.getParticipantByStreamId(targetId);
     if (participantByStream) {
       return this.updateParticipantPermission(participantByStream.streamId, {
-        can_publish_sources: [["video_360p", false], ["video_720p", false], ["video_1080p", false]],
+        can_publish_sources: [["cam_360p", false], ["cam_720p", false], ["cam_1080p", false]],
       });
     }
 
@@ -772,7 +772,7 @@ export class Room extends EventEmitter {
     if (participants.length > 0) {
       return Promise.all(participants.map(p =>
         this.updateParticipantPermission(p.streamId, {
-          can_publish_sources: [["video_360p", false], ["video_720p", false], ["video_1080p", false]],
+          can_publish_sources: [["cam_360p", false], ["cam_720p", false], ["cam_1080p", false]],
         })
       ));
     }
@@ -789,7 +789,7 @@ export class Room extends EventEmitter {
     const participantByStream = this.getParticipantByStreamId(targetId);
     if (participantByStream) {
       return this.updateParticipantPermission(participantByStream.streamId, {
-        can_publish_sources: [["video_360p", true], ["video_720p", true], ["video_1080p", true]],
+        can_publish_sources: [["cam_360p", true], ["cam_720p", true], ["cam_1080p", true]],
       });
     }
 
@@ -798,7 +798,7 @@ export class Room extends EventEmitter {
     if (participants.length > 0) {
       return Promise.all(participants.map(p =>
         this.updateParticipantPermission(p.streamId, {
-          can_publish_sources: [["video_360p", true], ["video_720p", true], ["video_1080p", true]],
+          can_publish_sources: [["cam_360p", true], ["cam_720p", true], ["cam_1080p", true]],
         })
       ));
     }
@@ -1289,47 +1289,7 @@ export class Room extends EventEmitter {
     };
   }
 
-  /**
-   * Get current GCC network quality stats from the publisher.
-   * Returns null values if publisher or congestion control is not active.
-   */
-  getNetworkQuality(): { stats: any; allocation: any } {
-    if (!this.localParticipant?.publisher) {
-      return { stats: null, allocation: null };
-    }
-    return this.localParticipant.publisher.getNetworkQuality();
-  }
 
-  /**
-   * Register a callback for network quality changes.
-   * Fires when quality transitions between tiers (EXCELLENT/GOOD/POOR/CRITICAL).
-   * Use this to show/hide lag notifications in the UI.
-   *
-   * @param listener - Callback receiving quality change data
-   * @returns Unsubscribe function
-   *
-   * @example
-   * ```typescript
-   * const unsub = room.onNetworkQualityChanged((data) => {
-   *   if (data.quality === 'POOR' || data.quality === 'CRITICAL') {
-   *     showLagNotification(data.quality);
-   *   } else {
-   *     hideLagNotification();
-   *   }
-   * });
-   * ```
-   */
-  onNetworkQualityChanged(listener: (data: {
-    quality: string;
-    previousQuality: string;
-    signals: { rtt: string; backpressure: string; silence: string };
-    rttMs: number;
-    backpressureRate: number;
-  }) => void): () => void {
-    const handler = (data: any) => listener(data);
-    this.on("networkQualityChanged", handler);
-    return () => this.off("networkQualityChanged", handler);
-  }
 
   /**
    * Start screen sharing for local participant
@@ -1769,7 +1729,7 @@ export class Room extends EventEmitter {
 
       // Skip join event for local participant's own stream (check stream_id, not user_id for multi-stream support)
       if (joinedParticipant.stream_id === this.localParticipant?.streamId) {
-        console.log("[Room] Skipping join event for local participant's stream", "joined participant stream id", joinedParticipant.stream_id, "this local participant stream id", this.localParticipant?.streamId);
+        log("[Room] Skipping join event for local participant's stream", "joined participant stream id", joinedParticipant.stream_id, "this local participant stream id", this.localParticipant?.streamId);
         return;
       }
 
@@ -1967,7 +1927,7 @@ export class Room extends EventEmitter {
         ? this.getParticipantByStreamId(streamId)
         : this.getParticipant(screenEvent.participant.user_id);
       // Extract hasAudio from event (server forwards has_audio at top level)
-      console.warn(`[Room] 📥 Received start_share_screen event FULL:`, JSON.stringify(screenEvent, null, 2));
+      console.log(`[Room] Received start_share_screen event:`, JSON.stringify(screenEvent, null, 2));
       const hasAudio = screenEvent.has_audio ?? false;
       console.warn(`[Room] Received start_share_screen event, hasAudio: ${hasAudio}`);
 
@@ -2239,7 +2199,7 @@ export class Room extends EventEmitter {
 
     if (event.type === "update_permission") {
       const permissionEvent = event as any;
-      log("[Room] 📥 Received update_permission event:", JSON.stringify(permissionEvent, null, 2));
+      log("[Room] Received update_permission event:", JSON.stringify(permissionEvent, null, 2));
       log("[Room] Looking for participant with user_id:", permissionEvent.participant?.user_id);
       log("[Room] Current participants:", Array.from(this.participants.keys()));
 
@@ -2402,7 +2362,7 @@ export class Room extends EventEmitter {
     // Bind handlers to preserve 'this' context
     const handleServerEvent = async (event: ServerEvent) => {
       // Skip noisy high-frequency events from logging
-      if ((event as any).type !== 'arrival_feedback' && (event as any).type !== 'pong') {
+      if ((event as any).type !== 'pong') {
         log("[Room] Received serverEvent from GlobalEventBus:", event);
       }
       await this._handleServerEvent(event);
@@ -2490,13 +2450,7 @@ export class Room extends EventEmitter {
       });
     };
 
-    // Network quality change handler
-    const handleNetworkQualityChanged = (data: any) => {
-      this.emit("networkQualityChanged", {
-        room: this,
-        ...data,
-      });
-    };
+
 
     // Subscriber reconnection handlers
     const handleSubscriberReconnecting = (data: any) => {
@@ -2554,7 +2508,6 @@ export class Room extends EventEmitter {
     globalEventBus.on(GlobalEvents.PUBLISHER_RECONNECTED, handlePublisherReconnected);
     globalEventBus.on(GlobalEvents.PUBLISHER_RECONNECTION_FAILED, handlePublisherReconnectionFailed);
     globalEventBus.on(GlobalEvents.PUBLISHER_CONNECTION_HEALTH_CHANGED, handlePublisherConnectionHealthChanged);
-    globalEventBus.on(GlobalEvents.NETWORK_QUALITY_CHANGED, handleNetworkQualityChanged);
 
     // Subscribe to Subscriber reconnection events
     globalEventBus.on(GlobalEvents.SUBSCRIBER_RECONNECTING, handleSubscriberReconnecting);
@@ -2573,7 +2526,6 @@ export class Room extends EventEmitter {
       () => globalEventBus.off(GlobalEvents.PUBLISHER_RECONNECTED, handlePublisherReconnected),
       () => globalEventBus.off(GlobalEvents.PUBLISHER_RECONNECTION_FAILED, handlePublisherReconnectionFailed),
       () => globalEventBus.off(GlobalEvents.PUBLISHER_CONNECTION_HEALTH_CHANGED, handlePublisherConnectionHealthChanged),
-      () => globalEventBus.off(GlobalEvents.NETWORK_QUALITY_CHANGED, handleNetworkQualityChanged),
       // Subscriber reconnection cleanups
       () => globalEventBus.off(GlobalEvents.SUBSCRIBER_RECONNECTING, handleSubscriberReconnecting),
       () => globalEventBus.off(GlobalEvents.SUBSCRIBER_RECONNECTED, handleSubscriberReconnected),

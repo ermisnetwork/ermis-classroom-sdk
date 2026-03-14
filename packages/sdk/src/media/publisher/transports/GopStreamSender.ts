@@ -1,4 +1,6 @@
 import { FrameHeaderEncoder, FrameType, GopStreamHeaderEncoder } from "../../shared";
+import { TRANSPORT } from "../../../constants/transportConstants";
+import { log } from "../../../utils";
 
 // gopStreamSender.ts
 export class GopStreamSender {
@@ -9,10 +11,6 @@ export class GopStreamSender {
     private frameSequence = 0;
     private _consecutiveFailures = 0;
 
-    // Write timeout tracking for NetworkQualityMonitor (sliding 5s window)
-    private _writeAttempts: number[] = []; // timestamps of all write attempts
-    private _writeTimeouts: number[] = []; // timestamps of timed-out writes
-    private static readonly TIMEOUT_WINDOW_MS = 5000;
 
     constructor(session: WebTransport, streamId: string) {
         this.session = session;
@@ -58,7 +56,7 @@ export class GopStreamSender {
                     await Promise.race([
                         this.closeCurrentGop(),
                         new Promise<void>((_, reject) =>
-                            setTimeout(() => reject(new Error('close timeout')), 200)
+                            setTimeout(() => reject(new Error('close timeout')), TRANSPORT.GOP_GRACEFUL_CLOSE_TIMEOUT_MS)
                         ),
                     ]);
                 } catch {
@@ -84,9 +82,9 @@ export class GopStreamSender {
     async ensurePersistentStream(channel: number, sendOrder?: number): Promise<void> {
         if (this.currentStream) return; // already open — no-op
         try {
-            await this.openNewStream(channel, 0xFFFF, sendOrder); // 0xFFFF = unbounded
+            await this.openNewStream(channel, TRANSPORT.GOP_PERSISTENT_STREAM_FRAMES, sendOrder); // unbounded
             this._consecutiveFailures = 0;
-            console.log(`[GOP] 🔊 Persistent audio stream opened ch=${channel} gopId=${this.currentGopId - 1}`);
+            log(`[GOP] Persistent audio stream opened ch=${channel} gopId=${this.currentGopId - 1}`);
         } catch (error) {
             console.error('[GOP] Error opening persistent audio stream:', error);
         }
@@ -113,7 +111,7 @@ export class GopStreamSender {
             gopId: this.currentGopId,
             expectedFrames,
         });
-        await this.writeWithTimeout(gopHeader, 300);
+        await this.writeWithTimeout(gopHeader, TRANSPORT.GOP_WRITE_TIMEOUT_MS);
 
         this.frameSequence = 0;
     }
@@ -123,7 +121,7 @@ export class GopStreamSender {
      * If the write takes longer than timeoutMs, the frame is dropped and the
      * current stream is aborted so the next batch starts fresh.
      */
-    private async writeWithTimeout(data: Uint8Array, timeoutMs: number = 300): Promise<void> {
+    private async writeWithTimeout(data: Uint8Array, timeoutMs: number = TRANSPORT.GOP_WRITE_TIMEOUT_MS): Promise<void> {
         if (!this.currentStream) {
             throw new Error('No current stream');
         }
@@ -176,13 +174,11 @@ export class GopStreamSender {
             combined.set(frameData, frameHeader.length);
             await this.writeWithTimeout(combined);
             this._consecutiveFailures = 0;
-            this._recordWrite(false);
             return true;
         } catch (error) {
             if (error instanceof Error && error.message === 'write timeout') {
                 this._consecutiveFailures++;
-                this._recordWrite(true);
-                if (this._consecutiveFailures >= 3) {
+                if (this._consecutiveFailures >= TRANSPORT.GOP_MAX_CONSECUTIVE_FAILURES) {
                     // Multiple consecutive timeouts — stream is stuck, abort and
                     // let the next batch start fresh
                     console.warn(`[GOP] ⏱️ ${this._consecutiveFailures} consecutive write timeouts — aborting GOP`);
@@ -238,44 +234,7 @@ export class GopStreamSender {
      */
     cleanup(): void {
         this.currentStream = null;
-        this._writeAttempts = [];
-        this._writeTimeouts = [];
-        console.log('[GOP] GopStreamSender cleaned up');
+        log('[GOP] GopStreamSender cleaned up');
     }
 
-    /**
-     * Get the write timeout rate within the last 5-second window.
-     * Returns a value between 0.0 (no timeouts) and 1.0 (all writes timed out).
-     * Used by NetworkQualityMonitor as a secondary congestion signal.
-     */
-    getWriteTimeoutRate(): number {
-        const now = Date.now();
-        const cutoff = now - GopStreamSender.TIMEOUT_WINDOW_MS;
-        this._pruneWindow(cutoff);
-
-        if (this._writeAttempts.length === 0) return 0;
-        return this._writeTimeouts.length / this._writeAttempts.length;
-    }
-
-    /** Record a write attempt (success or timeout). */
-    private _recordWrite(timedOut: boolean): void {
-        const now = Date.now();
-        this._writeAttempts.push(now);
-        if (timedOut) {
-            this._writeTimeouts.push(now);
-        }
-        // Prune old entries
-        const cutoff = now - GopStreamSender.TIMEOUT_WINDOW_MS;
-        this._pruneWindow(cutoff);
-    }
-
-    /** Remove entries older than cutoff from sliding windows. */
-    private _pruneWindow(cutoff: number): void {
-        while (this._writeAttempts.length > 0 && this._writeAttempts[0] < cutoff) {
-            this._writeAttempts.shift();
-        }
-        while (this._writeTimeouts.length > 0 && this._writeTimeouts[0] < cutoff) {
-            this._writeTimeouts.shift();
-        }
-    }
 }

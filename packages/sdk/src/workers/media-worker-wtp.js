@@ -2,7 +2,7 @@ import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
 import CommandSender from "./ClientCommand.js";
-import { CHANNEL_NAME } from "./publisherConstants.js";
+import { CHANNEL_NAME, CHUNK_TYPE, AUDIO } from "./publisherConstants.js";
 
 let videoDecoder360p;
 let videoDecoder720p;
@@ -344,9 +344,9 @@ async function handleVideoBinaryPacket(dataBuffer, quality) {
 
   if (frameType === 0 || frameType === 1) {
     // Video 360p
-    const type = frameType === 0 ? "key" : "delta";
+    const type = frameType === 0 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
 
-    if (type === "key") {
+    if (type === CHUNK_TYPE.KEY) {
       keyFrameReceived = true;
     }
 
@@ -366,9 +366,9 @@ async function handleVideoBinaryPacket(dataBuffer, quality) {
     return;
   } else if (frameType === 2 || frameType === 3) {
     // Video 720p
-    const type = frameType === 2 ? "key" : "delta";
+    const type = frameType === 2 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
 
-    if (type === "key") {
+    if (type === CHUNK_TYPE.KEY) {
       keyFrameReceived = true;
     }
 
@@ -434,7 +434,7 @@ async function readAudioStream(reader) {
 
                 const chunk = new EncodedAudioChunk({
                   timestamp: timestamp * 1000,
-                  type: "key",
+                  type: CHUNK_TYPE.KEY,
                   data,
                 });
                 audioDecoder.decode(chunk);
@@ -467,7 +467,7 @@ function handleAudioBinaryPacket(dataBuffer) {
 
   const chunk = new EncodedAudioChunk({
     timestamp: timestamp * 1000,
-    type: "key",
+    type: CHUNK_TYPE.KEY,
     data,
   });
 
@@ -495,7 +495,7 @@ async function initializeDecoders() {
   }
 
   curVideoInterval = { speed: 0, rate: 1000 / 30 };
-  curAudioInterval = { speed: 0, rate: 1000 / (48000 / 1024) };
+  curAudioInterval = { speed: 0, rate: 1000 / (AUDIO.SAMPLE_RATE / AUDIO.AAC_FRAME_SIZE) };
 }
 
 function configureVideoDecoders(quality) {
@@ -526,7 +526,7 @@ function configureAudioDecoder() {
   try {
     if (audioDecoder.state === "unconfigured") {
       audioDecoder.configure(audioConfig);
-      audioFrameRate = audioConfig.sampleRate / 1024;
+      audioFrameRate = audioConfig.sampleRate / AUDIO.AAC_FRAME_SIZE;
     }
 
     audioCodecReceived = true;

@@ -1,7 +1,7 @@
 import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
-import { CHANNEL_NAME, STREAM_TYPE } from "./publisherConstants.js";
+import { CHANNEL_NAME, STREAM_TYPE, CHUNK_TYPE } from "./publisherConstants.js";
 import { H264Decoder, isNativeH264DecoderSupported } from "../codec-polyfill/video-codec-polyfill.js";
 import { AACDecoder } from "../codec-polyfill/audio-codec-polyfill.js";
 import raptorqInit, { WasmFecManager } from '../raptorQ/raptorq_wasm.js';
@@ -14,7 +14,7 @@ const USE_SCREEN_SHARE_JITTER_BUFFER = false;
 
 let subscribeType = STREAM_TYPE.CAMERA;
 
-let currentVideoChannel = CHANNEL_NAME.VIDEO_360P;
+let currentVideoChannel = CHANNEL_NAME.CAM_360P;
 
 let workletPort = null;
 let audioEnabled = true;
@@ -135,9 +135,8 @@ async function createPolyfillDecoder(channelName) {
 async function createVideoDecoderWithFallback(channelName) {
   try {
     const nativeSupported = await isNativeH264DecoderSupported();
-    console.log(`[VideoDecoder] Native H264 decoder supported: ${nativeSupported}`, "type of VideoDecoder", typeof VideoDecoder);
+    proxyConsole.log(`[VideoDecoder] Native H264 decoder supported: ${nativeSupported}`);
     if (nativeSupported) {
-      console.log(`[VideoDecoder] ✅ Using NATIVE decoder for ${channelName}`);
       return new VideoDecoder(createVideoInit(channelName));
     }
   } catch (e) {
@@ -284,10 +283,10 @@ self.onmessage = async function (e) {
       if (videoDecoderPort) {
         setupVideoDecoderPort(videoDecoderPort);
       }
-      console.log(`[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}, initialQuality=${initialQuality}, workletPort=${workletPort}, hasDecoderPort=${!!externalDecoderPort}, hasVideoDecoderPort=${!!videoDecoderPort}`);
+      proxyConsole.log(`[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}, initialQuality=${initialQuality}`);
       try {
         await initializeDecoders();
-        console.log(`[Worker] Decoders initialized successfully`);
+        proxyConsole.log(`[Worker] Decoders initialized successfully`);
       } catch (err) {
         console.error(`[Worker] Decoder initialization failed:`, err);
       }
@@ -465,7 +464,7 @@ function attachWebRTCDataChannel(channelName, channel) {
     out.set(initData, 4);
 
     channel.send(out);
-    console.log(`[WebRTC] Sent subscribe message for ${channelName}`);
+    proxyConsole.log(`[WebRTC] Sent subscribe message for ${channelName}`);
   };
 
   channel.onclose = () => {
@@ -854,7 +853,7 @@ function handleStreamConfigs(json) {
 
           // DEBUG: Log ASC bytes for diagnostics (critical for cross-browser debugging)
           if (desc && desc.length > 0) {
-            console.log(`[Audio] AAC ASC bytes for ${channelName}: [${Array.from(desc).map(b => b.toString(16).padStart(2, '0')).join(' ')}], len=${desc.length}`);
+            proxyConsole.log(`[Audio] AAC ASC bytes for ${channelName}: [${Array.from(desc).map(b => b.toString(16).padStart(2, '0')).join(' ')}], len=${desc.length}`);
           } else {
             console.warn(`[Audio] ⚠️ No ASC description for AAC channel ${channelName}`);
           }
@@ -866,7 +865,7 @@ function handleStreamConfigs(json) {
             description: desc, // AudioSpecificConfig
           }).then(() => {
             aacDecoder.isReadyForAudio = true;
-            console.log(`[Audio] AACDecoder configured for ${channelName} — using ${aacDecoder.usingNative ? 'native WebCodecs' : 'FAAD2 WASM'}, state: ${aacDecoder.state}`);
+            proxyConsole.log(`[Audio] AACDecoder configured for ${channelName} — using ${aacDecoder.usingNative ? 'native WebCodecs' : 'FAAD2 WASM'}, state: ${aacDecoder.state}`);
           }).catch((err) => {
             console.error(`[Audio] AACDecoder configure failed for ${channelName}:`, err);
           });
@@ -877,7 +876,7 @@ function handleStreamConfigs(json) {
             try {
               decoder.configure({ ...audioConfig, decoderPort: externalDecoderPort })
                 .then((configResult) => {
-                  console.log(`[Audio] configured successfully for ${channelName}, result:`, configResult, "state:", decoder.state);
+                  proxyConsole.log(`[Audio] configured successfully for ${channelName}, result:`, configResult, "state:", decoder.state);
                   // Wait for the decoder worker's WASM to be truly ready instead
                   // of relying on a hardcoded delay (which was unreliable on slow
                   // iOS 15 devices).
@@ -885,7 +884,7 @@ function handleStreamConfigs(json) {
                 })
                 .then(() => {
                   try {
-                    console.log(`[Audio] Decoder WASM ready for ${channelName}, sending description chunk`);
+                    proxyConsole.log(`[Audio] Decoder WASM ready for ${channelName}, sending description chunk`);
 
                     const dataView = new DataView(desc.buffer, desc.byteOffset, desc.byteLength);
                     const timestamp = dataView.getUint32(4, false);
@@ -893,21 +892,21 @@ function handleStreamConfigs(json) {
 
                     const chunk = new EncodedAudioChunk({
                       timestamp: timestamp * 1000,
-                      type: "key",
+                      type: CHUNK_TYPE.KEY,
                       data,
                     });
                     decoder.decode(chunk);
                     decoder.isReadyForAudio = true; // Flag to allow normal packets
-                    console.log(`[Audio] Sent description chunk for ${channelName}, now ready for audio packets`);
+                    proxyConsole.log(`[Audio] Sent description chunk for ${channelName}, now ready for audio packets`);
 
                     // Replay any audio packets that arrived before the description
                     if (decoder._preConfigBuffer && decoder._preConfigBuffer.length > 0) {
-                      console.log(`[Audio] Replaying ${decoder._preConfigBuffer.length} pre-config buffered packets for ${channelName}`);
+                      proxyConsole.log(`[Audio] Replaying ${decoder._preConfigBuffer.length} pre-config buffered packets for ${channelName}`);
                       for (const buffered of decoder._preConfigBuffer) {
                         try {
                           const bufferedChunk = new EncodedAudioChunk({
                             timestamp: buffered.timestamp * 1000,
-                            type: "key",
+                            type: CHUNK_TYPE.KEY,
                             data: buffered.data,
                           });
                           decoder.decode(bufferedChunk);
@@ -969,7 +968,7 @@ async function attachWebTransportStream(readable, writable, channelName) {
 async function attachWebTransportFromUrl(url, channelName) {
   const transport = new WebTransport(url);
   await transport.ready;
-  console.log('[WebTransport] Session ready inside worker');
+  proxyConsole.log('[WebTransport] Session ready inside worker');
 
   // ── Bidi stream: used for command send/receive (DecoderConfigs, etc.) ──
   const bidi = await transport.createBidirectionalStream();
@@ -1220,7 +1219,7 @@ const activeGopPerChannel = new Map();
  *   while (true) { const { done, value } = await reader.read(); ... }
  */
 async function receiveUnidirectional(transport) {
-  console.log('[GOP] 🎬 receiveUnidirectional: starting GOP stream listener');
+  proxyConsole.log('[GOP] 🎬 receiveUnidirectional: starting GOP stream listener');
   let gopCount = 0;
   const reader = transport.incomingUnidirectionalStreams.getReader();
   while (true) {
@@ -1280,9 +1279,9 @@ async function readGopStream(receiveStream, gopIndex) {
     //   console.log(`[GOP] ch=${channel} new gopId=${gopId} supersedes old gopId=${prevGopId}`);
     // }
 
-    if (gopIndex <= 3) {
-      console.log(`[GOP] #${gopIndex} streamId=${streamId} ch=${channel} gopId=${gopId} expected=${expectedFrames}`);
-    }
+    // if (gopIndex <= 3) {
+    //   proxyConsole.log(`[GOP] #${gopIndex} streamId=${streamId} ch=${channel} gopId=${gopId} expected=${expectedFrames}`);
+    // }
 
     // ── 2. Frame loop ────────────────────────────────────────────────────
     const FRAME_HEADER_SIZE = 13; // sequence(4)+timestamp(4)+frameType(1)+payloadSize(4)
@@ -1415,9 +1414,9 @@ async function handleGopStream(stream, gopIndex) {
       await processIncomingMessage(fullPacket);
     }
 
-    if (gopIndex <= 3 || frameCount !== expectedFrames) {
-      proxyConsole.log(`[GOP] #${gopIndex} done: ch=${channel} gopId=${gopId} frames=${frameCount}/${expectedFrames}`);
-    }
+    // if (gopIndex <= 3 || frameCount !== expectedFrames) {
+    //   proxyConsole.log(`[GOP] #${gopIndex} done: ch=${channel} gopId=${gopId} frames=${frameCount}/${expectedFrames}`);
+    // }
   } catch (err) {
     proxyConsole.error(`[GOP] handleGopStream #${gopIndex} error:`, err);
   } finally {
@@ -1444,7 +1443,7 @@ async function processIncomingMessage(message) {
       const json = JSON.parse(text);
       // Only log DecoderConfigs parsing — avoid per-packet log spam in hot path
       if (json.type === 'DecoderConfigs') {
-        console.log(`[processIncomingMessage] Received DecoderConfigs`);
+        proxyConsole.log(`[processIncomingMessage] Received DecoderConfigs`);
         handleStreamConfigs(json);
         return;
       }
@@ -1482,23 +1481,23 @@ async function handleBinaryPacket(dataBuffer) {
 
   if (frameType === 0 || frameType === 1) {
     // 360p video
-    const type = frameType === 0 ? "key" : "delta";
-    if (type === "key") setKeyFrameReceived(CHANNEL_NAME.VIDEO_360P, true);
+    const type = frameType === 0 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
+    if (type === CHUNK_TYPE.KEY) setKeyFrameReceived(CHANNEL_NAME.CAM_360P, true);
 
-    if (isKeyFrameReceived(CHANNEL_NAME.VIDEO_360P)) {
+    if (isKeyFrameReceived(CHANNEL_NAME.CAM_360P)) {
       if (videoDecoderPort) {
-        decodeVideoExternal(CHANNEL_NAME.VIDEO_360P, type, timestamp, data);
+        decodeVideoExternal(CHANNEL_NAME.CAM_360P, type, timestamp, data);
       } else {
-        let decoder360p = mediaDecoders.get(CHANNEL_NAME.VIDEO_360P);
+        let decoder360p = mediaDecoders.get(CHANNEL_NAME.CAM_360P);
         const decoderState = decoder360p ? decoder360p.state : null;
 
         if (!decoder360p || decoderState === "closed" || decoderState === "unconfigured") {
           // Throttle decoder recreation to avoid spawning multiple WASM instances
           // under rapid error conditions (Safari 15 memory limit critical)
-          if (canRecreateDecoder(CHANNEL_NAME.VIDEO_360P)) {
-            decoder360p = await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_360P);
-            mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, decoder360p);
-            const video360pConfig = mediaConfigs.get(CHANNEL_NAME.VIDEO_360P);
+          if (canRecreateDecoder(CHANNEL_NAME.CAM_360P)) {
+            decoder360p = await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_360P);
+            mediaDecoders.set(CHANNEL_NAME.CAM_360P, decoder360p);
+            const video360pConfig = mediaConfigs.get(CHANNEL_NAME.CAM_360P);
             if (video360pConfig) decoder360p.configure(video360pConfig);
           } else {
             return; // Still in cooldown — drop this frame
@@ -1520,29 +1519,29 @@ async function handleBinaryPacket(dataBuffer) {
           }
         } catch (err) {
           proxyConsole.error("360p decode error:", err);
-          setKeyFrameReceived(CHANNEL_NAME.VIDEO_360P, false);
+          setKeyFrameReceived(CHANNEL_NAME.CAM_360P, false);
         }
       }
     }
     return;
   } else if (frameType === 2 || frameType === 3) {
     // 720p video
-    const type = frameType === 2 ? "key" : "delta";
-    if (type === "key") setKeyFrameReceived(CHANNEL_NAME.VIDEO_720P, true);
+    const type = frameType === 2 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
+    if (type === CHUNK_TYPE.KEY) setKeyFrameReceived(CHANNEL_NAME.CAM_720P, true);
 
-    if (isKeyFrameReceived(CHANNEL_NAME.VIDEO_720P)) {
+    if (isKeyFrameReceived(CHANNEL_NAME.CAM_720P)) {
       if (videoDecoderPort) {
-        decodeVideoExternal(CHANNEL_NAME.VIDEO_720P, type, timestamp, data);
+        decodeVideoExternal(CHANNEL_NAME.CAM_720P, type, timestamp, data);
       } else {
-        let decoder720p = mediaDecoders.get(CHANNEL_NAME.VIDEO_720P);
+        let decoder720p = mediaDecoders.get(CHANNEL_NAME.CAM_720P);
         const decoderState = decoder720p ? decoder720p.state : null;
 
         if (!decoder720p || decoderState === "closed" || decoderState === "unconfigured") {
           // Throttle decoder recreation to avoid spawning multiple WASM instances
-          if (canRecreateDecoder(CHANNEL_NAME.VIDEO_720P)) {
-            decoder720p = await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P);
-            mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, decoder720p);
-            const config720p = mediaConfigs.get(CHANNEL_NAME.VIDEO_720P);
+          if (canRecreateDecoder(CHANNEL_NAME.CAM_720P)) {
+            decoder720p = await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_720P);
+            mediaDecoders.set(CHANNEL_NAME.CAM_720P, decoder720p);
+            const config720p = mediaConfigs.get(CHANNEL_NAME.CAM_720P);
             if (config720p) {
               proxyConsole.log("Decoder error, Configuring 720p decoder with config:", config720p);
               decoder720p.configure(config720p);
@@ -1564,27 +1563,27 @@ async function handleBinaryPacket(dataBuffer) {
           }
         } catch (err) {
           proxyConsole.error("720p decode error:", err);
-          setKeyFrameReceived(CHANNEL_NAME.VIDEO_720P, false);
+          setKeyFrameReceived(CHANNEL_NAME.CAM_720P, false);
         }
       }
     }
     return;
   } else if (frameType === 13 || frameType === 14) {
     // 1080p video
-    const type = frameType === 13 ? "key" : "delta";
-    if (type === "key") setKeyFrameReceived(CHANNEL_NAME.VIDEO_1080P, true);
+    const type = frameType === 13 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
+    if (type === CHUNK_TYPE.KEY) setKeyFrameReceived(CHANNEL_NAME.CAM_1080P, true);
 
-    if (isKeyFrameReceived(CHANNEL_NAME.VIDEO_1080P)) {
+    if (isKeyFrameReceived(CHANNEL_NAME.CAM_1080P)) {
       if (videoDecoderPort) {
-        decodeVideoExternal(CHANNEL_NAME.VIDEO_1080P, type, timestamp, data);
+        decodeVideoExternal(CHANNEL_NAME.CAM_1080P, type, timestamp, data);
       } else {
-        let decoder1080p = mediaDecoders.get(CHANNEL_NAME.VIDEO_1080P);
+        let decoder1080p = mediaDecoders.get(CHANNEL_NAME.CAM_1080P);
         const decoderState = decoder1080p ? decoder1080p.state : null;
 
         if (!decoder1080p || decoderState === "closed" || decoderState === "unconfigured") {
-          decoder1080p = new VideoDecoder(createVideoInit(CHANNEL_NAME.VIDEO_1080P));
-          mediaDecoders.set(CHANNEL_NAME.VIDEO_1080P, decoder1080p);
-          const config1080p = mediaConfigs.get(CHANNEL_NAME.VIDEO_1080P);
+          decoder1080p = new VideoDecoder(createVideoInit(CHANNEL_NAME.CAM_1080P));
+          mediaDecoders.set(CHANNEL_NAME.CAM_1080P, decoder1080p);
+          const config1080p = mediaConfigs.get(CHANNEL_NAME.CAM_1080P);
           if (config1080p) {
             proxyConsole.log("Configuring 1080p decoder with config:", config1080p);
             decoder1080p.configure(config1080p);
@@ -1595,35 +1594,35 @@ async function handleBinaryPacket(dataBuffer) {
           decoder1080p.decode(new EncodedVideoChunk({ timestamp: timestamp * 1000, type, data }));
         } catch (err) {
           proxyConsole.error("1080p decode error:", err);
-          setKeyFrameReceived(CHANNEL_NAME.VIDEO_1080P, false);
+          setKeyFrameReceived(CHANNEL_NAME.CAM_1080P, false);
         }
       }
     }
     return;
   } else if (frameType === 15 || frameType === 16) {
     // 1440p video
-    const type = frameType === 15 ? "key" : "delta";
-    if (type === "key") setKeyFrameReceived(CHANNEL_NAME.VIDEO_1440P, true);
+    const type = frameType === 15 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
+    if (type === CHUNK_TYPE.KEY) setKeyFrameReceived(CHANNEL_NAME.CAM_1440P, true);
 
-    if (isKeyFrameReceived(CHANNEL_NAME.VIDEO_1440P)) {
+    if (isKeyFrameReceived(CHANNEL_NAME.CAM_1440P)) {
       if (videoDecoderPort) {
-        decodeVideoExternal(CHANNEL_NAME.VIDEO_1440P, type, timestamp, data);
+        decodeVideoExternal(CHANNEL_NAME.CAM_1440P, type, timestamp, data);
       } else {
-        let decoder1440p = mediaDecoders.get(CHANNEL_NAME.VIDEO_1440P);
+        let decoder1440p = mediaDecoders.get(CHANNEL_NAME.CAM_1440P);
 
         try {
           decoder1440p.decode(new EncodedVideoChunk({ timestamp: timestamp * 1000, type, data }));
         } catch (err) {
           proxyConsole.error("1440p decode error:", err);
-          setKeyFrameReceived(CHANNEL_NAME.VIDEO_1440P, false);
+          setKeyFrameReceived(CHANNEL_NAME.CAM_1440P, false);
         }
       }
     }
     return;
   } else if (frameType === 4 || frameType === 5) {
     // Screen share 720p
-    const type = frameType === 4 ? "key" : "delta";
-    if (type === "key") setKeyFrameReceived(CHANNEL_NAME.SCREEN_SHARE_720P, true);
+    const type = frameType === 4 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
+    if (type === CHUNK_TYPE.KEY) setKeyFrameReceived(CHANNEL_NAME.SCREEN_SHARE_720P, true);
 
     if (isKeyFrameReceived(CHANNEL_NAME.SCREEN_SHARE_720P)) {
       if (videoDecoderPort) {
@@ -1664,7 +1663,7 @@ async function handleBinaryPacket(dataBuffer) {
     self._audioPacketCount++;
 
     let audioDecoder = mediaDecoders.get(
-      subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_AUDIO : CHANNEL_NAME.SCREEN_SHARE_AUDIO
+      subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_48K : CHANNEL_NAME.SCREEN_SHARE_AUDIO
     );
 
     if (!audioDecoder) {
@@ -1677,11 +1676,6 @@ async function handleBinaryPacket(dataBuffer) {
     // (Previously these were hard-dropped, causing silent audio at stream start.)
     if (!audioDecoder.isReadyForAudio) {
       return;
-    }
-
-    if (self._audioPacketCount <= 3) {
-      console.log('[Audio] packet#:', self._audioPacketCount,
-        'state:', audioDecoder.state, 'ts:', timestamp, 'len:', data.byteLength);
     }
 
     // ── Audio delivery ──
@@ -1709,12 +1703,12 @@ async function handleBinaryPacket(dataBuffer) {
       // Periodic summary
       if (self._audioRxTotal % 500 === 0) {
         const lossRate = self._audioRxLost > 0 ? ((self._audioRxLost / (self._audioRxTotal + self._audioRxLost)) * 100).toFixed(2) : '0.00';
-        console.log(`[Audio RX] total=${self._audioRxTotal} lost=${self._audioRxLost} rate=${lossRate}% lastSeq=${sequenceNumber}`);
+        // proxyConsole.log(`[Audio RX] total=${self._audioRxTotal} lost=${self._audioRxLost} rate=${lossRate}% lastSeq=${sequenceNumber}`);
       }
 
       // Decode directly
       const decoder = mediaDecoders.get(
-        subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_AUDIO : CHANNEL_NAME.SCREEN_SHARE_AUDIO
+        subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_48K : CHANNEL_NAME.SCREEN_SHARE_AUDIO
       );
       if (!decoder || !decoder.isReadyForAudio) return;
 
@@ -1753,12 +1747,12 @@ async function handleBinaryPacket(dataBuffer) {
         // Periodic summary log
         if (self._audioRxTotal % 500 === 0) {
           const lossRate = self._audioRxLost > 0 ? ((self._audioRxLost / (self._audioRxTotal + self._audioRxLost)) * 100).toFixed(2) : '0.00';
-          console.log(`[Audio RX] total=${self._audioRxTotal} lost=${self._audioRxLost} rate=${lossRate}% lastSeq=${seq}`);
+          // proxyConsole.log(`[Audio RX] total=${self._audioRxTotal} lost=${self._audioRxLost} rate=${lossRate}% lastSeq=${seq}`);
         }
 
         // Resolve decoder at emit time (may have been recreated)
         const decoder = mediaDecoders.get(
-          subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_AUDIO : CHANNEL_NAME.SCREEN_SHARE_AUDIO
+          subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_48K : CHANNEL_NAME.SCREEN_SHARE_AUDIO
         );
         if (!decoder || !decoder.isReadyForAudio) return;
 
@@ -1778,7 +1772,7 @@ async function handleBinaryPacket(dataBuffer) {
           try {
             decoder.decode(new EncodedAudioChunk({
               timestamp: ts * 1000,
-              type: "key",
+              type: CHUNK_TYPE.KEY,
               data: audioPayload,
             }));
           } catch (err) {
@@ -1786,7 +1780,7 @@ async function handleBinaryPacket(dataBuffer) {
           }
         }
       });
-      console.log('[Audio] 🔄 AudioReorderBuffer initialized (bufferSize=3, timeout=60ms)');
+      proxyConsole.log('[Audio] 🔄 AudioReorderBuffer initialized (bufferSize=3, timeout=60ms)');
     }
 
     // Push into reorder buffer — data.slice() creates an isolated copy
@@ -1808,11 +1802,11 @@ function setupVideoDecoderPort(port) {
     const msg = e.data;
     switch (msg.type) {
       case "ready":
-        console.log("[Worker] Video decoder worker is ready");
+        proxyConsole.log("[Worker] Video decoder worker is ready");
         break;
 
       case "configured":
-        console.log(`[Worker] External video decoder configured for ${msg.channelName}`);
+        proxyConsole.log(`[Worker] External video decoder configured for ${msg.channelName}`);
         break;
 
       case "videoData": {
@@ -1890,32 +1884,32 @@ async function initializeDecoders() {
       // ── Audio decoder (always local) ──
       const micAudioDecoder = new OpusAudioDecoder(audioInit);
       const audioConfigPromise = micAudioDecoder.configure({ sampleRate: 48000, numberOfChannels: 1, decoderPort: externalDecoderPort });
-      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, micAudioDecoder);
+      mediaDecoders.set(CHANNEL_NAME.MIC_48K, micAudioDecoder);
 
       // ── Video decoders ──
       if (videoDecoderPort) {
         // iOS 15 path: video decoding is offloaded to external worker.
         // No local H264Decoder instances needed — the external worker
         // creates them when it receives "configure" commands.
-        console.log('[Worker] Video decoding offloaded to external video decoder worker');
+        proxyConsole.log('[Worker] Video decoding offloaded to external video decoder worker');
       } else {
         // Normal path: create local video decoders (native or WASM fallback)
-        const video360pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_360P);
-        const video720pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P);
+        const video360pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.CAM_360P);
+        const video720pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.CAM_720P);
         const [decoder360p, decoder720p] = await Promise.all([video360pPromise, video720pPromise]);
-        mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, decoder360p);
-        mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, decoder720p);
+        mediaDecoders.set(CHANNEL_NAME.CAM_360P, decoder360p);
+        mediaDecoders.set(CHANNEL_NAME.CAM_720P, decoder720p);
       }
 
       await audioConfigPromise;
-      console.log('[Audio] OpusDecoder configured, state:', micAudioDecoder.state,
+      proxyConsole.log('[Audio] OpusDecoder configured, state:', micAudioDecoder.state,
         'mode:', micAudioDecoder.useInlineDecoder ? 'inline' : 'worker');
       break;
     }
 
     case STREAM_TYPE.SCREEN_SHARE: {
       if (videoDecoderPort) {
-        console.log('[Worker] Screen share video decoding offloaded to external worker');
+        proxyConsole.log('[Worker] Screen share video decoding offloaded to external worker');
       } else {
         // Use same native/WASM fallback logic as camera path
         const screenDecoder = await createVideoDecoderWithFallback(CHANNEL_NAME.SCREEN_SHARE_720P);
@@ -1937,17 +1931,17 @@ async function initializeDecoders() {
       // ── Audio decoder (always local) ──
       const defaultMicAudioDecoder = new OpusAudioDecoder(audioInit);
       const audioConfigPromise = defaultMicAudioDecoder.configure({ sampleRate: 48000, numberOfChannels: 1, decoderPort: externalDecoderPort });
-      mediaDecoders.set(CHANNEL_NAME.MIC_AUDIO, defaultMicAudioDecoder);
+      mediaDecoders.set(CHANNEL_NAME.MIC_48K, defaultMicAudioDecoder);
 
       // ── Video decoders ──
       if (videoDecoderPort) {
-        console.log('[Worker] Video decoding offloaded to external video decoder worker');
+        proxyConsole.log('[Worker] Video decoding offloaded to external video decoder worker');
       } else {
-        const video360pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_360P);
-        const video720pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P);
+        const video360pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.CAM_360P);
+        const video720pPromise = createVideoDecoderWithFallback(CHANNEL_NAME.CAM_720P);
         const [decoder360p, decoder720p] = await Promise.all([video360pPromise, video720pPromise]);
-        mediaDecoders.set(CHANNEL_NAME.VIDEO_360P, decoder360p);
-        mediaDecoders.set(CHANNEL_NAME.VIDEO_720P, decoder720p);
+        mediaDecoders.set(CHANNEL_NAME.CAM_360P, decoder360p);
+        mediaDecoders.set(CHANNEL_NAME.CAM_720P, decoder720p);
       }
 
       await audioConfigPromise;

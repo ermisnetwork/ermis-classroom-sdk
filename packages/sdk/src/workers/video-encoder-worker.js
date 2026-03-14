@@ -91,10 +91,7 @@ async function handleConfigure(encoderName, config) {
 
     await encoder.configure(config);
     self.postMessage({ type: "configured", encoderName });
-    console.log(
-      `[VideoEncoderWorker] Encoder configured for ${encoderName}:`,
-      config
-    );
+    // Encoder configured
   } catch (err) {
     console.error(
       `[VideoEncoderWorker] Configure error (${encoderName}):`,

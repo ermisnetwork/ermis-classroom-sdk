@@ -9,10 +9,6 @@ export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun1.l.google.com:19302' },
 ];
 
-export const CONNECTION_TIMEOUT = 30000;
-export const RECONNECT_TIMEOUT = 5000;
-export const MAX_RECONNECT_ATTEMPTS = 5;
-
 export const DEFAULT_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
@@ -24,6 +20,7 @@ export * from './publisherConstants';
 export * from './mediaConstants';
 export * from './connectionStatus';
 export * from './participantRoles';
+export * from './transportConstants';
 export * from './version';
 
 export const DEFAULT_VIDEO_CONSTRAINTS: MediaTrackConstraints = {

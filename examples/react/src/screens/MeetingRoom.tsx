@@ -15,7 +15,6 @@ import {
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { cn } from "@/lib/utils"
 import { log, PinType } from "@ermis-network/ermis-classroom-sdk"
-import { NetworkQualityPanel } from "@/components/NetworkQualityPanel"
 
 interface MeetingRoomProps {
   onLeft: () => void
@@ -705,21 +704,7 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     return unsubscribe
   }, [onReplaced, onLeft, leaveRoom])
 
-  // Listen for network quality changes
-  useEffect(() => {
-    if (!currentRoom) return
 
-    const unsubscribe = (currentRoom as any).onNetworkQualityChanged((data: any) => {
-      const q = data.quality as string
-      if (q === 'POOR' || q === 'CRITICAL') {
-        setNetworkQuality({ quality: q, rttMs: data.rttMs })
-      } else {
-        setNetworkQuality(null)
-      }
-    })
-
-    return () => { unsubscribe() }
-  }, [currentRoom])
 
   // Get local participant ban status
   const localParticipant = useMemo(() => {
@@ -733,7 +718,7 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
   // Screen share permission states
   const [screenShareApproved, setScreenShareApproved] = useState(false)
   const [pendingScreenShareRequest, setPendingScreenShareRequest] = useState(false)
-  const [showNetworkPanel, setShowNetworkPanel] = useState(false)
+
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null)
   const [incomingPermissionRequest, setIncomingPermissionRequest] = useState<{
     requestId: string
@@ -752,11 +737,7 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
     timestamp: string
   } | null>(null)
 
-  // Network quality notification state
-  const [networkQuality, setNetworkQuality] = useState<{
-    quality: string;
-    rttMs: number;
-  } | null>(null)
+
 
   // Helper function to generate request ID
   const generateRequestId = () => `req_${Math.random().toString(36).substring(2, 12)}`
@@ -1477,16 +1458,8 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
             {isRecordingActive ? <IconPlayerRecordFilled className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconPlayerRecord className="h-4 w-4 sm:h-5 sm:w-5" />}
           </Button>
 
-          {/* Network Quality Button */}
-          <Button
-            variant="secondary"
-            size="icon"
-            onClick={() => setShowNetworkPanel(prev => !prev)}
-            className="h-10 w-10 sm:h-12 sm:w-12 rounded-full"
-            title="Network Quality Monitor"
-          >
-            📶
-          </Button>
+
+
 
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
@@ -1637,51 +1610,7 @@ export function MeetingRoom({ onLeft }: MeetingRoomProps) {
         </div>
       )}
 
-      {/* Network Lag Notification Banner */}
-      {networkQuality && (
-        <div className={cn(
-          "fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 animate-in slide-in-from-top duration-300 max-w-md",
-          networkQuality.quality === 'CRITICAL'
-            ? 'bg-red-900/90 border border-red-500/50'
-            : 'bg-yellow-900/90 border border-yellow-500/50'
-        )}>
-          <div className={cn(
-            "h-2 w-2 rounded-full animate-pulse",
-            networkQuality.quality === 'CRITICAL' ? 'bg-red-400' : 'bg-yellow-400'
-          )} />
-          <div className="flex flex-col">
-            <span className={cn(
-              "text-sm font-medium",
-              networkQuality.quality === 'CRITICAL' ? 'text-red-200' : 'text-yellow-200'
-            )}>
-              {networkQuality.quality === 'CRITICAL'
-                ? 'Mạng rất yếu — video tạm dừng để ưu tiên âm thanh'
-                : 'Mạng yếu — chất lượng video bị giảm'}
-            </span>
-            <span className="text-xs text-slate-400">
-              RTT: {Math.round(networkQuality.rttMs)}ms
-            </span>
-          </div>
-          <button
-            className="ml-auto p-1 rounded hover:bg-white/10 text-slate-400 hover:text-white"
-            onClick={() => setNetworkQuality(null)}
-          >
-            ✕
-          </button>
-        </div>
-      )}
 
-      {/* Network Quality Monitoring Panel */}
-      <NetworkQualityPanel
-        getNetworkQuality={() => {
-          if (currentRoom && typeof (currentRoom as any).getNetworkQuality === 'function') {
-            return (currentRoom as any).getNetworkQuality();
-          }
-          return { stats: null, allocation: null };
-        }}
-        isOpen={showNetworkPanel}
-        onClose={() => setShowNetworkPanel(false)}
-      />
     </div>
   )
 }

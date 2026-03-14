@@ -4,6 +4,7 @@ import type {
   AudioEncoderConfig,
 } from "../../../types/media/publisher.types";
 import { log } from "../../../utils";
+import { AUDIO_CONFIG } from "../../../constants/mediaConstants";
 
 // ---------------------------------------------------------------------------
 // AACEncoderManager
@@ -25,8 +26,8 @@ import { log } from "../../../utils";
 // ---------------------------------------------------------------------------
 
 const AAC_CONFIG = {
-  SAMPLE_RATE: 48000,
-  CHANNEL_COUNT: 2, // mono – mirrors current Opus configuration
+  SAMPLE_RATE: AUDIO_CONFIG.SAMPLE_RATE,
+  CHANNEL_COUNT: AUDIO_CONFIG.CHANNEL_COUNT,
   BITRATE: 128_000,
   SAMPLES_PER_FRAME: 1024, // AAC-LC frame size
 } as const;

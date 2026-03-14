@@ -47,16 +47,16 @@ export enum TransportPacketType {
 // Channel name constants
 export enum ChannelName {
   MEETING_CONTROL = "meeting_control",
-  MICROPHONE = "mic_48k",
-  VIDEO_360P = "video_360p",
-  VIDEO_720P = "video_720p",
+  MIC_48K = "mic_48k",
+  CAM_360P = "cam_360p",
+  CAM_720P = "cam_720p",
   SCREEN_SHARE_720P = "screen_share_720p",
   SCREEN_SHARE_1080P = "screen_share_1080p",
   SCREEN_SHARE_AUDIO = "screen_share_audio",
   LIVESTREAM_720P = "livestream_720p",
   LIVESTREAM_AUDIO = "livestream_audio",
-  VIDEO_1080P = "video_1080p",
-  VIDEO_1440P = "video_1440p",
+  CAM_1080P = "cam_1080p",
+  CAM_1440P = "cam_1440p",
 }
 
 /**
@@ -77,7 +77,7 @@ export function getStreamPriority(channelName: ChannelName): StreamPriority {
     case ChannelName.SCREEN_SHARE_AUDIO:
     case ChannelName.LIVESTREAM_AUDIO:
       return StreamPriority.SCREEN_SHARE_AUDIO;
-    case ChannelName.MICROPHONE:
+    case ChannelName.MIC_48K:
       return StreamPriority.MIC_AUDIO;
     case ChannelName.SCREEN_SHARE_720P:
     case ChannelName.SCREEN_SHARE_1080P:
@@ -108,8 +108,8 @@ export interface PublisherConfig {
   /**
    * Specific video resolutions to publish.
    * If not specified, publishes all permitted video resolutions.
-   * Example: [ChannelName.VIDEO_1080P] - only publish 1080p
-   * Example: [ChannelName.VIDEO_720P, ChannelName.VIDEO_360P] - publish 720p and 360p
+   * Example: [ChannelName.CAM_1080P] - only publish 1080p
+   * Example: [ChannelName.CAM_720P, ChannelName.CAM_360P] - publish 720p and 360p
    */
   videoResolutions?: ChannelName[];
   onStatusUpdate?: (message: string, isError?: boolean) => void;

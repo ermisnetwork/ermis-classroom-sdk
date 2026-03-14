@@ -6,6 +6,7 @@
  */
 
 import { log } from "../../utils";
+import { AUDIO_CONFIG } from "../../constants/mediaConstants";
 
 export interface LivestreamAudioMixerConfig {
   /** Master output volume (0-1) */
@@ -52,7 +53,7 @@ export class LivestreamAudioMixer {
     this.micVolume = config.micVolume ?? 1.0;
     this.tabAudioVolume = config.tabAudioVolume ?? 1.0;
     this.screenShareVolume = config.screenShareVolume ?? 1.0;
-    this.sampleRate = config.sampleRate ?? 48000;
+    this.sampleRate = config.sampleRate ?? AUDIO_CONFIG.SAMPLE_RATE;
     this.debug = config.debug ?? false;
   }
 

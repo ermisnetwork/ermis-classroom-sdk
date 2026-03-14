@@ -3,7 +3,8 @@ import {
   TransportPacketType,
   ChannelName,
 } from "../../../types/media/publisher.types";
-import { DATA_CHANNEL_IDS } from "../../../constants/mediaConstants";
+import { DATA_CHANNEL_IDS, CHUNK_TYPE } from "../../../constants/mediaConstants";
+import type { ChunkType } from "../../../constants/mediaConstants";
 
 /**
  * FrameTypeHelper - Utility class for frame type conversions and mappings
@@ -29,21 +30,21 @@ export class FrameTypeHelper {
    */
   static getFrameType(
     channelName: ChannelName,
-    chunkType: "key" | "delta",
+    chunkType: ChunkType,
   ): FrameType {
-    const isKeyFrame = chunkType === "key";
+    const isKeyFrame = chunkType === CHUNK_TYPE.KEY;
 
     switch (channelName) {
-      case ChannelName.VIDEO_360P:
+      case ChannelName.CAM_360P:
         return isKeyFrame ? FrameType.CAM_360P_KEY : FrameType.CAM_360P_DELTA;
 
-      case ChannelName.VIDEO_720P:
+      case ChannelName.CAM_720P:
         return isKeyFrame ? FrameType.CAM_720P_KEY : FrameType.CAM_720P_DELTA;
 
-      case ChannelName.VIDEO_1080P:
+      case ChannelName.CAM_1080P:
         return isKeyFrame ? FrameType.CAM_1080P_KEY : FrameType.CAM_1080P_DELTA;
 
-      case ChannelName.VIDEO_1440P:
+      case ChannelName.CAM_1440P:
         return isKeyFrame ? FrameType.CAM_1440P_KEY : FrameType.CAM_1440P_DELTA;
 
       case ChannelName.SCREEN_SHARE_720P:

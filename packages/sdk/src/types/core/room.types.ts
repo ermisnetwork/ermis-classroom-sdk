@@ -45,7 +45,7 @@ export interface RoomConfig {
   /**
    * Video resolutions to publish.
    * If not specified, publishes 360p and 720p by default.
-   * To enable 1080p: [ChannelName.VIDEO_1080P]
+   * To enable 1080p: [ChannelName.CAM_1080P]
    */
   videoResolutions?: ChannelName[];
   /**
@@ -316,9 +316,9 @@ export type ServerEventType =
  */
 export type MediaChannel =
   | 'meeting_control'
-  | 'video_360p'
-  | 'video_720p'
-  | 'video_1080p'
+  | 'cam_360p'
+  | 'cam_720p'
+  | 'cam_1080p'
   | 'screen_share_720p'
   | 'screen_share_1080p'
   | 'mic_48k'

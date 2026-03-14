@@ -43,13 +43,13 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
     this.microFadePos = -1;   // -1 = inactive
     this.useMicroFade = false; // Set false to disable all volume modification
 
-    console.log('[Audio Worklet] AudioWorklet loaded');
+    // AudioWorklet loaded
     let counter = 0;
     // Listen for messages from the main thread
     this.port.onmessage = (event) => {
       const { type, data, sampleRate, numberOfChannels, port } = event.data;
       if (type === "connectWorker") {
-        console.log('[Audio Worklet] connectWorker, workerPort:', port);
+        // workerPort connected
         this.workerPort = port;
 
         this.workerPort.onmessage = (workerEvent) => {

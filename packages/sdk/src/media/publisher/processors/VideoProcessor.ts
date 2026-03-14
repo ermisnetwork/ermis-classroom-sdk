@@ -109,7 +109,7 @@ export class VideoProcessor extends EventEmitter<{
       for (const subStream of this.subStreams) {
         // Skip high-res encoders for WASM fallback (single instance limitation)
         if (isWasmFallback && subStream.name.includes("720")) {
-          console.log(`[VideoProcessor] Skipping ${subStream.name} encoder (WASM single instance limitation)`);
+          log(`[VideoProcessor] Skipping ${subStream.name} encoder (WASM single instance limitation)`);
           continue;
         }
         

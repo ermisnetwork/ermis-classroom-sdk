@@ -75,20 +75,20 @@ export interface PaginatedParticipantResponse {
  *  can_publish_sources: [["mic_48k", false]],
  * }
  * ban camera: {
- *  can_publish_sources: [["video_360p", false], ["video_720p", false]],
+ *  can_publish_sources: [["cam_360p", false], ["cam_720p", false]],
  * }
  * cho phép camera và mic: {
- *  can_publish_sources: [["video_360p", true], ["video_720p", true], ["mic_48k", true]],
+ *  can_publish_sources: [["cam_360p", true], ["cam_720p", true], ["mic_48k", true]],
  * }
  * ban mic + camera: {
- *  can_publish_sources: [["video_360p", false], ["video_720p", false], ["mic_48k", false]],
+ *  can_publish_sources: [["cam_360p", false], ["cam_720p", false], ["mic_48k", false]],
  * }
  */
 export interface PermissionChanged {
   can_subscribe?: boolean | null;// có thể xem hay không
   can_publish?: boolean | null;// có thể bắn data (mic, camera, event)
   can_publish_data?: boolean | null; // có thể bắn data (mic or camera)
-  can_publish_sources?: Array<[ChannelName, boolean]> | null; // mic: channelName: mic_48k, camera: channelName: video_360p/video_720p, screen_share: channelName: screen_share_720p/screen_share_1080p/screen_share_audio
+  can_publish_sources?: Array<[ChannelName, boolean]> | null; // mic: channelName: mic_48k, camera: channelName: cam_360p/cam_720p, screen_share: channelName: screen_share_720p/screen_share_1080p/screen_share_audio
   hidden?: boolean | null;// bố mày chưa dùng
   can_update_metadata?: boolean | null;// bố mày chưa dùng
 }

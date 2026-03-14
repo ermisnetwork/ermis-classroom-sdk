@@ -1,9 +1,8 @@
 import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
-import { CHANNEL_NAME, SUBSCRIBE_TYPE } from "./publisherConstants.js";
+import { CHANNEL_NAME, SUBSCRIBE_TYPE, CHUNK_TYPE, AUDIO } from "./publisherConstants.js";
 import { H264Decoder, isNativeH264DecoderSupported } from "../codec-polyfill/video-codec-polyfill.js";
-// import { CHANNEL_NAME, SUBSCRIBE_TYPE } from new URL("./publisherConstants.js", import.meta.url);
 
 import CommandSender from "./ClientCommand.js";
 
@@ -11,7 +10,7 @@ let subscribeType = SUBSCRIBE_TYPE.CAMERA;
 
 let videoDecoder360p;
 let videoDecoder720p;
-let currentVideoChannel = CHANNEL_NAME.VIDEO_360P;
+let currentVideoChannel = CHANNEL_NAME.CAM_360P;
 let audioDecoder = null;
 
 let workletPort = null;
@@ -221,8 +220,8 @@ self.onmessage = async function (e) {
         });
 
         isWebSocket = true;
-        // const channels = [CHANNEL_NAME.VIDEO_720P, CHANNEL_NAME.AUDIO];
-        const channels = [CHANNEL_NAME.VIDEO_360P, CHANNEL_NAME.AUDIO];
+        // const channels = [CHANNEL_NAME.CAM_720P, CHANNEL_NAME.AUDIO];
+        const channels = [CHANNEL_NAME.CAM_360P, CHANNEL_NAME.AUDIO];
         channels.forEach((ch) => attachWebSocket(ch, wsUrl));
         // attachWebSocket(channelName, e.data.wsUrl);
       }
@@ -466,7 +465,7 @@ function handleStreamConfig(channelName, cfg) {
 
       const chunk = new EncodedAudioChunk({
         timestamp: timestamp * 1000,
-        type: "key",
+        type: CHUNK_TYPE.KEY,
         data,
       });
       audioDecoder.decode(chunk);
@@ -578,7 +577,7 @@ let videoCounterTest = 0;
 setInterval(() => {
   proxyConsole.log("Receive frame rate:", videoCounterTest / 5);
   videoCounterTest = 0;
-}, 5000);
+}, AUDIO.LOG_INTERVAL_MS);
 
 async function handleBinaryPacket(dataBuffer) {
   // const dataView = new DataView(dataBuffer);
@@ -592,19 +591,19 @@ async function handleBinaryPacket(dataBuffer) {
   const data = dataBuffer.slice(9);
 
   if (frameType === 0 || frameType === 1) {
-    const type = frameType === 0 ? "key" : "delta";
+    const type = frameType === 0 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
 
-    if (type === "key") {
+    if (type === CHUNK_TYPE.KEY) {
       keyFrameReceived = true;
     }
 
     if (keyFrameReceived) {
-      if (videoDecoders.get(CHANNEL_NAME.VIDEO_360P).state === "closed") {
-        const newDecoder = await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_360P);
-        videoDecoders.set(CHANNEL_NAME.VIDEO_360P, newDecoder);
-        const video360pConfig = videoConfigs.get(CHANNEL_NAME.VIDEO_360P);
+      if (videoDecoders.get(CHANNEL_NAME.CAM_360P).state === "closed") {
+        const newDecoder = await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_360P);
+        videoDecoders.set(CHANNEL_NAME.CAM_360P, newDecoder);
+        const video360pConfig = videoConfigs.get(CHANNEL_NAME.CAM_360P);
         proxyConsole.log("Decoder error, Configuring 360p decoder with config:", video360pConfig);
-        videoDecoders.get(CHANNEL_NAME.VIDEO_360P).configure(video360pConfig);
+        videoDecoders.get(CHANNEL_NAME.CAM_360P).configure(video360pConfig);
       }
       const encodedChunk = new EncodedVideoChunk({
         timestamp: timestamp * 1000,
@@ -612,7 +611,7 @@ async function handleBinaryPacket(dataBuffer) {
         data,
       });
 
-      videoDecoders.get(CHANNEL_NAME.VIDEO_360P).decode(encodedChunk);
+      videoDecoders.get(CHANNEL_NAME.CAM_360P).decode(encodedChunk);
     }
     return;
   } else if (frameType === 2 || frameType === 3) {
@@ -625,19 +624,19 @@ async function handleBinaryPacket(dataBuffer) {
     // proxyConsole.log(
     //   `Received video frame - Seq: ${sequenceNumber}, size: ${data.byteLength} bytes`
     // );
-    const type = frameType === 2 ? "key" : "delta";
+    const type = frameType === 2 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
 
-    if (type === "key") {
+    if (type === CHUNK_TYPE.KEY) {
       keyFrameReceived = true;
     }
 
     if (keyFrameReceived) {
-      if (videoDecoders.get(CHANNEL_NAME.VIDEO_720P).state === "closed") {
-        const newDecoder = await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P);
-        videoDecoders.set(CHANNEL_NAME.VIDEO_720P, newDecoder);
-        const config720p = videoConfigs.get(CHANNEL_NAME.VIDEO_720P);
+      if (videoDecoders.get(CHANNEL_NAME.CAM_720P).state === "closed") {
+        const newDecoder = await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_720P);
+        videoDecoders.set(CHANNEL_NAME.CAM_720P, newDecoder);
+        const config720p = videoConfigs.get(CHANNEL_NAME.CAM_720P);
         proxyConsole.log("Decoder error, Configuring 720p decoder with config:", config720p);
-        videoDecoders.get(CHANNEL_NAME.VIDEO_720P).configure(config720p);
+        videoDecoders.get(CHANNEL_NAME.CAM_720P).configure(config720p);
       }
       const encodedChunk = new EncodedVideoChunk({
         timestamp: timestamp * 1000,
@@ -645,21 +644,21 @@ async function handleBinaryPacket(dataBuffer) {
         data,
       });
 
-      videoDecoders.get(CHANNEL_NAME.VIDEO_720P).decode(encodedChunk);
+      videoDecoders.get(CHANNEL_NAME.CAM_720P).decode(encodedChunk);
     }
     return;
   } else if (frameType === 4 || frameType === 5) {
-    const type = frameType === 0 ? "key" : "delta";
+    const type = frameType === 0 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
 
-    if (type === "key") {
+    if (type === CHUNK_TYPE.KEY) {
       keyFrameReceived = true;
     }
 
     if (keyFrameReceived) {
-      if (videoDecoders.get(CHANNEL_NAME.VIDEO_1080P).state === "closed") {
-        const newDecoder = await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_1080P);
-        videoDecoders.set(CHANNEL_NAME.VIDEO_1080P, newDecoder);
-        videoDecoders.get(CHANNEL_NAME.VIDEO_1080P).configure(videoConfigs.get(CHANNEL_NAME.VIDEO_1080P));
+      if (videoDecoders.get(CHANNEL_NAME.CAM_1080P).state === "closed") {
+        const newDecoder = await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_1080P);
+        videoDecoders.set(CHANNEL_NAME.CAM_1080P, newDecoder);
+        videoDecoders.get(CHANNEL_NAME.CAM_1080P).configure(videoConfigs.get(CHANNEL_NAME.CAM_1080P));
       }
       const encodedChunk = new EncodedVideoChunk({
         timestamp: timestamp * 1000,
@@ -667,13 +666,13 @@ async function handleBinaryPacket(dataBuffer) {
         data,
       });
 
-      videoDecoders.get(CHANNEL_NAME.VIDEO_1080P).decode(encodedChunk);
+      videoDecoders.get(CHANNEL_NAME.CAM_1080P).decode(encodedChunk);
     }
     return;
   } else if (frameType === 6) {
     const chunk = new EncodedAudioChunk({
       timestamp: timestamp * 1000,
-      type: "key",
+      type: CHUNK_TYPE.KEY,
       data,
     });
 
@@ -695,18 +694,18 @@ async function initializeDecoders() {
   // Use polyfill decoders that auto-select native or WASM
   switch (subscribeType) {
     case SUBSCRIBE_TYPE.CAMERA:
-      videoDecoders.set(CHANNEL_NAME.VIDEO_360P, await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_360P));
-      videoDecoders.set(CHANNEL_NAME.VIDEO_720P, await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P));
+      videoDecoders.set(CHANNEL_NAME.CAM_360P, await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_360P));
+      videoDecoders.set(CHANNEL_NAME.CAM_720P, await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_720P));
       break;
 
     case SUBSCRIBE_TYPE.SCREEN:
-      videoDecoders.set(CHANNEL_NAME.VIDEO_720P, await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P));
-      videoDecoders.set(CHANNEL_NAME.VIDEO_1080P, await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_1080P));
+      videoDecoders.set(CHANNEL_NAME.CAM_720P, await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_720P));
+      videoDecoders.set(CHANNEL_NAME.CAM_1080P, await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_1080P));
       break;
 
     default:
-      videoDecoders.set(CHANNEL_NAME.VIDEO_360P, await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_360P));
-      videoDecoders.set(CHANNEL_NAME.VIDEO_720P, await createVideoDecoderWithFallback(CHANNEL_NAME.VIDEO_720P));
+      videoDecoders.set(CHANNEL_NAME.CAM_360P, await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_360P));
+      videoDecoders.set(CHANNEL_NAME.CAM_720P, await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_720P));
       break;
   }
 

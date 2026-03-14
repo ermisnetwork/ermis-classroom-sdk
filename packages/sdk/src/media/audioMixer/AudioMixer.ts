@@ -10,6 +10,7 @@ import type {
   SubscriberAudioNode,
 } from "../../types/media/audioMixer.types";
 import { log } from "../../utils";
+import { AUDIO_CONFIG } from "../../constants/mediaConstants";
 
 export class AudioMixer {
   private audioContext: AudioContext | null = null;
@@ -31,7 +32,7 @@ export class AudioMixer {
 
   constructor(config: AudioMixerConfig = {}) {
     this.masterVolume = config.masterVolume ?? 0.8;
-    this.sampleRate = config.sampleRate ?? 48000;
+    this.sampleRate = config.sampleRate ?? AUDIO_CONFIG.SAMPLE_RATE;
     this.enableEchoCancellation = config.enableEchoCancellation ?? true;
     this.debug = config.debug ?? false;
   }
@@ -163,7 +164,7 @@ export class AudioMixer {
 
       // Connect the port if provided
       if (channelWorkletPort) {
-        console.log('[AudioMixer] Connecting channelWorkletPort for:', subscriberId);
+        log('[AudioMixer] Connecting channelWorkletPort for:', subscriberId);
         workletNode.port.postMessage(
           { type: "connectWorker", port: channelWorkletPort },
           [channelWorkletPort],
@@ -505,7 +506,7 @@ export class AudioMixer {
         case "workletDiag":
           // Diagnostic messages from the AudioWorklet (useful on iOS 15
           // where worklet console.log may not appear in devtools)
-          console.log(`[AudioWorklet Diag] ${subscriberId}:`, event.data);
+          log(`[AudioWorklet Diag] ${subscriberId}:`, event.data);
           break;
         case "error":
           console.error(`Subscriber ${subscriberId} worklet error:`, error);

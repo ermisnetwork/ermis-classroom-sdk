@@ -148,7 +148,6 @@ export class WebRTCManager extends EventEmitter<
           action: "publisher_offer",
           channel: channelName,
         };
-        console.log("Offer body data:", bodyData);
         const response = await fetch(
           `https://${this.serverUrl}/meeting/sdp/answer`,
           {
