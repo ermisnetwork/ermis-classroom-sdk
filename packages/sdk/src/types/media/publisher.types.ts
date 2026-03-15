@@ -2,8 +2,6 @@
  * Publisher Types and Interfaces
  */
 
-import { GopStreamSender } from "../../media/publisher/transports/GopStreamSender";
-
 // Re-export ServerEvent from room.types to avoid duplication
 export type { ServerEvent } from "../core/room.types";
 
@@ -65,8 +63,10 @@ export enum ChannelName {
  * Order: screen_share_audio > mic_audio > screen_share_video > camera_video
  */
 export enum StreamPriority {
-  SCREEN_SHARE_AUDIO = 400,
-  MIC_AUDIO = 300,
+  /** Highest priority — screen share audio must never be starved */
+  SCREEN_SHARE_AUDIO = 1000,
+  /** High priority — mic audio is critical for communication */
+  MIC_AUDIO = 800,
   SCREEN_SHARE_VIDEO = 200,
   CAMERA_VIDEO = 100,
 }
@@ -122,9 +122,11 @@ export interface PublisherConfig {
    *                      FDK-AAC WASM (fallback). Better HLS compatibility.
    */
   audioCodec?: "opus" | "aac";
+  /** Enable unreliable datagrams for audio (congestion-resistant). Default: false. */
+  useAudioDatagrams?: boolean;
+  /** Enable SendGate: gate video when audio stream is unhealthy. Default: false. */
+  useSendGate?: boolean;
 }
-
-
 
 export interface ParticipantPermissions {
   can_subscribe: boolean;
@@ -134,7 +136,6 @@ export interface ParticipantPermissions {
   hidden: boolean;
   can_update_metadata: boolean;
 }
-
 
 // Sub-stream configuration
 export interface SubStream {
@@ -312,12 +313,6 @@ export type InitAudioRecorder = (
 export enum PinType {
   User = 1,
   ScreenShare = 2,
-}
-
-export type StreamDataGop = {
-  gopId: number;
-  gopSender: GopStreamSender;
-  currentGopFrames: number;
 }
 
 /**

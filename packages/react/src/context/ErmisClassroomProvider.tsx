@@ -44,8 +44,8 @@ export function ErmisClassroomProvider({
       const videoResolutionStrings = config.videoResolutions.map(r => r as string);
       if (channelForQuality && !videoResolutionStrings.includes(channelForQuality)) {
         throw new Error(
-          `subscriberInitQuality "${config.subscriberInitQuality}" is not in videoResolutions [${config.videoResolutions.join(', ')}]. ` +
-          `Please add "${channelForQuality}" to videoResolutions or change subscriberInitQuality.`
+            'subscriberInitQuality "' + config.subscriberInitQuality + '" is not in videoResolutions [' + config.videoResolutions.join(', ') + ']. ' +
+            'Please add "' + channelForQuality + '" to videoResolutions or change subscriberInitQuality.'
         );
       }
     }

@@ -75,9 +75,101 @@ let protocol = null;
 // WebSocket specific
 let isWebSocket = false;
 
+// ── Downlink Congestion Controller (subscriber side) ──
+// Uses server-sent Quinn stats which correctly measure server→client media traffic
+const QUALITY_LADDER = ['cam_360p', 'cam_720p', 'cam_1080p', 'cam_1440p'];
+let _dlBaseRtt = 0;
+let _dlSmoothedRtt = 0;
+let _dlPrevLostPackets = 0;
+let _dlPrevSentPackets = 0;
+let _dlLevel = 0; // 0=NORMAL, 1=MILD, 2=MODERATE, 3=SEVERE
+let _dlRecoveryStartTime = 0; // timestamp when level improved
+const DL_RECOVERY_HOLD_MS = 5000; // sustain improvement for 5s before upgrading quality
+const DL_RTT_RATIO_MILD = 1.5;
+const DL_RTT_RATIO_MODERATE = 2.0;
+const DL_RTT_RATIO_SEVERE = 3.0;
+const DL_LOSS_RATE_MODERATE = 0.03; // 3%
+const DL_LOSS_RATE_SEVERE = 0.08;   // 8%
+
+function evaluateDownlinkCongestion(stats) {
+  // Update RTT
+  _dlSmoothedRtt = stats.rtt_ms;
+  if (_dlSmoothedRtt > 0 && (_dlBaseRtt === 0 || _dlSmoothedRtt < _dlBaseRtt)) {
+    _dlBaseRtt = _dlSmoothedRtt;
+  }
+
+  // Compute loss rate since last interval
+  const sentDelta = stats.sent_packets - _dlPrevSentPackets;
+  const lostDelta = stats.lost_packets - _dlPrevLostPackets;
+  _dlPrevSentPackets = stats.sent_packets;
+  _dlPrevLostPackets = stats.lost_packets;
+  const lossRate = sentDelta > 0 ? lostDelta / sentDelta : 0;
+
+  // RTT ratio
+  const rttRatio = _dlBaseRtt > 0 ? _dlSmoothedRtt / _dlBaseRtt : 1.0;
+
+  // Determine target level
+  let target = 0; // NORMAL
+  if (rttRatio >= DL_RTT_RATIO_SEVERE || lossRate >= DL_LOSS_RATE_SEVERE) {
+    target = 3; // SEVERE
+  } else if (rttRatio >= DL_RTT_RATIO_MODERATE || lossRate >= DL_LOSS_RATE_MODERATE) {
+    target = 2; // MODERATE
+  } else if (rttRatio >= DL_RTT_RATIO_MILD) {
+    target = 1; // MILD
+  }
+
+  const prevLevel = _dlLevel;
+
+  // Degrade immediately
+  if (target > _dlLevel) {
+    _dlLevel = target;
+    _dlRecoveryStartTime = 0;
+    applyDownlinkQuality();
+  }
+  // Recover with hold timer (one step at a time)
+  else if (target < _dlLevel) {
+    if (_dlRecoveryStartTime === 0) {
+      _dlRecoveryStartTime = performance.now();
+    } else if (performance.now() - _dlRecoveryStartTime >= DL_RECOVERY_HOLD_MS) {
+      _dlLevel = Math.max(0, _dlLevel - 1);
+      _dlRecoveryStartTime = 0; // reset for next step
+      applyDownlinkQuality();
+    }
+  } else {
+    _dlRecoveryStartTime = 0; // not improving yet
+  }
+
+  // Debug log
+  if (_dlLevel !== prevLevel) {
+    const levels = ['NORMAL', 'MILD', 'MODERATE', 'SEVERE'];
+    console.warn(
+      `[DownlinkCongestion] ${levels[prevLevel]} → ${levels[_dlLevel]}` +
+      `  (rtt=${_dlSmoothedRtt.toFixed(1)}ms, ratio=${rttRatio.toFixed(2)}, loss=${(lossRate*100).toFixed(1)}%)`
+    );
+  }
+}
+
+function applyDownlinkQuality() {
+  // Only applies to camera subscriptions (screen share has fixed quality)
+  if (subscribeType !== STREAM_TYPE.CAMERA) return;
+
+  const currentIdx = QUALITY_LADDER.indexOf(currentVideoChannel);
+  if (currentIdx === -1) return;
+
+  // Map congestion level to max quality index
+  // NORMAL=3(1440p), MILD=2(1080p), MODERATE=1(720p), SEVERE=0(360p)
+  const maxIdx = Math.max(0, QUALITY_LADDER.length - 1 - _dlLevel);
+  const targetIdx = Math.min(currentIdx, maxIdx);
+
+  if (targetIdx !== currentIdx) {
+    const targetQuality = QUALITY_LADDER[targetIdx];
+    console.warn(`[DownlinkCongestion] Switching quality: ${currentVideoChannel} → ${targetQuality}`);
+    handleBitrateSwitch(targetQuality);
+  }
+}
+
 /** @type {WasmFecManager|null} Single shared FEC manager for all channels */
 let fecManager = null;
-let isRaptorQInitialized = false;
 
 function getOrCreateFecManager() {
   if (!fecManager) {
@@ -90,7 +182,6 @@ async function initRaptorQWasm() {
   // Load RaptorQ WASM from local path (served via Service Worker cache)
   const wasmUrl = "../raptorQ/raptorq_wasm_bg.wasm";
   await raptorqInit(wasmUrl);
-  isRaptorQInitialized = true;
 }
 
 const proxyConsole = {
@@ -988,6 +1079,184 @@ async function attachWebTransportFromUrl(url, channelName) {
 
   // ── Unidirectional streams: one stream per GOP from the node server ──
   receiveUnidirectional(transport);
+
+  // ── Datagram reader: unreliable audio from the node server ──
+  receiveDatagrams(transport);
+}
+
+/**
+ * Ring buffer that reorders audio datagrams by sequence number.
+ *
+ * Datagrams may arrive out of order. This buffer holds packets in a fixed-size
+ * circular array indexed by (seq % capacity). When the expected next sequence
+ * arrives (or a timer fires), it flushes contiguous in-order packets to the
+ * output callback.
+ *
+ * Design:
+ *  - capacity = 8 slots  (~160ms of audio at 20ms/frame — generous)
+ *  - maxWaitMs = 40ms    (2 frames of jitter tolerance, then force-flush)
+ *  - Zero-copy: stores references, no extra ArrayBuffer allocation
+ *  - If a packet arrives in-order, it flushes immediately (0ms added latency)
+ */
+class DatagramReorderBuffer {
+  /**
+   * @param {function(Uint8Array): void} onFlush — called for each packet, in order
+   * @param {number} capacity — ring buffer size (must be power of 2 for fast mod)
+   * @param {number} maxWaitMs — max time to hold a packet waiting for earlier ones
+   */
+  constructor(onFlush, capacity = 8, maxWaitMs = 40) {
+    this._onFlush = onFlush;
+    this._capacity = capacity;
+    this._mask = capacity - 1;           // fast modulo for power-of-2
+    this._maxWaitMs = maxWaitMs;
+    this._slots = new Array(capacity);   // Uint8Array | null
+    this._seqs = new Uint32Array(capacity); // stored seq per slot
+    this._filled = new Uint8Array(capacity); // 0/1 flag per slot
+    this._nextExpected = -1;             // -1 = not initialized
+    this._flushTimer = null;
+  }
+
+  /**
+   * Insert a datagram payload. Seq is read from the first 4 bytes (big-endian).
+   * @param {Uint8Array} payload — [seq:4][ts:4][frameType:1][audio_data...]
+   */
+  push(payload) {
+    if (payload.byteLength < 9) return;
+
+    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    const seq = view.getUint32(0, false); // big-endian
+
+    // Bootstrap: first packet sets the expected baseline
+    if (this._nextExpected === -1) {
+      this._nextExpected = seq;
+    }
+
+    // Drop if too old (behind the window)
+    // Use signed diff to handle uint32 wrap-around
+    const diff = (seq - this._nextExpected) | 0;
+    if (diff < 0) {
+      // Stale packet — already flushed past this seq
+      return;
+    }
+    if (diff >= this._capacity) {
+      // Packet is way ahead — force flush everything and reset
+      this._forceFlushAll();
+      this._nextExpected = seq;
+    }
+
+    // Place in ring buffer
+    const slot = seq & this._mask;
+    this._slots[slot] = payload;
+    this._seqs[slot] = seq;
+    this._filled[slot] = 1;
+
+    // Try to flush contiguous run starting from _nextExpected
+    this._tryFlush();
+
+    // Arm a timer to force-flush if we're stuck waiting for a gap
+    this._armTimer();
+  }
+
+  /** Flush all contiguous packets starting from _nextExpected */
+  _tryFlush() {
+    while (true) {
+      const slot = this._nextExpected & this._mask;
+      if (!this._filled[slot] || this._seqs[slot] !== this._nextExpected) break;
+
+      this._filled[slot] = 0;
+      const pkt = this._slots[slot];
+      this._slots[slot] = null;
+      this._nextExpected = (this._nextExpected + 1) >>> 0; // wrap-safe increment
+      this._onFlush(pkt);
+    }
+
+    // If everything flushed, cancel the timer
+    if (!this._hasBuffered()) {
+      this._cancelTimer();
+    }
+  }
+
+  /** Force flush all buffered packets (in seq order) when the gap is too old */
+  _forceFlushAll() {
+    // Collect all filled slots, sort by seq, flush
+    const pending = [];
+    for (let i = 0; i < this._capacity; i++) {
+      if (this._filled[i]) {
+        pending.push({ seq: this._seqs[i], payload: this._slots[i] });
+        this._filled[i] = 0;
+        this._slots[i] = null;
+      }
+    }
+    pending.sort((a, b) => ((a.seq - b.seq) | 0));
+    for (const p of pending) {
+      this._onFlush(p.payload);
+    }
+    this._cancelTimer();
+  }
+
+  _hasBuffered() {
+    for (let i = 0; i < this._capacity; i++) {
+      if (this._filled[i]) return true;
+    }
+    return false;
+  }
+
+  _armTimer() {
+    if (this._flushTimer !== null) return;
+    this._flushTimer = setTimeout(() => {
+      this._flushTimer = null;
+      // Skip _nextExpected to the lowest buffered seq and flush
+      let minSeq = 0xFFFFFFFF;
+      for (let i = 0; i < this._capacity; i++) {
+        if (this._filled[i] && ((this._seqs[i] - this._nextExpected) | 0) >= 0) {
+          if (((this._seqs[i] - minSeq) | 0) < 0) minSeq = this._seqs[i];
+        }
+      }
+      if (minSeq !== 0xFFFFFFFF) {
+        this._nextExpected = minSeq;
+      }
+      this._tryFlush();
+      // If still buffered, re-arm
+      if (this._hasBuffered()) {
+        this._armTimer();
+      }
+    }, this._maxWaitMs);
+  }
+
+  _cancelTimer() {
+    if (this._flushTimer !== null) {
+      clearTimeout(this._flushTimer);
+      this._flushTimer = null;
+    }
+  }
+}
+
+/**
+ * Read audio datagrams from the WebTransport session.
+ * Server sends: [channel:1][seq:4][ts:4][frameType:1][media_payload...]
+ * We strip the 1-byte channel prefix and push through a reorder buffer
+ * that delivers packets to processIncomingMessage in sequence order.
+ */
+async function receiveDatagrams(transport) {
+  const reorderBuffer = new DatagramReorderBuffer((payload) => {
+    processIncomingMessage(payload);
+  });
+
+  try {
+    const reader = transport.datagrams.readable.getReader();
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value || value.byteLength < 2) continue;
+
+      // Strip 1-byte channel prefix, push rest into reorder buffer
+      const payload = value.slice(1);
+      reorderBuffer.push(payload);
+    }
+  } catch (e) {
+    // Expected when session closes — not an error
+    console.warn('[Datagram] Reader stopped:', e?.message || e);
+  }
 }
 
 async function sendOverStream(frameBytes) {
@@ -1447,6 +1716,11 @@ async function processIncomingMessage(message) {
         handleStreamConfigs(json);
         return;
       }
+      // ── Subscriber downlink congestion stats ──
+      if (json.type === 'subscriber_connection_stats') {
+        evaluateDownlinkCongestion(json);
+        return;
+      }
     } catch (e) {
       // Not valid JSON — binary data that happens to start with 0x7B.
       // Fall through to binary handling.
@@ -1701,10 +1975,10 @@ async function handleBinaryPacket(dataBuffer) {
       }
 
       // Periodic summary
-      if (self._audioRxTotal % 500 === 0) {
-        const lossRate = self._audioRxLost > 0 ? ((self._audioRxLost / (self._audioRxTotal + self._audioRxLost)) * 100).toFixed(2) : '0.00';
-        // proxyConsole.log(`[Audio RX] total=${self._audioRxTotal} lost=${self._audioRxLost} rate=${lossRate}% lastSeq=${sequenceNumber}`);
-      }
+      // if (self._audioRxTotal % 500 === 0) {
+      //   const lossRate = self._audioRxLost > 0 ? ((self._audioRxLost / (self._audioRxTotal + self._audioRxLost)) * 100).toFixed(2) : '0.00';
+      //   proxyConsole.log(`[Audio RX] total=${self._audioRxTotal} lost=${self._audioRxLost} rate=${lossRate}% lastSeq=${sequenceNumber}`);
+      // }
 
       // Decode directly
       const decoder = mediaDecoders.get(
@@ -1745,10 +2019,10 @@ async function handleBinaryPacket(dataBuffer) {
         }
 
         // Periodic summary log
-        if (self._audioRxTotal % 500 === 0) {
-          const lossRate = self._audioRxLost > 0 ? ((self._audioRxLost / (self._audioRxTotal + self._audioRxLost)) * 100).toFixed(2) : '0.00';
-          // proxyConsole.log(`[Audio RX] total=${self._audioRxTotal} lost=${self._audioRxLost} rate=${lossRate}% lastSeq=${seq}`);
-        }
+        // if (self._audioRxTotal % 500 === 0) {
+        //   const lossRate = self._audioRxLost > 0 ? ((self._audioRxLost / (self._audioRxTotal + self._audioRxLost)) * 100).toFixed(2) : '0.00';
+        //   proxyConsole.log(`[Audio RX] total=${self._audioRxTotal} lost=${self._audioRxLost} rate=${lossRate}% lastSeq=${seq}`);
+        // }
 
         // Resolve decoder at emit time (may have been recreated)
         const decoder = mediaDecoders.get(
@@ -1780,7 +2054,7 @@ async function handleBinaryPacket(dataBuffer) {
           }
         }
       });
-      proxyConsole.log('[Audio] 🔄 AudioReorderBuffer initialized (bufferSize=3, timeout=60ms)');
+      // proxyConsole.log('[Audio] 🔄 AudioReorderBuffer initialized (bufferSize=3, timeout=60ms)');
     }
 
     // Push into reorder buffer — data.slice() creates an isolated copy

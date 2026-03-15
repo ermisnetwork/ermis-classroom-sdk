@@ -74,6 +74,12 @@ export interface MediaConfig {
   defaultVideoConfig?: VideoConfig;
   /** Default audio configuration */
   defaultAudioConfig?: AudioConfig;
+  /** Enable hybrid mode (audio on WebRTC, video on WebTransport). Default: false (all WebTransport). */
+  useHybrid?: boolean;
+  /** Enable unreliable datagrams for audio (congestion-resistant). Default: false (uses reliable uni-streams). */
+  useAudioDatagrams?: boolean;
+  /** Enable SendGate: gate video when audio stream is unhealthy. Default: false. */
+  useSendGate?: boolean;
 }
 
 /**

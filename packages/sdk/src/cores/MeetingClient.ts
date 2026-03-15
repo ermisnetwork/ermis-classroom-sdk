@@ -200,6 +200,9 @@ export class ErmisClient extends EventEmitter {
         sampleRate: AUDIO_CONFIG.SAMPLE_RATE,
         channels: AUDIO_CONFIG.CHANNEL_COUNT,
       },
+      useHybrid: false,
+      useAudioDatagrams: false,
+      useSendGate: true,
     };
 
     this._setupEventHandlers();

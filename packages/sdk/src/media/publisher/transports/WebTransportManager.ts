@@ -63,11 +63,11 @@ export class WebTransportManager extends EventEmitter<
           try {
             this.transport = new WebTransport(this.config.url, {
               serverCertificateHashes: this.config.serverCertificateHashes,
+              congestionControl: 'low-latency',
             });
 
             await this.transport.ready;
             clearTimeout(timeout);
-
 
             this.isConnected = true;
             this.reconnectAttempts = 0;

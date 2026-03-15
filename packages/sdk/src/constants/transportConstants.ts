@@ -30,23 +30,54 @@ export const TRANSPORT = {
   MAX_RECONNECT_DELAY: 10_000,
   MAX_RECONNECT_BACKOFF_DELAY: 30_000,
 
-  // --- GOP (Group of Pictures) ---
+  // --- GOP (Group of Pictures) — video only ---
   /** Number of video frames per GOP stream (≈ 1 second at 30 fps) */
   VIDEO_GOP_SIZE: 30,
-  /** Number of audio frames per GOP batch (≈ 1 second of audio) */
-  AUDIO_GOP_SIZE: 50,
 
-  // --- GopStreamSender thresholds ---
-  /** Write timeout per frame (ms) */
-  GOP_WRITE_TIMEOUT_MS: 300,
-  /** Graceful close timeout before falling back to abort (ms) */
-  GOP_GRACEFUL_CLOSE_TIMEOUT_MS: 200,
-
-  /** Consecutive write timeouts before aborting the GOP stream */
-  GOP_MAX_CONSECUTIVE_FAILURES: 3,
+  // --- GopStreamSender thresholds (video) ---
+  /** Write timeout per video frame (ms) — aggressive to release congestion window faster */
+  GOP_WRITE_TIMEOUT_MS: 200,
+  /** Consecutive write timeouts before aborting the GOP stream — abort fast to free window for audio */
+  GOP_MAX_CONSECUTIVE_FAILURES: 2,
   /** Frame count sentinel for unbounded / persistent streams */
   GOP_PERSISTENT_STREAM_FRAMES: 0xFFFF,
+  /** Maximum lifetime (ms) for a video GOP before client-side abort.
+   *  Must match or be slightly less than server-side MAX_GOP_LATENCY_SECS (2s).
+   *  Client aborts early so the server doesn't need to STOP_SENDING. */
+  GOP_MAX_LIFETIME_MS: 2_000,
 
+  // --- AudioStreamSender thresholds ---
+  /** Number of audio frames per batch (≈ 1 second of audio) */
+  AUDIO_BATCH_SIZE: 50,
+  /** Write timeout per audio frame (ms) — very aggressive so audio never blocks long */
+  AUDIO_WRITE_TIMEOUT_MS: 100,
+  /** Graceful close timeout before falling back to abort (ms) */
+  AUDIO_GRACEFUL_CLOSE_TIMEOUT_MS: 100,
+  /** Consecutive write timeouts before aborting the audio stream (higher threshold since timeout is shorter) */
+  AUDIO_MAX_CONSECUTIVE_FAILURES: 5,
+  /** Frame count sentinel for unbounded / persistent audio streams */
+  AUDIO_PERSISTENT_STREAM_FRAMES: 0xFFFF,
+
+  // --- Congestion Controller (progressive degradation) ---
+  /** Write-latency EMA threshold → Level 1 (mild) */
+  CONGESTION_LATENCY_L1_MS: 40,
+  /** Write-latency EMA threshold → Level 2 (moderate) */
+  CONGESTION_LATENCY_L2_MS: 70,
+  /** Write timeout already triggers Level 3 via reportTimeout() */
+  /** Hold time at current level before stepping up (recovery) */
+  CONGESTION_RECOVERY_HOLD_MS: 3_000,
+  /** EMA smoothing factor (0-1). Higher = react faster, noisier */
+  CONGESTION_EMA_ALPHA: 0.3,
+  /** Bandwidth reserved for audio — video budget = estimated - this (bps) */
+  AUDIO_RESERVATION_BPS: 50_000,
+  /** Minimum video bitrate floor before turning video OFF (bps) */
+  CONGESTION_MIN_VIDEO_BITRATE: 50_000,
+  /** Interval for debug bandwidth estimation log (ms). Set to 0 to disable. */
+  CONGESTION_DEBUG_LOG_INTERVAL_MS: 2_000,
+
+  // --- WebRTC hybrid mode ---
+  /** Interval for polling WebRTC getStats() in hybrid mode (ms) */
+  WEBRTC_STATS_POLL_INTERVAL_MS: 1_000,
 
 } as const;
 

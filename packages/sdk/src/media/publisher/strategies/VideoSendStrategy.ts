@@ -1,9 +1,10 @@
 import { ChannelName, FrameType, getStreamPriority } from "../../../types/media/publisher.types";
-import type { StreamDataGop } from "../../../types/media/publisher.types";
+import type { StreamDataGop } from "../transports/GopStreamSender";
 import { PacketBuilder } from "../../shared/utils/PacketBuilder";
 import { FrameTypeHelper } from "../../shared/utils/FrameTypeHelper";
 import { CHANNEL_NUMBERS, CHUNK_TYPE } from "../../../constants/mediaConstants";
 import type { ChunkType } from "../../../constants/mediaConstants";
+import type { SendGate } from "../controllers/SendGate";
 
 /**
  * VideoSendStrategy — encapsulates all video publish logic.
@@ -11,6 +12,7 @@ import type { ChunkType } from "../../../constants/mediaConstants";
  * Responsibilities:
  * - Extract raw bytes from EncodedVideoChunk / WASM chunk
  * - Build the on-wire packet
+ * - SendGate: proactively drop frames when congested (before touching QUIC)
  * - WebTransport path: manage GOP lifecycle (startGop on keyframe → sendFrame)
  * - WebRTC / fallback path: delegate to sendPacket
  */
@@ -23,6 +25,7 @@ export class VideoSendStrategy {
     private getAndIncrementSequence: (ch: ChannelName) => number,
     private isWebRTC: boolean,
     gopSize: number,
+    private sendGate?: SendGate,
   ) {
     this.VIDEO_GOP_SIZE = gopSize;
   }
@@ -32,11 +35,19 @@ export class VideoSendStrategy {
    */
   async send(
     channelName: ChannelName,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     chunk: EncodedVideoChunk | any,
     _metadata?: EncodedVideoChunkMetadata,
   ): Promise<void> {
-    const chunkType: ChunkType = chunk.type === CHUNK_TYPE.KEY ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
+    const isKeyframe = chunk.type === CHUNK_TYPE.KEY;
+
+    // ★ SendGate: proactive admission control.
+    // Drop video frames BEFORE building packets or touching the QUIC pipe.
+    // When audio can't send (CRITICAL), this kills all video at zero cost.
+    if (this.sendGate && !this.sendGate.shouldSendVideo(isKeyframe)) {
+      return;
+    }
+
+    const chunkType: ChunkType = isKeyframe ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
     const frameType = FrameTypeHelper.getFrameType(channelName, chunkType);
 
     const arrayBuffer = this.extractArrayBuffer(chunk);
@@ -51,7 +62,6 @@ export class VideoSendStrategy {
     );
 
     const channel = CHANNEL_NUMBERS[channelName];
-    const isKeyframe = chunk.type === CHUNK_TYPE.KEY;
 
     const gopData = this.gopSenders.get(channelName);
     const gopSender = gopData?.gopSender;

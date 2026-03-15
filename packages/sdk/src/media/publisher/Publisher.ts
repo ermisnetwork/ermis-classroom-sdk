@@ -21,6 +21,7 @@ import { AACEncoderManager } from "./managers/AACEncoderManager";
 import { VideoProcessor } from "./processors/VideoProcessor";
 import { AudioProcessor } from "./processors/AudioProcessor";
 import { LivestreamAudioMixer } from "../audioMixer/LivestreamAudioMixer";
+import { WebRTCStatsPoller } from "./controllers/WebRTCStatsPoller";
 import { log } from "../../utils";
 import { SUB_STREAMS } from "../../constants/publisherConstants";
 
@@ -129,6 +130,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   private mixedAudioStream: MediaStream | null = null;
   // Store viewport dimensions BEFORE getDisplayMedia popup changes them
   private preCaptureViewportDimensions: { width: number; height: number } | null = null;
+
+  // Hybrid mode: WebRTC stats poller for GCC congestion signals
+  private webRTCStatsPoller: WebRTCStatsPoller | null = null;
 
 
 
@@ -426,7 +430,13 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     });
 
     const webTransport = await this.webTransportManager.connect();
-    this.streamManager = new StreamManager(false, this.options.streamId);
+
+    // Determine if hybrid mode is available (WebRTC host provided + audio channels)
+    const webRtcHost = this.options.webRtcHost;
+    const hasAudioChannels = this.hasAudio;
+    const useHybrid = !!webRtcHost && hasAudioChannels;
+
+    this.streamManager = new StreamManager(false, this.options.streamId, useHybrid, this.options.useAudioDatagrams, this.options.useSendGate);
 
     // Set publisher state before initializing streams so correct state is sent to server
     // Include publish_channels to notify server about which channels we will publish
@@ -442,9 +452,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       publishChannels,
     });
 
-    // StreamManager now emits to globalEventBus directly - no need to re-emit
     // Filter channels based on actual device availability
-    const channelNames: ChannelName[] = this.subStreams
+    const allChannelNames: ChannelName[] = this.subStreams
       .map(s => s.channelName as ChannelName)
       .filter(channelName => {
         // MEETING_CONTROL is always required
@@ -457,16 +466,67 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         return true;
       });
 
-    log("[Publisher] WebTransport channels to initialize (filtered by device availability):", channelNames);
-
     // Only initialize if there are channels (at minimum MEETING_CONTROL)
-    if (channelNames.length === 0) {
+    if (allChannelNames.length === 0) {
       throw new Error("No channels available - at least MEETING_CONTROL should be present");
     }
 
-    await this.streamManager.initWebTransportStreams(webTransport, channelNames);
+    if (useHybrid) {
+      // ─── Hybrid mode: video + control on WebTransport, audio on WebRTC ───
+      // Route mic + screen share audio to WebRTC for GCC congestion stats.
+      // Livestream audio stays on WebTransport (separate use case).
+      const isHybridAudioCh = (ch: ChannelName) =>
+        ch === ChannelName.MIC_48K ||
+        ch === ChannelName.SCREEN_SHARE_AUDIO;
 
-    this.updateStatus("WebTransport connected");
+      // WebTransport gets video + meeting_control (NOT audio)
+      const wtChannels = allChannelNames.filter(ch => !isHybridAudioCh(ch));
+      // WebRTC gets only mic audio
+      const rtcChannels = allChannelNames.filter(ch => isHybridAudioCh(ch));
+
+      log("[Publisher] Hybrid mode — WebTransport channels:", wtChannels);
+      log("[Publisher] Hybrid mode — WebRTC audio channels:", rtcChannels);
+
+      // 1. Init WebTransport streams (video + control)
+      await this.streamManager.initWebTransportStreams(webTransport, wtChannels);
+
+      // 2. Init WebRTC for audio channels
+      if (rtcChannels.length > 0) {
+        this.webRtcManager = new WebRTCManager(
+          webRtcHost!,
+          this.options.roomId || "",
+          this.options.streamId || ""
+        );
+        this.streamManager.setWebRTCManager(this.webRtcManager);
+
+        // Initialize FEC worker for WebRTC audio encoding
+        await this.streamManager.initFecWorkerForHybrid();
+
+        await this.webRtcManager.connectMultipleChannels(rtcChannels, this.streamManager);
+
+        // 3. NOW send publisher_state — all channels (WT + WebRTC) are connected
+        this.streamManager.sendDeferredPublisherState();
+
+        // 4. Start WebRTC stats poller → feeds GCC stats to CongestionController
+        const peerConnections = this.webRtcManager.getPeerConnections();
+        // Use the first audio channel's peer connection for stats
+        const firstAudioPC = peerConnections.get(rtcChannels[0]);
+        if (firstAudioPC) {
+          this.webRTCStatsPoller = new WebRTCStatsPoller();
+          this.webRTCStatsPoller.start(
+            firstAudioPC,
+            this.streamManager.getCongestionController(),
+          );
+          log("[Publisher] WebRTC stats poller started on", rtcChannels[0]);
+        }
+      }
+    } else {
+      // ─── Standard WebTransport-only mode ───
+      log("[Publisher] WebTransport-only mode, channels:", allChannelNames);
+      await this.streamManager.initWebTransportStreams(webTransport, allChannelNames);
+    }
+
+    this.updateStatus(useHybrid ? "Hybrid (WT+WebRTC) connected" : "WebTransport connected");
     this.emit("connected");
     globalEventBus.emit(GlobalEvents.PUBLISHER_CONNECTED, { streamId: this.options.streamId });
   }
@@ -996,6 +1056,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       if (this.webTransportManager) {
         await this.webTransportManager.close();
         this.webTransportManager = null;
+      }
+
+      if (this.webRTCStatsPoller) {
+        this.webRTCStatsPoller.stop();
+        this.webRTCStatsPoller = null;
       }
 
       if (this.webRtcManager) {

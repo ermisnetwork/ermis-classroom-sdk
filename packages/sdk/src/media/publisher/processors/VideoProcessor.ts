@@ -6,6 +6,7 @@ import type {
 } from "../../../types/media/publisher.types";
 import { VideoEncoderManager } from "../managers/VideoEncoderManager";
 import { StreamManager } from "../transports/StreamManager";
+import { CongestionLevel, DEGRADATION_PROFILES } from "../controllers/CongestionController";
 import { log } from "../../../utils";
 
 /**
@@ -67,6 +68,11 @@ export class VideoProcessor extends EventEmitter<{
   private isCapturingConfig = false;
   private configCaptureComplete = false;
 
+  // Congestion throttling — progressive degradation via CongestionController
+  private _congestionPaused = false;
+  /** Original encoder configs, stored on first degradation so we can restore */
+  private _originalConfigs = new Map<string, { bitrate: number; framerate: number }>();
+
   // Sub-stream configurations
   private subStreams: SubStream[] = [];
 
@@ -82,6 +88,66 @@ export class VideoProcessor extends EventEmitter<{
     this.subStreams = subStreams.filter((s) =>
       s.width !== undefined && s.height !== undefined
     );
+
+    // Subscribe to progressive congestion level changes
+    this.streamManager.congestionController.on('levelChanged', ({ level, previousLevel }) => {
+      this._handleCongestionLevel(level, previousLevel);
+    });
+  }
+
+  /**
+   * Handle a congestion level transition.
+   * Levels 1-3: reconfigure encoders with reduced fps/bitrate.
+   * Level 4 (CRITICAL): pause encoding entirely (drop frames at source).
+   * Recovery: step back up, reconfigure, request keyframe.
+   */
+  private _handleCongestionLevel(level: CongestionLevel, previousLevel: CongestionLevel): void {
+    const levelNames = ['NORMAL', 'MILD', 'MODERATE', 'SEVERE', 'CRITICAL'];
+    log(`[VideoProcessor] Congestion level: ${levelNames[previousLevel]} → ${levelNames[level]}`);
+
+    if (level === CongestionLevel.CRITICAL) {
+      // Pause encoding — frames dropped at source in processFrames loop
+      this._congestionPaused = true;
+      log('[VideoProcessor] ⏸️ Video OFF — all frames dropped at source');
+    } else {
+      const wasOff = this._congestionPaused;
+      this._congestionPaused = false;
+
+      // Save original configs once (before first degradation)
+      if (this._originalConfigs.size === 0) {
+        for (const sub of this.subStreams) {
+          this._originalConfigs.set(sub.name, {
+            bitrate: sub.bitrate!,
+            framerate: sub.framerate!,
+          });
+        }
+      }
+
+      // Apply degradation profile to all encoders
+      const profile = DEGRADATION_PROFILES[level];
+      for (const sub of this.subStreams) {
+        const original = this._originalConfigs.get(sub.name);
+        if (!original) continue;
+
+        const newBitrate = Math.max(50_000, Math.round(original.bitrate * profile.bitrateFactor));
+        const newFps = Math.min(original.framerate, profile.fpsCap);
+
+        this.videoEncoderManager.reconfigureEncoder(sub.name, {
+          bitrate: newBitrate,
+          framerate: newFps,
+        }).catch((err) => {
+          console.warn(`[VideoProcessor] Failed to reconfigure ${sub.name}:`, err);
+        });
+      }
+
+      // If coming back from VIDEO OFF, request keyframes for clean GOP restart
+      if (wasOff) {
+        log('[VideoProcessor] ▶️ Video resumed — requesting keyframes');
+        for (const sub of this.subStreams) {
+          this.videoEncoderManager.requestKeyframe(sub.name);
+        }
+      }
+    }
   }
 
   /**
@@ -295,7 +361,8 @@ export class VideoProcessor extends EventEmitter<{
         }
 
         // Determine if we should encode this frame
-        const shouldEncode = this.cameraEnabled || (this.isCapturingConfig && !this.configCaptureComplete);
+        const shouldEncode = (this.cameraEnabled || (this.isCapturingConfig && !this.configCaptureComplete))
+                             && !this._congestionPaused;
 
         if (!shouldEncode) {
           frame.close();
