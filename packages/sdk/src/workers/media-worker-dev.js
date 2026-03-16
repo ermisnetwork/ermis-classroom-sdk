@@ -76,28 +76,32 @@ let protocol = null;
 let isWebSocket = false;
 
 // ── Downlink Congestion Controller (subscriber side) ──
-// Uses server-sent Quinn stats which correctly measure server→client media traffic
+// Uses server-sent Quinn stats (server→client path) for quality adaptation.
+//
+// Detection: loss-based only (per GCC / RFC 9002 standards).
+// RTT ratio was removed — it is not a standard signal and produces false
+// positives on low-latency links (e.g. baseRtt=6ms, jitter→20ms = ratio 3x
+// but 0% loss = no congestion). The server-side already does proper BWE-based
+// CC via cwnd/rtt; the client only needs loss for quality ladder decisions.
+//
+// GCC reference thresholds:
+//   >10% loss → reduce (SEVERE)
+//   >5%  loss → moderate degradation
+//   >2%  loss → mild degradation (hold/don't increase)
+//   ≤2%  loss → normal (can increase quality)
 const QUALITY_LADDER = ['cam_360p', 'cam_720p', 'cam_1080p', 'cam_1440p'];
-let _dlBaseRtt = 0;
-let _dlSmoothedRtt = 0;
 let _dlPrevLostPackets = 0;
 let _dlPrevSentPackets = 0;
 let _dlLevel = 0; // 0=NORMAL, 1=MILD, 2=MODERATE, 3=SEVERE
-let _dlRecoveryStartTime = 0; // timestamp when level improved
-const DL_RECOVERY_HOLD_MS = 8000; // sustain improvement for 8s before upgrading quality (prioritize audio stability)
-const DL_RTT_RATIO_MILD = 1.3;
-const DL_RTT_RATIO_MODERATE = 1.8;
-const DL_RTT_RATIO_SEVERE = 2.5;
-const DL_LOSS_RATE_MODERATE = 0.02; // 2%
-const DL_LOSS_RATE_SEVERE = 0.05;   // 5%
+let _dlRecoveryStartTime = 0;
+const DL_RECOVERY_HOLD_MS = 8000; // 8s hold before upgrading quality
+
+// Loss rate thresholds (per GCC standard)
+const DL_LOSS_MILD = 0.02;     // 2% — hold / don't increase
+const DL_LOSS_MODERATE = 0.05; // 5% — reduce quality
+const DL_LOSS_SEVERE = 0.10;   // 10% — heavy reduction
 
 function evaluateDownlinkCongestion(stats) {
-  // Update RTT
-  _dlSmoothedRtt = stats.rtt_ms;
-  if (_dlSmoothedRtt > 0 && (_dlBaseRtt === 0 || _dlSmoothedRtt < _dlBaseRtt)) {
-    _dlBaseRtt = _dlSmoothedRtt;
-  }
-
   // Compute loss rate since last interval
   const sentDelta = stats.sent_packets - _dlPrevSentPackets;
   const lostDelta = stats.lost_packets - _dlPrevLostPackets;
@@ -105,17 +109,14 @@ function evaluateDownlinkCongestion(stats) {
   _dlPrevLostPackets = stats.lost_packets;
   const lossRate = sentDelta > 0 ? lostDelta / sentDelta : 0;
 
-  // RTT ratio
-  const rttRatio = _dlBaseRtt > 0 ? _dlSmoothedRtt / _dlBaseRtt : 1.0;
-
-  // Determine target level
+  // Determine target level (loss-based, per GCC)
   let target = 0; // NORMAL
-  if (rttRatio >= DL_RTT_RATIO_SEVERE || lossRate >= DL_LOSS_RATE_SEVERE) {
-    target = 3; // SEVERE
-  } else if (rttRatio >= DL_RTT_RATIO_MODERATE || lossRate >= DL_LOSS_RATE_MODERATE) {
-    target = 2; // MODERATE
-  } else if (rttRatio >= DL_RTT_RATIO_MILD) {
-    target = 1; // MILD
+  if (lossRate >= DL_LOSS_SEVERE) {
+    target = 3; // SEVERE: ≥10% loss
+  } else if (lossRate >= DL_LOSS_MODERATE) {
+    target = 2; // MODERATE: ≥5% loss
+  } else if (lossRate >= DL_LOSS_MILD) {
+    target = 1; // MILD: ≥2% loss
   }
 
   const prevLevel = _dlLevel;
@@ -132,11 +133,11 @@ function evaluateDownlinkCongestion(stats) {
       _dlRecoveryStartTime = performance.now();
     } else if (performance.now() - _dlRecoveryStartTime >= DL_RECOVERY_HOLD_MS) {
       _dlLevel = Math.max(0, _dlLevel - 1);
-      _dlRecoveryStartTime = 0; // reset for next step
+      _dlRecoveryStartTime = 0;
       applyDownlinkQuality();
     }
   } else {
-    _dlRecoveryStartTime = 0; // not improving yet
+    _dlRecoveryStartTime = 0;
   }
 
   // Debug log + forward to audio worklet
@@ -144,10 +145,9 @@ function evaluateDownlinkCongestion(stats) {
     const levels = ['NORMAL', 'MILD', 'MODERATE', 'SEVERE'];
     console.warn(
       `[DownlinkCongestion] ${levels[prevLevel]} → ${levels[_dlLevel]}` +
-      `  (rtt=${_dlSmoothedRtt.toFixed(1)}ms, ratio=${rttRatio.toFixed(2)}, loss=${(lossRate*100).toFixed(1)}%)`
+      `  (rtt=${stats.rtt_ms.toFixed(1)}ms, loss=${(lossRate*100).toFixed(1)}%)`
     );
 
-    // Forward congestion level to audio worklet for proactive buffer boost
     if (workletPort) {
       workletPort.postMessage({ type: "congestionLevel", data: _dlLevel });
     }
@@ -1478,6 +1478,26 @@ class GopByteReader {
 }
 
 /**
+ * Map the channel byte from GOP header (MeetingChannel::to_u8() on server)
+ * to the CHANNEL_NAME string used by keyFrameReceivedMap.
+ *
+ * Server channel bytes:
+ *   1=Cam360p, 2=Cam720p, 3=ScreenShare720p, 4=ScreenShare1080p,
+ *   5=Mic48k, 6=ScreenShareAudio, 7=Livestream720p, 9=Cam1080p, 10=Cam1440p
+ */
+function gopChannelToName(channelByte) {
+  switch (channelByte) {
+    case 1: return CHANNEL_NAME.CAM_360P;
+    case 2: return CHANNEL_NAME.CAM_720P;
+    case 3: return CHANNEL_NAME.SCREEN_SHARE_720P;
+    // case 4: return CHANNEL_NAME.SCREEN_SHARE_1080P; // not used yet
+    case 9: return CHANNEL_NAME.CAM_1080P;
+    case 10: return CHANNEL_NAME.CAM_1440P;
+    default: return null;
+  }
+}
+
+/**
  * Track the latest GOP ID per channel so that when a new GOP arrives,
  * older (superseded) GOPs for the same channel stop processing.
  * Key: channel byte (u8), Value: latest gopId (u32)
@@ -1528,6 +1548,7 @@ async function readGopStream(receiveStream, gopIndex) {
   const byteReader = new GopByteReader(rawReader);
   let channel = -1;
   let gopId = -1;
+  let channelName = null; // CHANNEL_NAME string for keyframe tracking
   try {
     // ── 1. GOP Header ────────────────────────────────────────────────────
     const streamIdLenBytes = await byteReader.readExact(2);
@@ -1544,22 +1565,17 @@ async function readGopStream(receiveStream, gopIndex) {
     gopId = dv.getUint32(off, false); off += 4;
     const expectedFrames = dv.getUint16(off, false);
 
+    // Map channel byte → CHANNEL_NAME for keyframe flag reset
+    channelName = gopChannelToName(channel);
+
     // Register this GOP as the active one for its channel.
     // Any older GOP for this channel will detect it's been superseded.
-    // const prevGopId = activeGopPerChannel.get(channel);
     activeGopPerChannel.set(channel, gopId);
-
-    // if (prevGopId !== undefined && prevGopId !== gopId) {
-    //   console.log(`[GOP] ch=${channel} new gopId=${gopId} supersedes old gopId=${prevGopId}`);
-    // }
-
-    // if (gopIndex <= 3) {
-    //   proxyConsole.log(`[GOP] #${gopIndex} streamId=${streamId} ch=${channel} gopId=${gopId} expected=${expectedFrames}`);
-    // }
 
     // ── 2. Frame loop ────────────────────────────────────────────────────
     const FRAME_HEADER_SIZE = 13; // sequence(4)+timestamp(4)+frameType(1)+payloadSize(4)
     let frameCount = 0;
+    let wasSuperseded = false;
     while (true) {
       const headerBytes = await byteReader.readExact(FRAME_HEADER_SIZE);
       if (!headerBytes) break; // stream ended — normal GOP completion
@@ -1585,6 +1601,7 @@ async function readGopStream(receiveStream, gopIndex) {
       // Without this check, frames from the old GOP can interleave with
       // the new GOP's frames at the decoder, causing brief corruption.
       if (activeGopPerChannel.get(channel) !== gopId) {
+        wasSuperseded = true;
         rawReader.cancel().catch(() => {});
         break;
       }
@@ -1597,12 +1614,30 @@ async function readGopStream(receiveStream, gopIndex) {
       await processIncomingMessage(fullPacket);
     }
 
+    // ── 3. GOP integrity check ─────────────────────────────────────────
+    // If the GOP ended prematurely (fewer frames than expected), the decoder
+    // has received an incomplete GOP. H.264 delta frames depend on ALL previous
+    // frames, so missing frames corrupt the decoder's reference state.
+    // Reset keyframe flag → decoder drops all subsequent deltas until a clean
+    // keyframe arrives from the next GOP, preventing visual artifacts.
+    if (channelName && frameCount > 0 && frameCount < expectedFrames && !wasSuperseded) {
+      // console.warn(
+      //   `[GOP] ⚠️ Incomplete GOP: ch=${channel} gopId=${gopId} ` +
+      //   `frames=${frameCount}/${expectedFrames} — resetting keyframe flag to prevent artifacts`
+      // );
+      setKeyFrameReceived(channelName, false);
+    }
 
   } catch (err) {
     // Suppress errors from cancelled streams (expected when superseded)
     if (activeGopPerChannel.get(channel) !== gopId) {
       // This GOP was superseded — cancellation errors are expected
       return;
+    }
+    // GOP stream error: decoder may have partial data → reset keyframe flag
+    if (channelName) {
+      console.warn(`[GOP] readGopStream error, resetting keyframe flag for ch=${channel}`);
+      setKeyFrameReceived(channelName, false);
     }
     proxyConsole.error(`[GOP] readGopStream #${gopIndex} error:`, err);
   }

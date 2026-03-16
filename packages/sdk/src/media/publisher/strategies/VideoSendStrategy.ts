@@ -40,43 +40,65 @@ export class VideoSendStrategy {
   ): Promise<void> {
     const isKeyframe = chunk.type === CHUNK_TYPE.KEY;
 
-    // ★ SendGate: proactive admission control.
-    // Drop video frames BEFORE building packets or touching the QUIC pipe.
-    // When audio can't send (CRITICAL), this kills all video at zero cost.
-    if (this.sendGate && !this.sendGate.shouldSendVideo(isKeyframe)) {
-      return;
-    }
-
     const chunkType: ChunkType = isKeyframe ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
     const frameType = FrameTypeHelper.getFrameType(channelName, chunkType);
 
-    const arrayBuffer = this.extractArrayBuffer(chunk);
-    if (!arrayBuffer) return;
-
-    const sequenceNumber = this.getAndIncrementSequence(channelName);
-    const packet = PacketBuilder.createPacket(
-      arrayBuffer,
-      chunk.timestamp,
-      frameType,
-      sequenceNumber,
-    );
-
     const channel = CHANNEL_NUMBERS[channelName];
-
     const gopData = this.gopSenders.get(channelName);
     const gopSender = gopData?.gopSender;
 
-    // WebTransport path: use GOP sender
+    // WebTransport path: use GOP sender with GOP-level gating
     if (!this.isWebRTC && gopSender) {
       if (isKeyframe) {
+        // ★ GOP-level gating: decide whether the ENTIRE GOP passes or drops.
+        // This prevents mid-GOP frame drops which cause H.264 decoder artifacts.
+        if (this.sendGate) {
+          const gopAllowed = this.sendGate.startNewGop();
+          if (!gopAllowed) {
+            return; // Drop entire GOP including keyframe
+          }
+        }
+
         await gopSender.startGop(channel, this.VIDEO_GOP_SIZE, getStreamPriority(channelName));
         gopData.currentGopFrames = 0;
       }
 
+      // ★ Per-frame gate: handles SEVERE (keyframe only) and CRITICAL (drop all).
+      // For NORMAL/MILD/MODERATE, this follows the GOP-level decision from startNewGop().
+      if (this.sendGate && !this.sendGate.shouldSendVideo(isKeyframe)) {
+        return;
+      }
+
+      const arrayBuffer = this.extractArrayBuffer(chunk);
+      if (!arrayBuffer) return;
+
+      const sequenceNumber = this.getAndIncrementSequence(channelName);
+      const packet = PacketBuilder.createPacket(
+        arrayBuffer,
+        chunk.timestamp,
+        frameType,
+        sequenceNumber,
+      );
+
       await gopSender.sendFrame(packet, chunk.timestamp, frameType);
       gopData.currentGopFrames++;
     } else {
-      // WebRTC or fallback to BIDI stream
+      // WebRTC or fallback to BIDI stream — use frame-level gate only
+      if (this.sendGate && !this.sendGate.shouldSendVideo(isKeyframe)) {
+        return;
+      }
+
+      const arrayBuffer = this.extractArrayBuffer(chunk);
+      if (!arrayBuffer) return;
+
+      const sequenceNumber = this.getAndIncrementSequence(channelName);
+      const packet = PacketBuilder.createPacket(
+        arrayBuffer,
+        chunk.timestamp,
+        frameType,
+        sequenceNumber,
+      );
+
       console.warn(
         `[VideoSendStrategy] ⚠️ Video fallback to BIDI stream: channel=${channelName} isWebRTC=${this.isWebRTC} gopSender=${!!gopSender} gopData=${!!gopData}`,
       );

@@ -102,7 +102,7 @@ export class StreamManager extends EventEmitter<{
   private readonly AUDIO_BATCH_SIZE = TRANSPORT.AUDIO_BATCH_SIZE;
 
   // --- Congestion controller (progressive degradation) ---
-  private _congestionController = new CongestionController();
+  private _congestionController: CongestionController;
   private _sendGate: SendGate;
 
 
@@ -119,13 +119,14 @@ export class StreamManager extends EventEmitter<{
   private readonly useAudioDatagrams: boolean;
   private datagramSender: AudioDatagramSender | null = null;
 
-  constructor(isWebRTC: boolean = false, streamID?: string, isHybrid: boolean = false, useAudioDatagrams: boolean = false, useSendGate: boolean = false) {
+  constructor(isWebRTC: boolean = false, streamID?: string, isHybrid: boolean = false, useAudioDatagrams: boolean = false, useSendGate: boolean = false, disableCongestionControl: boolean = false) {
     super();
     this.isWebRTC = isWebRTC;
     this.isHybrid = isHybrid;
     this.useAudioDatagrams = useAudioDatagrams;
     this.streamId = streamID || "default_stream";
     this.isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+    this._congestionController = new CongestionController(disableCongestionControl);
     log(`[StreamManager] isAndroid: ${this.isAndroid}, isHybrid: ${this.isHybrid}`);
 
     if (isWebRTC) {

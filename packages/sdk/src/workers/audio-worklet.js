@@ -12,9 +12,9 @@ const proxyConsole = {
 class JitterResistantProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.bufferSize = 4096; // ~85ms at 48kHz — larger buffer reduces crackling on Android
-    this.minBuffer = 4096; // Start playback after ~85ms of data
-    this.maxBuffer = 14400; // ~300ms max — absorb network lag spikes
+    this.bufferSize = 6144; // ~128ms at 48kHz — larger buffer reduces crackling and underruns
+    this.minBuffer = 6144; // Start playback after ~128ms of data
+    this.maxBuffer = 19200; // ~400ms max — absorb video burst-induced audio gaps
     this.isPlaying = false;
     this.sampleRate = 48000;
     this.numberOfChannels = 2;
@@ -39,12 +39,7 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
     this.FADE_LEN = 64;
     this.fadeInRemaining = 0;
 
-    // ── Resampling (Android 44.1kHz/48kHz fix) ──
-    this._sourceSampleRate = 0;       // decoded audio rate (e.g. 48000)
-    this._outputSampleRate = globalThis.sampleRate || 48000; // hardware rate
-    this._resampleRatio = 1.0;        // source/output (>1 when 48k→44.1k)
-    this._needsResample = false;
-    this._resampleFrac = 0.0;         // fractional position accumulator
+
 
     let counter = 0;
     this.port.onmessage = (event) => {
@@ -85,19 +80,7 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
               this._initRings(workerChannels);
             }
 
-            // Detect sample rate mismatch for resampling (Android fix)
-            if (this._sourceSampleRate !== workerSampleRate) {
-              this._sourceSampleRate = workerSampleRate;
-              this._outputSampleRate = globalThis.sampleRate || 48000;
-              this._resampleRatio = this._sourceSampleRate / this._outputSampleRate;
-              this._needsResample = Math.abs(this._resampleRatio - 1.0) > 0.001;
-              this._resampleFrac = 0.0;
-              if (this._needsResample) {
-                proxyConsole.log(
-                  `Resampling enabled: source=${this._sourceSampleRate}Hz → output=${this._outputSampleRate}Hz (ratio=${this._resampleRatio.toFixed(4)})`
-                );
-              }
-            }
+
 
             this.addAudioData(receivedChannelDataBuffers);
 
@@ -334,67 +317,22 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // ── Copy from ring buffer to output ──
-    if (this._needsResample) {
-      // ── Resampling path: linear interpolation ──
-      // Read ceil(outputLength * ratio) source samples, interpolate to outputLength outputs.
-      // This corrects pitch when hardware runs at different rate (e.g. 44.1kHz vs 48kHz source).
-      const ratio = this._resampleRatio;
-      let frac = this._resampleFrac;
-      const sourceSamplesNeeded = Math.ceil(outputLength * ratio + 1);
-
-      // Ensure we have enough source samples
-      if (this._count < sourceSamplesNeeded) {
-        // Not enough for resampled output — output silence, treat as underrun
-        for (let channel = 0; channel < outputChannels; channel++) {
-          output[channel].fill(0);
+    // ── Copy from ring buffer to output — O(outputLength), no shifts ──
+    for (let channel = 0; channel < outputChannels; channel++) {
+      const ring = channel < this._rings.length ? this._rings[channel] : null;
+      let rp = this._readPos;
+      if (ring) {
+        for (let i = 0; i < outputLength; i++) {
+          output[channel][i] = ring[rp];
+          rp = (rp + 1) % this._ringCap;
         }
-        return true;
+      } else {
+        output[channel].fill(0);
       }
-
-      for (let channel = 0; channel < outputChannels; channel++) {
-        const ring = channel < this._rings.length ? this._rings[channel] : null;
-        if (ring) {
-          let localFrac = (channel === 0) ? frac : this._resampleFrac;
-          for (let i = 0; i < outputLength; i++) {
-            const srcPos = Math.floor(localFrac);
-            const t = localFrac - srcPos; // interpolation coefficient [0,1)
-            const idx0 = (this._readPos + srcPos) % this._ringCap;
-            const idx1 = (this._readPos + srcPos + 1) % this._ringCap;
-            // Linear interpolation: sample = s0 + t * (s1 - s0)
-            output[channel][i] = ring[idx0] + t * (ring[idx1] - ring[idx0]);
-            localFrac += ratio;
-          }
-          if (channel === 0) frac = localFrac;
-        } else {
-          output[channel].fill(0);
-        }
-      }
-
-      // Advance read pointer by actual source samples consumed
-      const consumed = Math.floor(frac);
-      this._readPos = (this._readPos + consumed) % this._ringCap;
-      this._count -= consumed;
-      this._resampleFrac = frac - consumed; // keep fractional remainder
-      this._applyFadeIn(output, outputChannels, outputLength);
-    } else {
-      // ── Direct copy path (no resampling needed) — O(outputLength), no shifts ──
-      for (let channel = 0; channel < outputChannels; channel++) {
-        const ring = channel < this._rings.length ? this._rings[channel] : null;
-        let rp = this._readPos;
-        if (ring) {
-          for (let i = 0; i < outputLength; i++) {
-            output[channel][i] = ring[rp];
-            rp = (rp + 1) % this._ringCap;
-          }
-        } else {
-          output[channel].fill(0);
-        }
-      }
-      this._readPos = (this._readPos + outputLength) % this._ringCap;
-      this._count -= outputLength;
-      this._applyFadeIn(output, outputChannels, outputLength);
     }
+    this._readPos = (this._readPos + outputLength) % this._ringCap;
+    this._count -= outputLength;
+    this._applyFadeIn(output, outputChannels, outputLength);
 
     // Trim if buffer too full — crossfade to avoid clicks
     if (this._count > this.maxBuffer) {

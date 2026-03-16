@@ -90,9 +90,6 @@ export class GopStreamSender {
             throw new Error('No current stream');
         }
 
-        // Measure total time: writer.ready (backpressure wait) + write (queue)
-        // writer.ready is the real congestion signal — it blocks when the
-        // QUIC send buffer is full. write() alone just queues instantly.
         const t0 = performance.now();
         let timer: ReturnType<typeof setTimeout> | null = null;
         try {
@@ -157,15 +154,6 @@ export class GopStreamSender {
             const combined = new Uint8Array(frameHeader.length + frameData.length);
             combined.set(frameHeader, 0);
             combined.set(frameData, frameHeader.length);
-
-            // ── Report writer.desiredSize to CongestionController (PRIMARY signal) ──
-            // desiredSize = highWaterMark - queueSize → gradual congestion signal.
-            // Reports on every write attempt for real-time buffer level tracking.
-            const desiredSize = this.currentStream?.desiredSize;
-            if (desiredSize !== null && desiredSize !== undefined) {
-                this.congestionController?.reportVideoDesiredSize(desiredSize);
-            }
-
             const elapsed = await this.writeWithTimeout(combined);
 
             // Report successful write latency to congestion controller
@@ -175,23 +163,17 @@ export class GopStreamSender {
             return true;
         } catch (error) {
             if (error instanceof Error && error.message === 'write timeout') {
-                this._consecutiveFailures++;
-
-                // Report timeout to congestion controller
+                // ★ A single write timeout means this frame was potentially lost.
+                // H.264 delta frames depend on ALL previous frames in the GOP.
+                // If even one frame is missing, all subsequent decoder output will
+                // show artifacts. Abort the ENTIRE GOP so the subscriber receives
+                // an incomplete-but-clean stream (video freezes on last good frame)
+                // instead of a corrupted stream (visual artifacts).
                 this.congestionController?.reportTimeout();
-
-                if (this._consecutiveFailures >= TRANSPORT.GOP_MAX_CONSECUTIVE_FAILURES) {
-                    // Multiple consecutive timeouts — stream is stuck, abort and
-                    // let the next batch start fresh
-                    console.warn(`[GOP] ⏱️ ${this._consecutiveFailures} consecutive write timeouts — aborting GOP`);
-                    await this.abortCurrentGop('Multiple write timeouts — congestion');
-                    this._consecutiveFailures = 0;
-                }
-                // else: drop this frame but keep stream alive for next attempt
+                console.warn(`[GOP] ⏱️ Write timeout — aborting GOP ${this.currentGopId} to prevent artifacts`);
+                await this.abortCurrentGop('Write timeout — preventing GOP gap');
+                this._consecutiveFailures = 0;
             } else {
-                // Non-timeout errors (stream reset, new GOP starting, etc.)
-                // are also congestion signals — report them
-                this.congestionController?.reportTimeout();
                 console.error('[GOP] Error sending frame:', error);
                 await this.abortCurrentGop('Send error');
             }
