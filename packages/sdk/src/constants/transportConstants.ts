@@ -58,31 +58,22 @@ export const TRANSPORT = {
   /** Frame count sentinel for unbounded / persistent audio streams */
   AUDIO_PERSISTENT_STREAM_FRAMES: 0xFFFF,
 
-  // --- Congestion Controller (RFC 9002-aligned) ---
-  // NOTE: EWMA weights (7/8 + 1/8) are hardcoded in CongestionController
-  // per RFC 9002 §5.3. Variance weights (3/4 + 1/4) likewise.
-  //
-  // Thresholds use RFC 9002 §6.2 PTO-inspired formula:
-  //   threshold = smoothed + N × var  (with minimum floor below)
-  //
-  /** Audio latency floor (ms) — below this, never flag MILD from audio */
-  CONGESTION_AUDIO_LATENCY_MILD_FLOOR_MS: 20,
-  /** Audio latency floor (ms) — below this, never flag SEVERE from audio */
-  CONGESTION_AUDIO_LATENCY_SEVERE_FLOOR_MS: 50,
-  /** Video write latency floor (ms) — below this, never flag MILD from video */
-  CONGESTION_VIDEO_LATENCY_MILD_FLOOR_MS: 30,
-  /** Video write latency floor (ms) — below this, never flag MODERATE from video */
-  CONGESTION_VIDEO_LATENCY_MODERATE_FLOOR_MS: 60,
-  /** baseRtt / baseLatency sliding-min reset window (ms) — RFC 9002 §5.2 */
-  CONGESTION_BASE_RTT_WINDOW_MS: 60_000,
-  /** Hold time at current level before stepping down one level (recovery) */
-  CONGESTION_RECOVERY_HOLD_MS: 10_000,
+  // --- Congestion Controller (progressive degradation) ---
+  /** Write-latency EMA threshold → Level 1 (mild) */
+  CONGESTION_LATENCY_L1_MS: 40,
+  /** Write-latency EMA threshold → Level 2 (moderate) */
+  CONGESTION_LATENCY_L2_MS: 70,
+  /** Write timeout already triggers Level 3 via reportTimeout() */
+  /** Hold time at current level before stepping up (recovery) */
+  CONGESTION_RECOVERY_HOLD_MS: 3_000,
+  /** EMA smoothing factor (0-1). Higher = react faster, noisier */
+  CONGESTION_EMA_ALPHA: 0.3,
   /** Bandwidth reserved for audio — video budget = estimated - this (bps) */
   AUDIO_RESERVATION_BPS: 50_000,
-  /** Minimum video bitrate floor (bps). Video is NEVER turned off. */
+  /** Minimum video bitrate floor before turning video OFF (bps) */
   CONGESTION_MIN_VIDEO_BITRATE: 50_000,
   /** Interval for debug bandwidth estimation log (ms). Set to 0 to disable. */
-  CONGESTION_DEBUG_LOG_INTERVAL_MS: 2_000,
+  CONGESTION_DEBUG_LOG_INTERVAL_MS: 0,
 
   // --- WebRTC hybrid mode ---
   /** Interval for polling WebRTC getStats() in hybrid mode (ms) */

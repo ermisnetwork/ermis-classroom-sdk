@@ -203,6 +203,7 @@ export class ErmisClient extends EventEmitter {
       useHybrid: false,
       useAudioDatagrams: false,
       useSendGate: true,
+      disablePublisherCongestionControl: false,
     };
 
     this._setupEventHandlers();

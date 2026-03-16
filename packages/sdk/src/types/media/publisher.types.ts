@@ -126,6 +126,8 @@ export interface PublisherConfig {
   useAudioDatagrams?: boolean;
   /** Enable SendGate: gate video when audio stream is unhealthy. Default: false. */
   useSendGate?: boolean;
+  /** Disable application-level publisher congestion control (use QUIC CC only). Default: false. */
+  disablePublisherCongestionControl?: boolean;
 }
 
 export interface ParticipantPermissions {

@@ -124,9 +124,8 @@ export class AudioStreamSender {
 
     /**
      * Write data with a timeout to prevent indefinite blocking during congestion.
-     * Audio does NOT await writer.ready — it writes immediately (fire-and-forget)
-     * to avoid blocking real-time audio on QUIC backpressure.
-     * Congestion is detected via writer.desiredSize in sendFrame() instead.
+     * Unlike video (GopStreamSender), audio does NOT await writer.ready —
+     * it writes immediately to avoid blocking real-time audio on backpressure.
      */
     private async writeWithTimeout(data: Uint8Array, timeoutMs: number = TRANSPORT.AUDIO_WRITE_TIMEOUT_MS): Promise<void> {
         if (!this.currentStream) {
@@ -177,22 +176,9 @@ export class AudioStreamSender {
             combined.set(frameHeader, 0);
             combined.set(frameData, frameHeader.length);
 
-            // ── Report writer.desiredSize to CongestionController (PRIMARY signal) ──
-            // desiredSize = highWaterMark - queueSize → gradual congestion signal.
-            // Audio is NEVER dropped — always write, even under congestion.
-            const desiredSize = this.currentStream?.desiredSize;
-            if (desiredSize !== null && desiredSize !== undefined) {
-                this.congestionController?.reportAudioDesiredSize(desiredSize);
-            }
-
             // Fire-and-forget: dispatch write but do NOT await it.
-            // Audio pipeline is never blocked by QUIC backpressure.
-            const writeStart = performance.now();
+            // This ensures the audio pipeline is never blocked by QUIC backpressure.
             this.writeWithTimeout(combined).then(() => {
-                // Report latency for debug logging (secondary to desiredSize)
-                this.congestionController?.reportAudioWriteLatency(
-                    performance.now() - writeStart,
-                );
                 this._consecutiveFailures = 0;
             }).catch((error) => {
                 if (error instanceof Error && error.message === 'write timeout') {

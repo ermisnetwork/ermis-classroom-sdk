@@ -436,7 +436,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     const hasAudioChannels = this.hasAudio;
     const useHybrid = !!webRtcHost && hasAudioChannels;
 
-    this.streamManager = new StreamManager(false, this.options.streamId, useHybrid, this.options.useAudioDatagrams, this.options.useSendGate);
+    this.streamManager = new StreamManager(false, this.options.streamId, useHybrid, this.options.useAudioDatagrams, this.options.useSendGate, this.options.disablePublisherCongestionControl);
 
     // Set publisher state before initializing streams so correct state is sent to server
     // Include publish_channels to notify server about which channels we will publish

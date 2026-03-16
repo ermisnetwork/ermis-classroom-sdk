@@ -1613,6 +1613,7 @@ export class Room extends EventEmitter {
       audioCodec: "aac",
       useAudioDatagrams: this.mediaConfig.useAudioDatagrams,
       useSendGate: this.mediaConfig.useSendGate,
+      disablePublisherCongestionControl: this.mediaConfig.disablePublisherCongestionControl,
 
       onStatusUpdate: (_message: string, isError?: boolean) => {
         this.localParticipant?.setConnectionStatus(
