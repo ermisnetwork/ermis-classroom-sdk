@@ -90,6 +90,9 @@ export class GopStreamSender {
             throw new Error('No current stream');
         }
 
+        // Measure total time: writer.ready (backpressure wait) + write (queue)
+        // writer.ready is the real congestion signal — it blocks when the
+        // QUIC send buffer is full. write() alone just queues instantly.
         const t0 = performance.now();
         let timer: ReturnType<typeof setTimeout> | null = null;
         try {
@@ -154,6 +157,15 @@ export class GopStreamSender {
             const combined = new Uint8Array(frameHeader.length + frameData.length);
             combined.set(frameHeader, 0);
             combined.set(frameData, frameHeader.length);
+
+            // ── Report writer.desiredSize to CongestionController (PRIMARY signal) ──
+            // desiredSize = highWaterMark - queueSize → gradual congestion signal.
+            // Reports on every write attempt for real-time buffer level tracking.
+            const desiredSize = this.currentStream?.desiredSize;
+            if (desiredSize !== null && desiredSize !== undefined) {
+                this.congestionController?.reportVideoDesiredSize(desiredSize);
+            }
+
             const elapsed = await this.writeWithTimeout(combined);
 
             // Report successful write latency to congestion controller
@@ -177,6 +189,9 @@ export class GopStreamSender {
                 }
                 // else: drop this frame but keep stream alive for next attempt
             } else {
+                // Non-timeout errors (stream reset, new GOP starting, etc.)
+                // are also congestion signals — report them
+                this.congestionController?.reportTimeout();
                 console.error('[GOP] Error sending frame:', error);
                 await this.abortCurrentGop('Send error');
             }

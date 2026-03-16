@@ -11,10 +11,10 @@ export interface ServerConnectionStats {
  * Congestion severity levels — drives progressive video degradation.
  *
  * Level 0: Full quality
- * Level 1: Mild    — reduce fps + bitrate 50%
+ * Level 1: Mild     — reduce fps + bitrate 50%
  * Level 2: Moderate — reduce fps + bitrate 25%
- * Level 3: Severe  — minimum video
- * Level 4: Critical — video OFF
+ * Level 3: Severe   — keyframes only, minimum bitrate
+ * Level 4: Critical — keyframes only, 5% bitrate (video is NEVER turned off)
  */
 export enum CongestionLevel {
   NORMAL   = 0,
@@ -24,39 +24,49 @@ export enum CongestionLevel {
   CRITICAL = 4,
 }
 
-/** Per-level degradation factors */
+/** Per-level degradation factors — video is NEVER fully killed */
 export const DEGRADATION_PROFILES: Record<CongestionLevel, { fpsCap: number; bitrateFactor: number }> = {
   [CongestionLevel.NORMAL]:   { fpsCap: 30, bitrateFactor: 1.0  },
   [CongestionLevel.MILD]:     { fpsCap: 15, bitrateFactor: 0.5  },
   [CongestionLevel.MODERATE]: { fpsCap: 10, bitrateFactor: 0.25 },
   [CongestionLevel.SEVERE]:   { fpsCap: 5,  bitrateFactor: 0.15 },
-  [CongestionLevel.CRITICAL]: { fpsCap: 0,  bitrateFactor: 0    },
+  [CongestionLevel.CRITICAL]: { fpsCap: 2,  bitrateFactor: 0.05 },
 };
 
 /**
  * CongestionController
  *
- * Detects uplink congestion using two signal sources:
+ * Detects uplink congestion using RFC 9002-aligned algorithms:
  *
- * 1. **RTT** (from server — bidirectional):
+ * 1. **Audio write latency** (HIGHEST priority — early-warning):
+ *    Measured by AudioStreamSender on every successful write.
+ *    Uses RFC 9002 §5.3 EWMA (7/8 + 1/8) for smoothing,
+ *    and RFC 9002 §6.2 PTO-inspired variance thresholds for detection.
+ *    Audio latency rise triggers proactive video degradation BEFORE
+ *    audio is impacted.
+ *
+ * 2. **Video write latency** (secondary uplink signal):
+ *    Measured by GopStreamSender. Same RFC 9002 EWMA + variance.
+ *
+ * 3. **RTT** (from server — bidirectional):
  *    Server sends `connection_stats` with `rtt_ms` every second.
  *    RTT ratio (smoothedRtt / baseRtt) detects queuing delays.
+ *    Uses RFC 9002 §5.2 min_rtt with periodic reset.
  *
- * 2. **Write latency EMA** (from GopStreamSender — direct uplink):
- *    Measures how long `writer.write()` blocks on the QUIC stream.
- *    When QUIC send buffer is full (uplink congested), writes block longer.
- *
- * NOTE: Quinn's cwnd/lost_packets/congestion_events on the publisher
- * connection measure server→client (near-empty downlink), NOT the client's
- * upload path. They were removed as signals.
- *
- * When WebRTC hybrid mode is active, WebRTC `getStats()` provides
- * direct upload path measurements and takes priority.
+ * 4. **WebRTC getStats()** (optional — hybrid mode):
+ *    Direct upload path measurements with  * The client-side CongestionController uses:
+ *   1. writer.desiredSize      — PRIMARY: QUIC send buffer fill level
+ *      desiredSize = highWaterMark - queueSize → gradual signal
+ *      ratio = desiredSize / maxDesiredSize → 1.0=empty, 0=full, <0=over
+ *   2. Write timeouts           — backup, triggers SEVERE/CRITICAL
+ *   3. Server-reported RTT      — tertiary, detects path-level changes
+ *   4. WebRTC stats             — packet loss + BWE from upload path
  *
  * ╭───────────────────────────────────────────────────────╮
  * │  Degrade: IMMEDIATE when threshold crossed            │
  * │  Recover: only after RECOVERY_HOLD_MS of sustained    │
  * │           good metrics, ONE level at a time            │
+ * │  Video:  NEVER fully killed — min keyframes always    │
  * ╰───────────────────────────────────────────────────────╯
  */
 export class CongestionController extends EventEmitter<{
@@ -68,25 +78,45 @@ export class CongestionController extends EventEmitter<{
     estimatedSendRate: number;
   };
 }> {
-  // ─── Write-latency EMA (primary uplink signal from GopStreamSender) ───
-  private _latencyEMA = 0;
+  // ─── desiredSize tracking (PRIMARY signal) ───
+  // desiredSize = highWaterMark - queueSize
+  // ratio = current / max → 1.0 = empty, 0 = full, <0 = overfull
+  private _videoDesiredSize = -1;   // latest video stream desiredSize
+  private _videoMaxDS = 0;          // max seen (= highWaterMark reference)
+  private _audioDesiredSize = -1;   // latest audio stream desiredSize
+  private _audioMaxDS = 0;          // max seen
+
+  // ─── Write latency EWMA (kept for debug logging) ───
+  private _audioSmoothed = 0;
+  private _audioVar = 0;
+  private _audioBaseLatency = 0;
+  private _audioBaseTimestamp = 0;
+  private _writeSmoothed = 0;
+  private _writeVar = 0;
+  private _writeBaseLatency = 0;
+  private _writeBaseTimestamp = 0;
   private _consecutiveTimeouts = 0;
 
   // ─── Server-reported RTT (bidirectional) ───
-  private _smoothedRtt = 0;            // ms — from server (Quinn) or WebRTC
-  private _baseRtt = 0;               // first RTT seen (proxy for minRtt)
-  private _hasServerStats = false;     // true once first server stats arrive
+  private _smoothedRtt = 0;         // ms — from server (Quinn) or WebRTC
+  private _baseRtt = 0;             // sliding min RTT (RFC 9002 §5.2)
+  private _baseRttTimestamp = 0;    // for periodic reset
+  private _hasServerStats = false;  // true once first server stats arrive
 
   // ─── WebRTC client-side stats (preferred over server stats) ───
-  private _hasWebRTCStats = false;     // true once first WebRTC stats arrive
-  private _webRTCPacketsLost = 0;      // cumulative from WebRTC
-  private _prevWebRTCPacketsLost = 0;  // for computing loss delta
-  private _availableBitrate = 0;       // GCC bandwidth estimate (bps)
-  private _packetsLost = 0;           // unified for debug log
+  private _hasWebRTCStats = false;
+  private _webRTCPacketsLost = 0;
+  private _prevWebRTCPacketsLost = 0;
+  private _availableBitrate = 0;     // GCC bandwidth estimate (bps)
+  private _packetsLost = 0;          // unified for debug log
 
   // ─── State ───
   private _level = CongestionLevel.NORMAL;
   private _recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // ─── Backwards compatibility ───
+  /** @deprecated Use writeSmoothed instead. Kept for API compat. */
+  get latencyEMA(): number { return this._writeSmoothed; }
 
   // ──────────── DEBUG: bandwidth estimation log ────────────
   private _debugTimer: ReturnType<typeof setInterval> | null = null;
@@ -96,62 +126,169 @@ export class CongestionController extends EventEmitter<{
     this._startDebugLog();
   }
 
-  // ─── Server stats (called by StreamManager when connection_stats event arrives) ───
+  // ═══════════════════════════════════════════════════════════
+  // desiredSize reporting (PRIMARY signal)
+  // Called by AudioStreamSender / GopStreamSender on each write.
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Report audio stream's writer.desiredSize.
+   * desiredSize > 0 → buffer has space, ≤ 0 → buffer full/overfull.
+   * We track the max observed value as reference (≈ highWaterMark).
+   */
+  reportAudioDesiredSize(desiredSize: number): void {
+    if (desiredSize > this._audioMaxDS) {
+      this._audioMaxDS = desiredSize;
+    }
+    this._audioDesiredSize = desiredSize;
+    this._evaluateLevel();
+  }
+
+  /**
+   * Report video stream's writer.desiredSize.
+   */
+  reportVideoDesiredSize(desiredSize: number): void {
+    if (desiredSize > this._videoMaxDS) {
+      this._videoMaxDS = desiredSize;
+    }
+    this._videoDesiredSize = desiredSize;
+    this._evaluateLevel();
+  }
+
+  /**
+   * Report audio write latency (kept for EWMA debug logging + fallback).
+   */
+  reportAudioWriteLatency(latencyMs: number): void {
+    const now = Date.now();
+    if (this._audioBaseLatency === 0
+        || latencyMs < this._audioBaseLatency
+        || now - this._audioBaseTimestamp > TRANSPORT.CONGESTION_BASE_RTT_WINDOW_MS) {
+      this._audioBaseLatency = latencyMs;
+      this._audioBaseTimestamp = now;
+    }
+    if (this._audioSmoothed === 0) {
+      this._audioSmoothed = latencyMs;
+      this._audioVar = latencyMs / 2;
+    } else {
+      this._audioVar = 0.75 * this._audioVar
+          + 0.25 * Math.abs(this._audioSmoothed - latencyMs);
+      this._audioSmoothed = 0.875 * this._audioSmoothed + 0.125 * latencyMs;
+    }
+    // NOTE: _evaluateLevel is NOT called here — desiredSize drives evaluation
+  }
+
+  /**
+   * Report an audio write timeout.
+   * Audio is highest priority — immediately escalate to CRITICAL
+   * to maximally degrade video (keyframes only at 5% bitrate).
+   */
+  reportAudioTimeout(): void {
+    // If already at CRITICAL, don't touch recovery timer.
+    // Orphaned fire-and-forget writes from dead streams still fire
+    // timeouts — clearing the recovery timer here would prevent
+    // recovery from ever completing.
+    if (this._level === CongestionLevel.CRITICAL) return;
+
+    console.warn('[CongestionController] 🚨 Audio write timeout — escalating to CRITICAL');
+    this._consecutiveTimeouts = TRANSPORT.GOP_MAX_CONSECUTIVE_FAILURES;
+    this._writeSmoothed = TRANSPORT.GOP_WRITE_TIMEOUT_MS;
+    this._clearRecoveryTimer();
+    this._setLevel(CongestionLevel.CRITICAL);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Video write latency (secondary uplink signal)
+  // Called by GopStreamSender on each successful write.
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Report a successful video write with its measured latency.
+   *
+   * Uses RFC 9002 §5.3 EWMA (7/8 + 1/8) for smoothing.
+   */
+  reportWriteLatency(latencyMs: number, _bytesSent: number): void {
+    const now = Date.now();
+
+    // RFC 9002 §5.2: sliding minimum with periodic reset
+    if (this._writeBaseLatency === 0
+        || latencyMs < this._writeBaseLatency
+        || now - this._writeBaseTimestamp > TRANSPORT.CONGESTION_BASE_RTT_WINDOW_MS) {
+      this._writeBaseLatency = latencyMs;
+      this._writeBaseTimestamp = now;
+    }
+
+    // RFC 9002 §5.3
+    if (this._writeSmoothed === 0) {
+      this._writeSmoothed = latencyMs;
+      this._writeVar = latencyMs / 2;
+    } else {
+      this._writeVar = 0.75 * this._writeVar
+          + 0.25 * Math.abs(this._writeSmoothed - latencyMs);
+      this._writeSmoothed = 0.875 * this._writeSmoothed + 0.125 * latencyMs;
+    }
+
+    if (this._consecutiveTimeouts > 0) {
+      this._consecutiveTimeouts = 0;
+    }
+
+    this._evaluateLevel();
+  }
+
+  /**
+   * Report a video write timeout (video frame could not be sent within deadline).
+   */
+  reportTimeout(): void {
+    this._consecutiveTimeouts++;
+    this._writeSmoothed = Math.max(this._writeSmoothed, TRANSPORT.GOP_WRITE_TIMEOUT_MS);
+    this._evaluateLevel();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Server stats (RTT from server — bidirectional)
+  // Called by StreamManager when connection_stats event arrives.
+  // ═══════════════════════════════════════════════════════════
 
   /**
    * Update from server-reported QUIC connection stats.
-   * Called by StreamManager when a `connection_stats` event is received.
    *
    * On the publisher connection, server only sends RTT (bidirectional).
-   * cwnd/lost_packets/congestion_events were removed because they measured
-   * the near-empty server→client path, not the client's upload.
+   * cwnd/lost_packets/congestion_events measure server→client downlink,
+   * NOT the client's upload — they are NOT used.
    *
-   * When WebRTC stats are available, they take priority since they measure
-   * the upload path directly.
+   * When WebRTC stats are available, they take priority.
    */
   updateFromServerStats(stats: ServerConnectionStats): void {
-    // If WebRTC stats are active, skip server stats — WebRTC is more accurate
-    // for publisher congestion (measures upload path, available locally)
     if (this._hasWebRTCStats) return;
 
     this._hasServerStats = true;
     this._smoothedRtt = stats.rtt_ms;
 
-    // Sliding minimum baseRtt — always track the lowest observed RTT
-    if (this._smoothedRtt > 0 && (this._baseRtt === 0 || this._smoothedRtt < this._baseRtt)) {
-      this._baseRtt = this._smoothedRtt;
-    }
+    // RFC 9002 §5.2: sliding minimum with periodic reset
+    this._updateBaseRtt(this._smoothedRtt);
 
-    // Use RTT-based level computation (no loss data available on publisher connection)
-    this._evaluateLevelFromRtt();
+    this._evaluateLevel();
   }
 
-  // ─── WebRTC client-side stats (preferred source) ───
+  // ═══════════════════════════════════════════════════════════
+  // WebRTC client-side stats (preferred source)
+  // ═══════════════════════════════════════════════════════════
 
   /**
    * Update from WebRTC `getStats()` — client-side measurements.
-   *
-   * Unlike server stats, these:
-   * 1. Measure the client→server **upload** path (correct for publisher)
-   * 2. Are available as a local API call — no network delay
-   * 3. Include GCC bandwidth estimate (availableOutgoingBitrate)
+   * These measure the client→server upload path directly.
    */
   updateFromWebRTCStats(stats: WebRTCCongestionStats): void {
     this._hasWebRTCStats = true;
     this._smoothedRtt = stats.rttMs;
 
-    // Sliding minimum baseRtt — always track the lowest observed RTT
-    if (this._smoothedRtt > 0 && (this._baseRtt === 0 || this._smoothedRtt < this._baseRtt)) {
-      this._baseRtt = this._smoothedRtt;
-    }
+    this._updateBaseRtt(this._smoothedRtt);
 
     // Compute loss delta since last poll
     const lossThisPeriod = stats.packetsLost - this._prevWebRTCPacketsLost;
     this._prevWebRTCPacketsLost = stats.packetsLost;
     this._webRTCPacketsLost = stats.packetsLost;
-    this._packetsLost = stats.packetsLost; // unify for debug log
+    this._packetsLost = stats.packetsLost;
 
-    // Store GCC bandwidth estimate
     if (stats.availableOutgoingBitrate !== undefined) {
       this._availableBitrate = stats.availableOutgoingBitrate;
     }
@@ -159,75 +296,30 @@ export class CongestionController extends EventEmitter<{
     this._evaluateLevelFromWebRTC(lossThisPeriod);
   }
 
-  // ─── Public API (called by GopStreamSender / AudioStreamSender) ───
-
-  /**
-   * Report a successful write with its measured latency.
-   * This is the PRIMARY uplink congestion signal — measures directly
-   * how long writer.write() blocks on the QUIC send buffer.
-   */
-  reportWriteLatency(latencyMs: number, _bytesSent: number): void {
-    const alpha = TRANSPORT.CONGESTION_EMA_ALPHA;
-    this._latencyEMA = this._latencyEMA === 0
-      ? latencyMs
-      : alpha * latencyMs + (1 - alpha) * this._latencyEMA;
-
-    if (this._consecutiveTimeouts > 0) {
-      this._consecutiveTimeouts = 0;
-    }
-
-    // Only evaluate from write latency if no server stats are arriving
-    if (!this._hasServerStats) {
-      this._evaluateLevel();
-    }
-  }
-
-  /**
-   * Report a write timeout (video frame could not be sent within deadline).
-   */
-  reportTimeout(): void {
-    this._consecutiveTimeouts++;
-    this._latencyEMA = Math.max(this._latencyEMA, TRANSPORT.GOP_WRITE_TIMEOUT_MS);
-    this._evaluateLevel();
-  }
-
-  /**
-   * Report an audio write timeout.
-   * Audio is highest priority — immediately escalate to CRITICAL
-   * to kill all video and free the uplink.
-   */
-  reportAudioTimeout(): void {
-    console.warn('[CongestionController] 🚨 Audio write timeout — escalating to CRITICAL');
-    this._consecutiveTimeouts = TRANSPORT.GOP_MAX_CONSECUTIVE_FAILURES;
-    this._latencyEMA = TRANSPORT.GOP_WRITE_TIMEOUT_MS;
-    this._clearRecoveryTimer();
-    this._setLevel(CongestionLevel.CRITICAL);
-  }
-
   // ─── Getters ───
 
   get level(): CongestionLevel { return this._level; }
-  get latencyEMA(): number { return this._latencyEMA; }
   get smoothedRtt(): number { return this._smoothedRtt; }
   get availableBitrate(): number { return this._availableBitrate; }
   get hasWebRTCStats(): boolean { return this._hasWebRTCStats; }
+  get audioSmoothed(): number { return this._audioSmoothed; }
+  get audioVar(): number { return this._audioVar; }
+  get writeSmoothed(): number { return this._writeSmoothed; }
+  get writeVar(): number { return this._writeVar; }
 
-  // ─── RTT-only level evaluation (server stats path — no loss data) ───
+  // ═══════════════════════════════════════════════════════════
+  // Level evaluation — unified, audio-first
+  // ═══════════════════════════════════════════════════════════
 
   /**
-   * Compute congestion level from server-reported RTT only.
+   * Compute congestion level from all available signals.
+   * Priority order: timeouts > audio latency > video latency > RTT ratio.
    *
-   * RTT ratio = smoothedRtt / baseRtt
-   *   1.0x = normal
-   *   1.5x = mild congestion (queuing delays building up)
-   *   2.0x = moderate
-   *   3.0x = severe
-   *   5.0x+ = critical
-   *
-   * Also uses write latency EMA as supplementary signal.
+   * Thresholds use RFC 9002 §6.2 PTO concept:
+   *   threshold = smoothed + N × var  (with minimum floor)
    */
-  private _evaluateLevelFromRtt(): void {
-    // Write timeouts always override
+  private _evaluateLevel(): void {
+    // Write / audio timeouts always override
     if (this._consecutiveTimeouts >= TRANSPORT.GOP_MAX_CONSECUTIVE_FAILURES) {
       this._clearRecoveryTimer();
       this._setLevel(CongestionLevel.CRITICAL);
@@ -241,26 +333,52 @@ export class CongestionController extends EventEmitter<{
 
     let target = CongestionLevel.NORMAL;
 
-    // RTT-based detection
-    if (this._baseRtt > 0 && this._smoothedRtt > 0) {
-      const rttRatio = this._smoothedRtt / this._baseRtt;
+    // ── 1. desiredSize ratio (PRIMARY signal) ──
+    // ratio = desiredSize / maxDesiredSize
+    //   1.0  = buffer empty → no congestion
+    //   0.75 = 25% full → watch
+    //   0.5  = 50% full → MILD
+    //   0.25 = 75% full → MODERATE/SEVERE
+    //   ≤ 0  = 100% full → CRITICAL
 
-      if (rttRatio >= 5.0) {
-        target = CongestionLevel.CRITICAL;
-      } else if (rttRatio >= 3.0) {
-        target = CongestionLevel.SEVERE;
-      } else if (rttRatio >= 2.0) {
-        target = CongestionLevel.MODERATE;
-      } else if (rttRatio >= 1.5) {
-        target = CongestionLevel.MILD;
+    // Video desiredSize (largest bandwidth consumer)
+    if (this._videoMaxDS > 0 && this._videoDesiredSize !== -1) {
+      const vRatio = this._videoDesiredSize / this._videoMaxDS;
+      if (vRatio <= 0) {
+        target = Math.max(target, CongestionLevel.CRITICAL) as CongestionLevel;
+      } else if (vRatio <= 0.25) {
+        target = Math.max(target, CongestionLevel.SEVERE) as CongestionLevel;
+      } else if (vRatio <= 0.5) {
+        target = Math.max(target, CongestionLevel.MODERATE) as CongestionLevel;
+      } else if (vRatio <= 0.75) {
+        target = Math.max(target, CongestionLevel.MILD) as CongestionLevel;
       }
     }
 
-    // Also check write latency EMA (supplementary uplink signal)
-    if (this._latencyEMA >= TRANSPORT.CONGESTION_LATENCY_L2_MS) {
-      target = Math.max(target, CongestionLevel.MODERATE) as CongestionLevel;
-    } else if (this._latencyEMA >= TRANSPORT.CONGESTION_LATENCY_L1_MS) {
-      target = Math.max(target, CongestionLevel.MILD) as CongestionLevel;
+    // Audio desiredSize (highest priority — overrides video if worse)
+    if (this._audioMaxDS > 0 && this._audioDesiredSize !== -1) {
+      const aRatio = this._audioDesiredSize / this._audioMaxDS;
+      if (aRatio <= 0) {
+        target = Math.max(target, CongestionLevel.CRITICAL) as CongestionLevel;
+      } else if (aRatio <= 0.25) {
+        target = Math.max(target, CongestionLevel.SEVERE) as CongestionLevel;
+      } else if (aRatio <= 0.5) {
+        target = Math.max(target, CongestionLevel.MODERATE) as CongestionLevel;
+      }
+    }
+
+    // ── 2. RTT ratio (backup — detects path-level congestion) ──
+    if (this._baseRtt > 0 && this._smoothedRtt > 0) {
+      const rttRatio = this._smoothedRtt / this._baseRtt;
+      if (rttRatio >= 5.0) {
+        target = Math.max(target, CongestionLevel.CRITICAL) as CongestionLevel;
+      } else if (rttRatio >= 3.0) {
+        target = Math.max(target, CongestionLevel.SEVERE) as CongestionLevel;
+      } else if (rttRatio >= 2.0) {
+        target = Math.max(target, CongestionLevel.MODERATE) as CongestionLevel;
+      } else if (rttRatio >= 1.5) {
+        target = Math.max(target, CongestionLevel.MILD) as CongestionLevel;
+      }
     }
 
     // Apply level transition rules
@@ -276,10 +394,10 @@ export class CongestionController extends EventEmitter<{
 
   /**
    * Compute congestion level when WebRTC stats are available.
-   * These measure the actual upload path, so packet loss is a valid signal.
+   * Adds packet loss (upload path measurement) on top of standard evaluation.
    */
   private _evaluateLevelFromWebRTC(recentLoss: number): void {
-    // Write timeouts always override
+    // Write / audio timeouts always override
     if (this._consecutiveTimeouts >= TRANSPORT.GOP_MAX_CONSECUTIVE_FAILURES) {
       this._clearRecoveryTimer();
       this._setLevel(CongestionLevel.CRITICAL);
@@ -293,29 +411,22 @@ export class CongestionController extends EventEmitter<{
 
     let target = CongestionLevel.NORMAL;
 
-    // RTT-based detection
-    if (this._baseRtt > 0 && this._smoothedRtt > 0) {
-      const rttRatio = this._smoothedRtt / this._baseRtt;
-
-      if (rttRatio >= 5.0) {
-        target = CongestionLevel.CRITICAL;
-      } else if (rttRatio >= 3.0) {
-        target = CongestionLevel.SEVERE;
-      } else if (rttRatio >= 2.0) {
-        target = CongestionLevel.MODERATE;
-      } else if (rttRatio >= 1.5) {
-        target = CongestionLevel.MILD;
-      }
+    // desiredSize ratio (primary signal)
+    if (this._videoMaxDS > 0 && this._videoDesiredSize !== -1) {
+      const vRatio = this._videoDesiredSize / this._videoMaxDS;
+      if (vRatio <= 0) target = Math.max(target, CongestionLevel.CRITICAL) as CongestionLevel;
+      else if (vRatio <= 0.25) target = Math.max(target, CongestionLevel.SEVERE) as CongestionLevel;
+      else if (vRatio <= 0.5) target = Math.max(target, CongestionLevel.MODERATE) as CongestionLevel;
+      else if (vRatio <= 0.75) target = Math.max(target, CongestionLevel.MILD) as CongestionLevel;
+    }
+    if (this._audioMaxDS > 0 && this._audioDesiredSize !== -1) {
+      const aRatio = this._audioDesiredSize / this._audioMaxDS;
+      if (aRatio <= 0) target = Math.max(target, CongestionLevel.CRITICAL) as CongestionLevel;
+      else if (aRatio <= 0.25) target = Math.max(target, CongestionLevel.SEVERE) as CongestionLevel;
+      else if (aRatio <= 0.5) target = Math.max(target, CongestionLevel.MODERATE) as CongestionLevel;
     }
 
-    // Write latency EMA (supplementary signal)
-    if (this._latencyEMA >= TRANSPORT.CONGESTION_LATENCY_L2_MS) {
-      target = Math.max(target, CongestionLevel.MODERATE) as CongestionLevel;
-    } else if (this._latencyEMA >= TRANSPORT.CONGESTION_LATENCY_L1_MS) {
-      target = Math.max(target, CongestionLevel.MILD) as CongestionLevel;
-    }
-
-    // Packet loss from WebRTC (measures upload path — valid signal)
+    // Packet loss from WebRTC (measures upload path)
     if (recentLoss >= 10) {
       target = Math.max(target, CongestionLevel.SEVERE) as CongestionLevel;
     } else if (recentLoss >= 3) {
@@ -331,40 +442,25 @@ export class CongestionController extends EventEmitter<{
     }
   }
 
-  // ─── Internal (shared) ───
+  // ═══════════════════════════════════════════════════════════
+  // Internal helpers
+  // ═══════════════════════════════════════════════════════════
 
   /**
-   * Fallback evaluation when no server stats available.
-   * Uses write latency EMA + timeout count only.
+   * Update baseRtt with RFC 9002 §5.2 sliding minimum + periodic reset.
+   * "Endpoints SHOULD set min_rtt to the newest RTT sample after persistent
+   * congestion is established."
    */
-  private _evaluateLevel(): void {
-    const target = this._computeTargetLevelFromEMA();
+  private _updateBaseRtt(rttMs: number): void {
+    if (rttMs <= 0) return;
+    const now = Date.now();
 
-    if (target > this._level) {
-      this._clearRecoveryTimer();
-      this._setLevel(target);
-    } else if (target < this._level) {
-      this._scheduleRecovery();
+    if (this._baseRtt === 0
+        || rttMs < this._baseRtt
+        || now - this._baseRttTimestamp > TRANSPORT.CONGESTION_BASE_RTT_WINDOW_MS) {
+      this._baseRtt = rttMs;
+      this._baseRttTimestamp = now;
     }
-  }
-
-  private _computeTargetLevelFromEMA(): CongestionLevel {
-    const ema = this._latencyEMA;
-    const timeouts = this._consecutiveTimeouts;
-
-    if (timeouts >= TRANSPORT.GOP_MAX_CONSECUTIVE_FAILURES) {
-      return CongestionLevel.CRITICAL;
-    }
-    if (timeouts >= 1) {
-      return CongestionLevel.SEVERE;
-    }
-    if (ema >= TRANSPORT.CONGESTION_LATENCY_L2_MS) {
-      return CongestionLevel.MODERATE;
-    }
-    if (ema >= TRANSPORT.CONGESTION_LATENCY_L1_MS) {
-      return CongestionLevel.MILD;
-    }
-    return CongestionLevel.NORMAL;
   }
 
   private _setLevel(newLevel: CongestionLevel): void {
@@ -372,17 +468,31 @@ export class CongestionController extends EventEmitter<{
     const prev = this._level;
     this._level = newLevel;
 
+    // When entering CRITICAL, SendGate drops ALL video, so no new
+    // reportVideoDesiredSize() calls will arrive. Reset stale signals
+    // so the recovery timer doesn't get stuck on old values.
+    if (newLevel === CongestionLevel.CRITICAL) {
+      this._videoDesiredSize = -1;  // "no signal" — won't block recovery
+      this._audioDesiredSize = -1;  // audio stream may also be dead
+      this._consecutiveTimeouts = 0; // already at max level
+      // Proactively schedule recovery so we don't depend solely on
+      // external signals (server RTT) to kick-start the step-down.
+      this._scheduleRecovery();
+    }
+
     const levelNames = ['NORMAL', 'MILD', 'MODERATE', 'SEVERE', 'CRITICAL'];
     console.warn(
       `[CongestionController] Level ${levelNames[prev]} → ${levelNames[newLevel]}` +
       `  (rtt=${this._smoothedRtt.toFixed(1)}ms, baseRtt=${this._baseRtt.toFixed(1)}ms,` +
-      ` writeEMA=${this._latencyEMA.toFixed(1)}ms, timeouts=${this._consecutiveTimeouts})`,
+      ` audioSmoothed=${this._audioSmoothed.toFixed(1)}ms, audioVar=${this._audioVar.toFixed(1)}ms,` +
+      ` writeSmoothed=${this._writeSmoothed.toFixed(1)}ms, writeVar=${this._writeVar.toFixed(1)}ms,` +
+      ` timeouts=${this._consecutiveTimeouts})`,
     );
 
     this.emit('levelChanged', {
       level: newLevel,
       previousLevel: prev,
-      latencyEMA: this._latencyEMA,
+      latencyEMA: this._writeSmoothed,
       smoothedRtt: this._smoothedRtt,
       estimatedSendRate: 0, // deprecated, kept for API compat
     });
@@ -394,14 +504,31 @@ export class CongestionController extends EventEmitter<{
     this._recoveryTimer = setTimeout(() => {
       this._recoveryTimer = null;
 
-      // Re-check: is the situation still improved?
+      // Re-check: compute current target level from desiredSize
       let currentTarget = CongestionLevel.NORMAL;
+
+      // desiredSize check
+      if (this._videoMaxDS > 0 && this._videoDesiredSize !== -1) {
+        const vRatio = this._videoDesiredSize / this._videoMaxDS;
+        if (vRatio <= 0) currentTarget = Math.max(currentTarget, CongestionLevel.CRITICAL) as CongestionLevel;
+        else if (vRatio <= 0.25) currentTarget = Math.max(currentTarget, CongestionLevel.SEVERE) as CongestionLevel;
+        else if (vRatio <= 0.5) currentTarget = Math.max(currentTarget, CongestionLevel.MODERATE) as CongestionLevel;
+        else if (vRatio <= 0.75) currentTarget = Math.max(currentTarget, CongestionLevel.MILD) as CongestionLevel;
+      }
+      if (this._audioMaxDS > 0 && this._audioDesiredSize !== -1) {
+        const aRatio = this._audioDesiredSize / this._audioMaxDS;
+        if (aRatio <= 0) currentTarget = Math.max(currentTarget, CongestionLevel.CRITICAL) as CongestionLevel;
+        else if (aRatio <= 0.25) currentTarget = Math.max(currentTarget, CongestionLevel.SEVERE) as CongestionLevel;
+        else if (aRatio <= 0.5) currentTarget = Math.max(currentTarget, CongestionLevel.MODERATE) as CongestionLevel;
+      }
+
+      // RTT check
       if (this._baseRtt > 0 && this._smoothedRtt > 0) {
         const rttRatio = this._smoothedRtt / this._baseRtt;
-        if (rttRatio >= 5.0) currentTarget = CongestionLevel.CRITICAL;
-        else if (rttRatio >= 3.0) currentTarget = CongestionLevel.SEVERE;
-        else if (rttRatio >= 2.0) currentTarget = CongestionLevel.MODERATE;
-        else if (rttRatio >= 1.5) currentTarget = CongestionLevel.MILD;
+        if (rttRatio >= 5.0) currentTarget = Math.max(currentTarget, CongestionLevel.CRITICAL) as CongestionLevel;
+        else if (rttRatio >= 3.0) currentTarget = Math.max(currentTarget, CongestionLevel.SEVERE) as CongestionLevel;
+        else if (rttRatio >= 2.0) currentTarget = Math.max(currentTarget, CongestionLevel.MODERATE) as CongestionLevel;
+        else if (rttRatio >= 1.5) currentTarget = Math.max(currentTarget, CongestionLevel.MILD) as CongestionLevel;
       }
 
       if (currentTarget < this._level) {
@@ -429,16 +556,21 @@ export class CongestionController extends EventEmitter<{
     this._debugTimer = setInterval(() => {
       const levelNames = ['NORMAL', 'MILD', 'MODERATE', 'SEVERE', 'CRITICAL'];
       const rttRatio = this._baseRtt > 0 ? (this._smoothedRtt / this._baseRtt).toFixed(2) : 'N/A';
-      const source = this._hasWebRTCStats ? 'webrtc' : this._hasServerStats ? 'server(rtt)' : 'write-latency';
+      const source = this._hasWebRTCStats ? 'webrtc'
+        : (this._videoMaxDS > 0 || this._audioMaxDS > 0) ? 'desiredSize'
+        : this._hasServerStats ? 'server(rtt)'
+        : 'no-signal';
       const bweStr = this._availableBitrate > 0 ? `${(this._availableBitrate / 1000).toFixed(0)}kbps` : 'N/A';
+      const vDS = this._videoMaxDS > 0 ? `${(this._videoDesiredSize / this._videoMaxDS * 100).toFixed(0)}%` : 'N/A';
+      const aDS = this._audioMaxDS > 0 ? `${(this._audioDesiredSize / this._audioMaxDS * 100).toFixed(0)}%` : 'N/A';
       console.log(
         `[CongestionController] 📊 uplink (${source}): ` +
+        `videoDS=${vDS}  audioDS=${aDS}  ` +
         `rtt=${this._smoothedRtt.toFixed(1)}ms  ` +
         `baseRtt=${this._baseRtt.toFixed(1)}ms  ` +
         `ratio=${rttRatio}  ` +
         `lost=${this._packetsLost}  ` +
         `bwe=${bweStr}  ` +
-        `writeEMA=${this._latencyEMA.toFixed(1)}ms  ` +
         `level=${levelNames[this._level]}`,
       );
     }, interval);
@@ -449,11 +581,9 @@ export class CongestionController extends EventEmitter<{
    */
   dispose(): void {
     this._clearRecoveryTimer();
-    // ──── DEBUG ────
     if (this._debugTimer) {
       clearInterval(this._debugTimer);
       this._debugTimer = null;
     }
-    // ──── /DEBUG ────
   }
 }

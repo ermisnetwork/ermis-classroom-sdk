@@ -12,44 +12,44 @@ const proxyConsole = {
 class JitterResistantProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    // Store audio samples in planar format - separate arrays for each channel
-    this.audioBuffers = []; // Array of arrays, one per channel
-    this.bufferSize = 2048; // ~42ms at 48kHz — baseline target
-    this.minBuffer = 2048; // Start playback after ~42ms of data
+    this.bufferSize = 4096; // ~85ms at 48kHz — larger buffer reduces crackling on Android
+    this.minBuffer = 4096; // Start playback after ~85ms of data
     this.maxBuffer = 14400; // ~300ms max — absorb network lag spikes
     this.isPlaying = false;
-    this.sampleRate = 48000; // Default sample rate, updated on first data packet
-    this.numberOfChannels = 2; // Default channels, updated on first data packet
+    this.sampleRate = 48000;
+    this.numberOfChannels = 2;
     this.adaptiveBufferSize = this.bufferSize;
 
+    // ── Ring buffer per channel (Float32Array for O(1) ops) ──
+    this._rings = [];      // Float32Array[] — one per channel
+    this._ringCap = this.maxBuffer + 1024; // extra headroom
+    this._writePos = 0;    // shared write cursor
+    this._readPos = 0;     // shared read cursor
+    this._count = 0;       // samples currently buffered
+
     // ── Underrun grace period ──
-    // Allow up to GRACE_BLOCKS consecutive empty blocks before declaring underrun.
-    // A single missing audio packet (~20ms) spans ~1 process() block at 128 samples;
-    // 2-block grace absorbs it without stopping playback.
     this.GRACE_BLOCKS = 2;
     this.emptyBlockCount = 0;
 
     // ── Adaptive decay ──
-    // After stable playback (no underruns for DECAY_INTERVAL blocks),
-    // shrink adaptiveBufferSize 10% toward baseline to reduce latency.
     this.DECAY_INTERVAL = 1875; // ~5s at 128 samples/block, 48kHz
     this.blocksSinceUnderrun = 0;
 
-    // ── Micro-crossfade: 1ms ──
-    // Only activates on resume after real underrun (not during normal playback).
-    // 1ms is below human temporal resolution for loudness (~10-20ms) so it's
-    // completely inaudible, but prevents the click from silence→audio transition.
-    this.MICRO_FADE_LEN = 48; // ~1ms at 48kHz
-    this.microFadePos = -1;   // -1 = inactive
-    this.useMicroFade = false; // Set false to disable all volume modification
+    // ── Crossfade: always-on ──
+    this.FADE_LEN = 64;
+    this.fadeInRemaining = 0;
 
-    // AudioWorklet loaded
+    // ── Resampling (Android 44.1kHz/48kHz fix) ──
+    this._sourceSampleRate = 0;       // decoded audio rate (e.g. 48000)
+    this._outputSampleRate = globalThis.sampleRate || 48000; // hardware rate
+    this._resampleRatio = 1.0;        // source/output (>1 when 48k→44.1k)
+    this._needsResample = false;
+    this._resampleFrac = 0.0;         // fractional position accumulator
+
     let counter = 0;
-    // Listen for messages from the main thread
     this.port.onmessage = (event) => {
-      const { type, data, sampleRate, numberOfChannels, port } = event.data;
+      const { type, data, port } = event.data;
       if (type === "connectWorker") {
-        // workerPort connected
         this.workerPort = port;
 
         this.workerPort.onmessage = (workerEvent) => {
@@ -62,7 +62,6 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
 
           if (workerType === "audioData") {
             counter++;
-            // Send diagnostics back to main thread for first few frames
             if (counter <= 3) {
               const ch0 = receivedChannelDataBuffers ? receivedChannelDataBuffers[0] : null;
               this.port.postMessage({
@@ -72,7 +71,7 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
                 channels: receivedChannelDataBuffers ? receivedChannelDataBuffers.length : 0,
                 ch0Length: ch0 ? ch0.length : 0,
                 ch0ByteLen: ch0 && ch0.buffer ? ch0.buffer.byteLength : 0,
-                bufferSize: this.audioBuffers[0] ? this.audioBuffers[0].length : 0,
+                bufferSize: this._count,
               });
             }
 
@@ -82,25 +81,37 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
             ) {
               this.sampleRate = workerSampleRate;
               this.numberOfChannels = workerChannels;
-              this.MICRO_FADE_LEN = Math.round(workerSampleRate / 1000); // 1ms
-              this.resizeBuffers(workerChannels);
+              this.FADE_LEN = Math.max(48, Math.round(workerSampleRate / 750));
+              this._initRings(workerChannels);
+            }
+
+            // Detect sample rate mismatch for resampling (Android fix)
+            if (this._sourceSampleRate !== workerSampleRate) {
+              this._sourceSampleRate = workerSampleRate;
+              this._outputSampleRate = globalThis.sampleRate || 48000;
+              this._resampleRatio = this._sourceSampleRate / this._outputSampleRate;
+              this._needsResample = Math.abs(this._resampleRatio - 1.0) > 0.001;
+              this._resampleFrac = 0.0;
+              if (this._needsResample) {
+                proxyConsole.log(
+                  `Resampling enabled: source=${this._sourceSampleRate}Hz → output=${this._outputSampleRate}Hz (ratio=${this._resampleRatio.toFixed(4)})`
+                );
+              }
             }
 
             this.addAudioData(receivedChannelDataBuffers);
 
-            // Report after adding data (first few frames)
             if (counter <= 3) {
               this.port.postMessage({
                 type: "workletDiag",
                 frame: counter,
                 phase: "afterAdd",
-                bufferSize: this.audioBuffers[0] ? this.audioBuffers[0].length : 0,
+                bufferSize: this._count,
                 isPlaying: this.isPlaying,
               });
             }
           }
         };
-        // Confirm port connection back to main thread
         this.port.postMessage({ type: "workletDiag", event: "workerPortConnected" });
       } else if (type === "reset") {
         this.reset();
@@ -113,90 +124,141 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
     };
   }
 
-  /**
-   * Resizes the buffer arrays to match the number of channels
-   * @param {number} numberOfChannels - Number of audio channels
-   */
-  resizeBuffers(numberOfChannels) {
-    this.audioBuffers = [];
-    for (let i = 0; i < numberOfChannels; i++) {
-      this.audioBuffers.push([]);
+  /** Initialize ring buffers for N channels */
+  _initRings(numChannels) {
+    this._rings = [];
+    for (let i = 0; i < numChannels; i++) {
+      this._rings.push(new Float32Array(this._ringCap));
     }
+    this._writePos = 0;
+    this._readPos = 0;
+    this._count = 0;
   }
 
   /**
-   * Adds planar channel data directly to separate channel buffers.
+   * Adds planar channel data to ring buffers — O(numSamples), no array shifts.
    */
   addAudioData(channelData) {
-    if (
-      !channelData ||
-      channelData.length === 0 ||
-      channelData[0].length === 0
-    ) {
+    if (!channelData || channelData.length === 0 || channelData[0].length === 0) {
       return;
     }
 
+    const numSamples = channelData[0].length;
     const numChannels = channelData.length;
 
-    while (this.audioBuffers.length < numChannels) {
-      this.audioBuffers.push([]);
+    // Lazy-init rings on first data
+    if (this._rings.length < numChannels) {
+      this._initRings(numChannels);
     }
+
+    // How many samples we can accept
+    const space = this._ringCap - this._count;
+    const toWrite = Math.min(numSamples, space);
 
     for (let ch = 0; ch < numChannels; ch++) {
-      const channelArray = Array.from(channelData[ch]);
-      this.audioBuffers[ch].push(...channelArray);
-    }
-
-    // Trim buffers if they grow too large
-    if (this.audioBuffers[0] && this.audioBuffers[0].length > this.maxBuffer) {
-      const excess = this.audioBuffers[0].length - this.maxBuffer;
-      for (let ch = 0; ch < this.audioBuffers.length; ch++) {
-        this.audioBuffers[ch].splice(0, excess);
+      const ring = this._rings[ch];
+      const src = channelData[ch];
+      let wp = this._writePos;
+      for (let i = 0; i < toWrite; i++) {
+        ring[wp] = src[i];
+        wp = (wp + 1) % this._ringCap;
       }
     }
+    this._writePos = (this._writePos + toWrite) % this._ringCap;
+    this._count += toWrite;
 
-    // Start playback if the buffer has reached the adaptive threshold
-    const currentBufferSize = this.audioBuffers[0]
-      ? this.audioBuffers[0].length
-      : 0;
-    if (!this.isPlaying && currentBufferSize >= this.adaptiveBufferSize) {
+    // Trim if over maxBuffer: crossfade to avoid clicks
+    if (this._count > this.maxBuffer) {
+      this._trimWithCrossfade();
+    }
+
+    // Start playback if buffer threshold reached
+    if (!this.isPlaying && this._count >= this.adaptiveBufferSize) {
       this.isPlaying = true;
       this.emptyBlockCount = 0;
-      // Activate 1ms micro-crossfade to prevent click on resume
-      this.microFadePos = 0;
+      this.fadeInRemaining = this.FADE_LEN;
       this.port.postMessage({ type: "playbackStarted" });
     }
   }
 
-  /**
-   * Resets the processor to its initial state.
-   */
   reset() {
-    for (let ch = 0; ch < this.audioBuffers.length; ch++) {
-      this.audioBuffers[ch] = [];
-    }
+    this._writePos = 0;
+    this._readPos = 0;
+    this._count = 0;
     this.isPlaying = false;
     this.emptyBlockCount = 0;
     this.blocksSinceUnderrun = 0;
-    this.microFadePos = -1;
+    this.fadeInRemaining = 0;
     this.adaptiveBufferSize = this.bufferSize;
     proxyConsole.log("Audio processor reset.");
   }
 
+  _trimWithCrossfade() {
+    const excess = this._count - this.maxBuffer;
+    if (excess <= 0) return;
+    const fadeLen = Math.min(this.FADE_LEN, this.maxBuffer);
+    const newReadPos = (this._readPos + excess) % this._ringCap;
+    for (let ch = 0; ch < this._rings.length; ch++) {
+      const ring = this._rings[ch];
+      for (let i = 0; i < fadeLen; i++) {
+        const fadeOut = 1.0 - (i / fadeLen);
+        const fadeIn = i / fadeLen;
+        const oldIdx = (this._readPos + i) % this._ringCap;
+        const newIdx = (newReadPos + i) % this._ringCap;
+        ring[newIdx] = ring[oldIdx] * fadeOut + ring[newIdx] * fadeIn;
+      }
+    }
+    this._readPos = newReadPos;
+    this._count = this.maxBuffer;
+  }
+
+  _applyFadeIn(output, outputChannels, outputLength) {
+    if (this.fadeInRemaining <= 0) return;
+    const fadeStart = this.FADE_LEN - this.fadeInRemaining;
+    for (let ch = 0; ch < outputChannels; ch++) {
+      for (let i = 0; i < outputLength && (fadeStart + i) < this.FADE_LEN; i++) {
+        output[ch][i] *= (fadeStart + i) / this.FADE_LEN;
+      }
+    }
+    this.fadeInRemaining = Math.max(0, this.fadeInRemaining - outputLength);
+  }
+
+  _applyFadeOut(output, outputChannels, sampleCount) {
+    const fadeLen = Math.min(this.FADE_LEN, sampleCount);
+    const fadeStart = sampleCount - fadeLen;
+    for (let ch = 0; ch < outputChannels; ch++) {
+      for (let i = 0; i < fadeLen; i++) {
+        output[ch][fadeStart + i] *= 1.0 - (i / fadeLen);
+      }
+    }
+  }
+
+  _softClip(output, outputChannels, length) {
+    const THRESHOLD = 0.85;
+    const INV_THRESHOLD = 1.0 / THRESHOLD;
+    for (let ch = 0; ch < outputChannels; ch++) {
+      const buf = output[ch];
+      for (let i = 0; i < length; i++) {
+        const s = buf[i];
+        if (s > THRESHOLD) {
+          buf[i] = THRESHOLD + (1.0 - THRESHOLD) * Math.tanh((s - THRESHOLD) * INV_THRESHOLD);
+        } else if (s < -THRESHOLD) {
+          buf[i] = -THRESHOLD - (1.0 - THRESHOLD) * Math.tanh((-s - THRESHOLD) * INV_THRESHOLD);
+        }
+      }
+    }
+  }
+
   /**
-   * Main processing loop.
-   * Samples are output at original level. Only a 1ms (~48 sample) micro-crossfade
-   * is applied when resuming after a real underrun — inaudible to humans but
-   * prevents the click artifact from a sudden silence→audio transition.
+   * Main processing loop — O(outputLength) per call, no array shifts.
    */
   process(inputs, outputs, parameters) {
     const output = outputs[0];
     const outputChannels = output.length;
     const outputLength = output[0].length;
+    const bufferFrames = this._count;
 
-    const bufferFrames = this.audioBuffers[0] ? this.audioBuffers[0].length : 0;
-
-    // ── Not yet playing: wait for buffer to fill ──
+    // ── Not yet playing ──
     if (!this.isPlaying) {
       for (let channel = 0; channel < outputChannels; channel++) {
         output[channel].fill(0);
@@ -204,19 +266,40 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
       return true;
     }
 
-    // ── Buffer too low for this block ──
+    // ── Buffer too low ──
     if (bufferFrames < outputLength) {
       this.emptyBlockCount++;
-
       if (this.emptyBlockCount <= this.GRACE_BLOCKS) {
-        // Grace period: output silence but DON'T stop playback
         for (let channel = 0; channel < outputChannels; channel++) {
           output[channel].fill(0);
         }
         return true;
       }
-
-      // Real underrun: exceeded grace period → stop playback
+      // Real underrun — output remaining with fade-out
+      if (bufferFrames > 0) {
+        for (let channel = 0; channel < outputChannels; channel++) {
+          const ring = channel < this._rings.length ? this._rings[channel] : null;
+          if (ring) {
+            let rp = this._readPos;
+            for (let i = 0; i < bufferFrames; i++) {
+              output[channel][i] = ring[rp];
+              rp = (rp + 1) % this._ringCap;
+            }
+            for (let i = bufferFrames; i < outputLength; i++) {
+              output[channel][i] = 0;
+            }
+          } else {
+            output[channel].fill(0);
+          }
+        }
+        this._applyFadeOut(output, outputChannels, bufferFrames);
+        this._readPos = (this._readPos + bufferFrames) % this._ringCap;
+        this._count = 0;
+      } else {
+        for (let channel = 0; channel < outputChannels; channel++) {
+          output[channel].fill(0);
+        }
+      }
       this.isPlaying = false;
       this.emptyBlockCount = 0;
       this.blocksSinceUnderrun = 0;
@@ -224,21 +307,15 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
         Math.ceil(this.adaptiveBufferSize * 1.5),
         this.maxBuffer
       );
-      this.port.postMessage({
-        type: "underrun",
-        newBufferSize: this.adaptiveBufferSize,
-      });
-      for (let channel = 0; channel < outputChannels; channel++) {
-        output[channel].fill(0);
-      }
+      this.port.postMessage({ type: "underrun", newBufferSize: this.adaptiveBufferSize });
       return true;
     }
 
-    // ── We have data: reset grace counter ──
+    // ── Data available ──
     this.emptyBlockCount = 0;
     this.blocksSinceUnderrun++;
 
-    // ── Adaptive decay: shrink buffer threshold toward baseline when stable ──
+    // ── Adaptive decay ──
     if (
       this.blocksSinceUnderrun > 0 &&
       this.blocksSinceUnderrun % this.DECAY_INTERVAL === 0 &&
@@ -257,48 +334,75 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // ── Copy samples to output ──
-    // During micro-crossfade (first 1ms after resume), apply a tiny ramp
-    // to prevent click. After that, samples pass through unmodified.
-    for (let channel = 0; channel < outputChannels; channel++) {
-      if (
-        channel < this.audioBuffers.length &&
-        this.audioBuffers[channel].length >= outputLength
-      ) {
-        if (this.useMicroFade && this.microFadePos >= 0 && this.microFadePos < this.MICRO_FADE_LEN) {
-          // Micro-crossfade active (1ms ramp — inaudible)
+    // ── Copy from ring buffer to output ──
+    if (this._needsResample) {
+      // ── Resampling path: linear interpolation ──
+      // Read ceil(outputLength * ratio) source samples, interpolate to outputLength outputs.
+      // This corrects pitch when hardware runs at different rate (e.g. 44.1kHz vs 48kHz source).
+      const ratio = this._resampleRatio;
+      let frac = this._resampleFrac;
+      const sourceSamplesNeeded = Math.ceil(outputLength * ratio + 1);
+
+      // Ensure we have enough source samples
+      if (this._count < sourceSamplesNeeded) {
+        // Not enough for resampled output — output silence, treat as underrun
+        for (let channel = 0; channel < outputChannels; channel++) {
+          output[channel].fill(0);
+        }
+        return true;
+      }
+
+      for (let channel = 0; channel < outputChannels; channel++) {
+        const ring = channel < this._rings.length ? this._rings[channel] : null;
+        if (ring) {
+          let localFrac = (channel === 0) ? frac : this._resampleFrac;
           for (let i = 0; i < outputLength; i++) {
-            if (this.microFadePos < this.MICRO_FADE_LEN) {
-              output[channel][i] = this.audioBuffers[channel][i] * (this.microFadePos / this.MICRO_FADE_LEN);
-              if (channel === 0) this.microFadePos++;
-            } else {
-              output[channel][i] = this.audioBuffers[channel][i];
-            }
+            const srcPos = Math.floor(localFrac);
+            const t = localFrac - srcPos; // interpolation coefficient [0,1)
+            const idx0 = (this._readPos + srcPos) % this._ringCap;
+            const idx1 = (this._readPos + srcPos + 1) % this._ringCap;
+            // Linear interpolation: sample = s0 + t * (s1 - s0)
+            output[channel][i] = ring[idx0] + t * (ring[idx1] - ring[idx0]);
+            localFrac += ratio;
+          }
+          if (channel === 0) frac = localFrac;
+        } else {
+          output[channel].fill(0);
+        }
+      }
+
+      // Advance read pointer by actual source samples consumed
+      const consumed = Math.floor(frac);
+      this._readPos = (this._readPos + consumed) % this._ringCap;
+      this._count -= consumed;
+      this._resampleFrac = frac - consumed; // keep fractional remainder
+      this._applyFadeIn(output, outputChannels, outputLength);
+    } else {
+      // ── Direct copy path (no resampling needed) — O(outputLength), no shifts ──
+      for (let channel = 0; channel < outputChannels; channel++) {
+        const ring = channel < this._rings.length ? this._rings[channel] : null;
+        let rp = this._readPos;
+        if (ring) {
+          for (let i = 0; i < outputLength; i++) {
+            output[channel][i] = ring[rp];
+            rp = (rp + 1) % this._ringCap;
           }
         } else {
-          // Direct copy — zero modification
-          for (let i = 0; i < outputLength; i++) {
-            output[channel][i] = this.audioBuffers[channel][i];
-          }
-          if (this.microFadePos >= this.MICRO_FADE_LEN) this.microFadePos = -1;
+          output[channel].fill(0);
         }
-      } else {
-        output[channel].fill(0);
       }
+      this._readPos = (this._readPos + outputLength) % this._ringCap;
+      this._count -= outputLength;
+      this._applyFadeIn(output, outputChannels, outputLength);
     }
 
-    // Remove the processed samples
-    for (let ch = 0; ch < this.audioBuffers.length; ch++) {
-      this.audioBuffers[ch].splice(0, outputLength);
+    // Trim if buffer too full — crossfade to avoid clicks
+    if (this._count > this.maxBuffer) {
+      this._trimWithCrossfade();
     }
 
-    // Aggressively drain if buffer is too full to prevent latency buildup
-    if (bufferFrames > this.maxBuffer) {
-      const excess = bufferFrames - this.bufferSize;
-      for (let ch = 0; ch < this.audioBuffers.length; ch++) {
-        this.audioBuffers[ch].splice(0, excess);
-      }
-    }
+    // Soft clip to prevent digital distortion
+    this._softClip(output, outputChannels, outputLength);
 
     return true;
   }

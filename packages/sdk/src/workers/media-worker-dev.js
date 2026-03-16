@@ -84,12 +84,12 @@ let _dlPrevLostPackets = 0;
 let _dlPrevSentPackets = 0;
 let _dlLevel = 0; // 0=NORMAL, 1=MILD, 2=MODERATE, 3=SEVERE
 let _dlRecoveryStartTime = 0; // timestamp when level improved
-const DL_RECOVERY_HOLD_MS = 5000; // sustain improvement for 5s before upgrading quality
-const DL_RTT_RATIO_MILD = 1.5;
-const DL_RTT_RATIO_MODERATE = 2.0;
-const DL_RTT_RATIO_SEVERE = 3.0;
-const DL_LOSS_RATE_MODERATE = 0.03; // 3%
-const DL_LOSS_RATE_SEVERE = 0.08;   // 8%
+const DL_RECOVERY_HOLD_MS = 8000; // sustain improvement for 8s before upgrading quality (prioritize audio stability)
+const DL_RTT_RATIO_MILD = 1.3;
+const DL_RTT_RATIO_MODERATE = 1.8;
+const DL_RTT_RATIO_SEVERE = 2.5;
+const DL_LOSS_RATE_MODERATE = 0.02; // 2%
+const DL_LOSS_RATE_SEVERE = 0.05;   // 5%
 
 function evaluateDownlinkCongestion(stats) {
   // Update RTT
@@ -139,13 +139,18 @@ function evaluateDownlinkCongestion(stats) {
     _dlRecoveryStartTime = 0; // not improving yet
   }
 
-  // Debug log
+  // Debug log + forward to audio worklet
   if (_dlLevel !== prevLevel) {
     const levels = ['NORMAL', 'MILD', 'MODERATE', 'SEVERE'];
     console.warn(
       `[DownlinkCongestion] ${levels[prevLevel]} → ${levels[_dlLevel]}` +
       `  (rtt=${_dlSmoothedRtt.toFixed(1)}ms, ratio=${rttRatio.toFixed(2)}, loss=${(lossRate*100).toFixed(1)}%)`
     );
+
+    // Forward congestion level to audio worklet for proactive buffer boost
+    if (workletPort) {
+      workletPort.postMessage({ type: "congestionLevel", data: _dlLevel });
+    }
   }
 }
 
@@ -1080,8 +1085,8 @@ async function attachWebTransportFromUrl(url, channelName) {
   // ── Unidirectional streams: one stream per GOP from the node server ──
   receiveUnidirectional(transport);
 
-  // ── Datagram reader: unreliable audio from the node server ──
-  receiveDatagrams(transport);
+  // ── Datagram reader: DISABLED — audio downstream uses uni-streams only ──
+  // receiveDatagrams(transport);
 }
 
 /**

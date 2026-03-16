@@ -55,7 +55,10 @@ export class SendGate {
         break;
 
       case CongestionLevel.CRITICAL:
-        // Audio can't send → kill ALL video
+        // Maximum degradation — drop ALL video (including keyframes).
+        // Audio needs the entire pipe. Subscriber freezes on last
+        // frame (preserveDrawingBuffer). Recovery keyframe is sent
+        // when level drops below CRITICAL.
         allow = false;
         break;
 

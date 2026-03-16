@@ -69,8 +69,10 @@ function CustomParticipantTile({
   const [showRemoveModal, setShowRemoveModal] = useState(false)
   const [removeReason, setRemoveReason] = useState('')
   const removeInputRef = useRef<HTMLInputElement>(null)
+  const [hasVideoFrame, setHasVideoFrame] = useState(false)
 
   useEffect(() => {
+    setHasVideoFrame(false)
     if (videoRef.current && participant.stream) {
       videoRef.current.srcObject = participant.stream
     }
@@ -94,9 +96,13 @@ function CustomParticipantTile({
         autoPlay
         playsInline
         muted={participant.isLocal}
-        className={cn("w-full h-full object-contain", participant.isVideoOff && "hidden")}
+        onLoadedData={() => setHasVideoFrame(true)}
+        className={cn(
+          "w-full h-full object-contain transition-opacity duration-150",
+          (participant.isVideoOff || !hasVideoFrame) && "opacity-0 absolute"
+        )}
       />
-      {participant.isVideoOff && (
+      {(participant.isVideoOff || !hasVideoFrame) && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-700">
           <div className="h-16 w-16 rounded-full bg-slate-600 flex items-center justify-center">
             <span className="text-2xl font-semibold text-white">
@@ -438,8 +444,10 @@ function CustomTile({
   participantId?: string
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const [hasVideoFrame, setHasVideoFrame] = useState(false)
 
   useEffect(() => {
+    setHasVideoFrame(false)
     if (videoRef.current && tile.stream) {
       videoRef.current.srcObject = tile.stream
     }
@@ -464,18 +472,26 @@ function CustomTile({
         autoPlay
         playsInline
         muted={tile.isLocal}
+        onLoadedData={() => setHasVideoFrame(true)}
         className={cn(
-          "w-full h-full object-contain",
-          !isScreenShare && tile.isVideoOff && "hidden"
+          "w-full h-full object-contain transition-opacity duration-150",
+          (tile.isVideoOff || !hasVideoFrame) && "opacity-0 absolute"
         )}
       />
-      {!isScreenShare && tile.isVideoOff && (
+      {(tile.isVideoOff || !hasVideoFrame) && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-700">
-          <div className="h-16 w-16 rounded-full bg-slate-600 flex items-center justify-center">
-            <span className="text-2xl font-semibold text-white">
-              {tile.name.charAt(0).toUpperCase()}
-            </span>
-          </div>
+          {isScreenShare ? (
+            <div className="flex flex-col items-center gap-2">
+              <IconScreenShare className="h-8 w-8 text-slate-400 animate-pulse" />
+              <span className="text-sm text-slate-400">Loading screen share...</span>
+            </div>
+          ) : (
+            <div className="h-16 w-16 rounded-full bg-slate-600 flex items-center justify-center">
+              <span className="text-2xl font-semibold text-white">
+                {tile.name.charAt(0).toUpperCase()}
+              </span>
+            </div>
+          )}
         </div>
       )}
       {(canPin || showStreamControls) && (

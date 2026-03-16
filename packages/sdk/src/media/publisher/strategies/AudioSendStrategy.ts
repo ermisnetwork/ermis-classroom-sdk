@@ -25,6 +25,10 @@ export class AudioSendStrategy {
   // Audio TX diagnostics
   private _audioTxSent = 0;
   private _audioTxDropped = 0;
+
+  // Backoff to prevent death spiral when stream reopen keeps failing
+  private _lastReopenAttempt = 0;
+  private static readonly REOPEN_BACKOFF_MS = 500;
   private _audioTxRetried = 0;
 
   constructor(
@@ -113,6 +117,16 @@ export class AudioSendStrategy {
   ): Promise<void> {
     // Force reopen if the stream was marked unhealthy by background write failures
     const needsReopen = !audioSender.isHealthy();
+
+    // Backoff: if we just tried to reopen and it failed, skip to avoid
+    // death spiral (every frame → reopen timeout → drop → repeat)
+    if (needsReopen) {
+      const now = performance.now();
+      if (now - this._lastReopenAttempt < AudioSendStrategy.REOPEN_BACKOFF_MS) {
+        return; // still in backoff window — drop this frame, retry later
+      }
+      this._lastReopenAttempt = now;
+    }
 
     if (useBatching) {
       // Android MIC: rotate stream every AUDIO_BATCH_SIZE frames
