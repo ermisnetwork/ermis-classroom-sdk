@@ -14,6 +14,8 @@
  * assets are loaded from local paths (Vite plugin copies them to public/).
  */
 
+import { log } from './logger';
+
 const SDK_CACHE_PREFIX = 'sdk-assets-v';
 
 interface SdkManifest {
@@ -39,7 +41,7 @@ export async function initSdkAssets(sdkAssetsUrl?: string): Promise<void> {
       const cacheNames = await caches.keys();
       for (const name of cacheNames) {
         if (name.startsWith(SDK_CACHE_PREFIX)) {
-          console.log(`[SdkAssetLoader] sdkAssetsUrl not configured — deleting stale cache: ${name}`);
+          log(`[SdkAssetLoader] sdkAssetsUrl not configured — deleting stale cache: ${name}`);
           await caches.delete(name);
         }
       }
@@ -48,7 +50,7 @@ export async function initSdkAssets(sdkAssetsUrl?: string): Promise<void> {
         const registrations = await navigator.serviceWorker.getRegistrations();
         for (const reg of registrations) {
           if (reg.active?.scriptURL?.includes('sdk-sw.js')) {
-            console.log('[SdkAssetLoader] Unregistering sdk-sw.js service worker');
+            log('[SdkAssetLoader] Unregistering sdk-sw.js service worker');
             await reg.unregister();
           }
         }
@@ -67,11 +69,11 @@ export async function initSdkAssets(sdkAssetsUrl?: string): Promise<void> {
     // 1. Register Service Worker
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.register('/sdk-sw.js');
-      console.log('[SdkAssetLoader] Service Worker registered:', reg.scope);
+      log('[SdkAssetLoader] Service Worker registered:', reg.scope);
 
       // Wait for SW to be ready
       await navigator.serviceWorker.ready;
-      console.log('[SdkAssetLoader] Service Worker ready');
+      log('[SdkAssetLoader] Service Worker ready');
     } else {
       console.warn('[SdkAssetLoader] Service Workers not supported — assets will be fetched directly from server');
       return;
@@ -85,14 +87,14 @@ export async function initSdkAssets(sdkAssetsUrl?: string): Promise<void> {
       throw new Error(`Manifest fetch failed: ${res.status} ${res.statusText}`);
     }
     const manifest: SdkManifest = await res.json();
-    console.log(`[SdkAssetLoader] Manifest loaded: v${manifest.version}, ${manifest.files.length} files`);
+    log(`[SdkAssetLoader] Manifest loaded: v${manifest.version}, ${manifest.files.length} files`);
 
     // 3. Check if we already have this version cached
     const cacheName = `${SDK_CACHE_PREFIX}${manifest.version}`;
     const existingCache = await caches.open(cacheName);
     const existingKeys = await existingCache.keys();
     if (existingKeys.length === manifest.files.length) {
-      console.log(`[SdkAssetLoader] Assets v${manifest.version} already cached (${existingKeys.length} files)`);
+      log(`[SdkAssetLoader] Assets v${manifest.version} already cached (${existingKeys.length} files)`);
       _initialized = true;
       return;
     }
@@ -101,7 +103,7 @@ export async function initSdkAssets(sdkAssetsUrl?: string): Promise<void> {
     const cacheNames = await caches.keys();
     for (const name of cacheNames) {
       if (name.startsWith(SDK_CACHE_PREFIX)) {
-        console.log(`[SdkAssetLoader] Deleting cache: ${name}`);
+        log(`[SdkAssetLoader] Deleting cache: ${name}`);
         await caches.delete(name);
       }
     }
@@ -147,7 +149,7 @@ export async function initSdkAssets(sdkAssetsUrl?: string): Promise<void> {
     await Promise.all(fetchPromises);
 
     const finalKeys = await cache.keys();
-    console.log(`[SdkAssetLoader] Cached ${finalKeys.length}/${manifest.files.length} SDK assets v${manifest.version}`);
+    log(`[SdkAssetLoader] Cached ${finalKeys.length}/${manifest.files.length} SDK assets v${manifest.version}`);
     _initialized = true;
   } catch (err) {
     console.error('[SdkAssetLoader] Pre-fetch failed:', err);

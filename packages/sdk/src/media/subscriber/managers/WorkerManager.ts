@@ -81,7 +81,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
     // iOS 15: VideoDecoder is not available → need external WASM worker
     // iOS 16+ / iOS 18: VideoDecoder available → use native decoder in media-worker
     const hasVideoDecoder = typeof VideoDecoder !== 'undefined';
-    console.log(`[WorkerManager] iOS Safari detected — VideoDecoder available: ${hasVideoDecoder} → external worker: ${!hasVideoDecoder}`);
+    log(`[WorkerManager] iOS Safari detected — VideoDecoder available: ${hasVideoDecoder} → external worker: ${!hasVideoDecoder}`);
     return !hasVideoDecoder;
   }
 

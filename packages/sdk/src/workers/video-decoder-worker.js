@@ -59,7 +59,7 @@ self.onmessage = function (e) {
     pendingMessages.length = 0;
 
     port.postMessage({ type: "ready" });
-    console.log("[VideoDecoderWorker] Initialized, port connected");
+    // VideoDecoderWorker initialized
   }
 };
 
@@ -105,7 +105,7 @@ async function handleConfigure(channelName, config) {
     }
     await decoder.configure(config || { codec: "avc1.42001f" });
     port.postMessage({ type: "configured", channelName });
-    console.log(`[VideoDecoderWorker] Decoder configured for ${channelName}`);
+    // Decoder configured
   } catch (err) {
     console.error(`[VideoDecoderWorker] Configure error (${channelName}):`, err);
     port.postMessage({

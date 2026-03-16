@@ -10,6 +10,8 @@ import {
   PinType,
 } from '../../types';
 import { getSubStreams, MEETING_EVENTS } from '../../constants';
+import { AUDIO_CONFIG } from '../../constants/mediaConstants';
+import { TRANSPORT } from '../../constants/transportConstants';
 import { WebTransportManager } from "./transports/WebTransportManager";
 import { WebRTCManager } from "./transports/WebRTCManager";
 import { StreamManager } from "./transports/StreamManager";
@@ -19,10 +21,9 @@ import { AACEncoderManager } from "./managers/AACEncoderManager";
 import { VideoProcessor } from "./processors/VideoProcessor";
 import { AudioProcessor } from "./processors/AudioProcessor";
 import { LivestreamAudioMixer } from "../audioMixer/LivestreamAudioMixer";
+import { WebRTCStatsPoller } from "./controllers/WebRTCStatsPoller";
 import { log } from "../../utils";
 import { SUB_STREAMS } from "../../constants/publisherConstants";
-import { NetworkQualityMonitor, type GCCStats, type ArrivalFeedback } from "./congestion/NetworkQualityMonitor";
-import { AdaptiveMediaController, type AllocationSummary } from "./congestion/AdaptiveMediaController";
 
 interface PublisherEvents extends Record<string, unknown> {
   statusUpdate: { message: string; isError: boolean };
@@ -109,8 +110,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   // Reconnection state
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 3;
-  private baseReconnectDelay = 1000; // 1 second
-  private maxReconnectDelay = 10000; // 10 seconds
+  private baseReconnectDelay: number = TRANSPORT.RECONNECT_BASE_DELAY;
+  private maxReconnectDelay: number = TRANSPORT.MAX_RECONNECT_DELAY;
   private isReconnecting = false;
   private connectionHealthChecker: ReturnType<typeof setInterval> | null = null;
 
@@ -130,9 +131,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
   // Store viewport dimensions BEFORE getDisplayMedia popup changes them
   private preCaptureViewportDimensions: { width: number; height: number } | null = null;
 
-  // Adaptive congestion control
-  private networkQualityMonitor: NetworkQualityMonitor | null = null;
-  private adaptiveMediaController: AdaptiveMediaController | null = null;
+  // Hybrid mode: WebRTC stats poller for GCC congestion signals
+  private webRTCStatsPoller: WebRTCStatsPoller | null = null;
+
+
 
   constructor(config: PublisherConfig) {
     super();
@@ -152,7 +154,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
   /**
    * Determine available publish channels based on device availability and encoder capabilities
-   * iOS 15 Safari (WASM encoder) only supports video_360p, while native encoder supports both 360p and 720p
+   * iOS 15 Safari (WASM encoder) only supports cam_360p, while native encoder supports both 360p and 720p
    * 
    * @returns Array of channel names that the publisher is capable of publishing
    */
@@ -163,10 +165,10 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     // Only publish channels that are in subStreams (already filtered by videoResolutions config)
     if (this.hasVideo) {
       for (const sub of this.subStreams) {
-        if (sub.channelName === ChannelName.VIDEO_360P ||
-          sub.channelName === ChannelName.VIDEO_720P ||
-          sub.channelName === ChannelName.VIDEO_1080P ||
-          sub.channelName === ChannelName.VIDEO_1440P) {
+        if (sub.channelName === ChannelName.CAM_360P ||
+          sub.channelName === ChannelName.CAM_720P ||
+          sub.channelName === ChannelName.CAM_1080P ||
+          sub.channelName === ChannelName.CAM_1440P) {
           channels.push(sub.channelName);
         }
       }
@@ -174,7 +176,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     // Add audio channel if mic is available
     if (this.hasAudio) {
-      channels.push(ChannelName.MICROPHONE);
+      channels.push(ChannelName.MIC_48K);
     }
 
     log("[Publisher] Publish channels determined:", channels);
@@ -244,7 +246,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     // so the gesture context is preserved. On other browsers this is a no-op.
     const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
     if (AudioContextClass) {
-      this.publisherAudioContext = new AudioContextClass({ sampleRate: 48000 }) as AudioContext;
+      this.publisherAudioContext = new AudioContextClass({ sampleRate: AUDIO_CONFIG.SAMPLE_RATE }) as AudioContext;
       this.publisherAudioContext!.resume().catch(() => { });
       log("[Publisher] AudioContext created and resume() called in user gesture");
     }
@@ -294,9 +296,6 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Send initial state to server so other clients know the mic/camera status
       // This is important when user joins with mic/camera already disabled
       await this.sendInitialState();
-
-      // Start adaptive congestion control
-      this.startCongestionControl();
 
       // Start connection health monitoring
       this.startConnectionHealthMonitoring();
@@ -431,7 +430,13 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     });
 
     const webTransport = await this.webTransportManager.connect();
-    this.streamManager = new StreamManager(false, this.options.streamId);
+
+    // Determine if hybrid mode is available (WebRTC host provided + audio channels)
+    const webRtcHost = this.options.webRtcHost;
+    const hasAudioChannels = this.hasAudio;
+    const useHybrid = !!webRtcHost && hasAudioChannels;
+
+    this.streamManager = new StreamManager(false, this.options.streamId, useHybrid, this.options.useAudioDatagrams, this.options.useSendGate);
 
     // Set publisher state before initializing streams so correct state is sent to server
     // Include publish_channels to notify server about which channels we will publish
@@ -447,31 +452,81 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       publishChannels,
     });
 
-    // StreamManager now emits to globalEventBus directly - no need to re-emit
     // Filter channels based on actual device availability
-    const channelNames: ChannelName[] = this.subStreams
+    const allChannelNames: ChannelName[] = this.subStreams
       .map(s => s.channelName as ChannelName)
       .filter(channelName => {
         // MEETING_CONTROL is always required
         if (channelName === ChannelName.MEETING_CONTROL) return true;
         // MICROPHONE only if we have audio
-        if (channelName === ChannelName.MICROPHONE) return this.hasAudio;
+        if (channelName === ChannelName.MIC_48K) return this.hasAudio;
         // Video channels only if we have video
-        if (channelName === ChannelName.VIDEO_360P || channelName === ChannelName.VIDEO_720P || channelName === ChannelName.VIDEO_1080P || channelName === ChannelName.VIDEO_1440P) return this.hasVideo;
+        if (channelName === ChannelName.CAM_360P || channelName === ChannelName.CAM_720P || channelName === ChannelName.CAM_1080P || channelName === ChannelName.CAM_1440P) return this.hasVideo;
         // Allow other channels by default
         return true;
       });
 
-    log("[Publisher] WebTransport channels to initialize (filtered by device availability):", channelNames);
-
     // Only initialize if there are channels (at minimum MEETING_CONTROL)
-    if (channelNames.length === 0) {
+    if (allChannelNames.length === 0) {
       throw new Error("No channels available - at least MEETING_CONTROL should be present");
     }
 
-    await this.streamManager.initWebTransportStreams(webTransport, channelNames);
+    if (useHybrid) {
+      // ─── Hybrid mode: video + control on WebTransport, audio on WebRTC ───
+      // Route mic + screen share audio to WebRTC for GCC congestion stats.
+      // Livestream audio stays on WebTransport (separate use case).
+      const isHybridAudioCh = (ch: ChannelName) =>
+        ch === ChannelName.MIC_48K ||
+        ch === ChannelName.SCREEN_SHARE_AUDIO;
 
-    this.updateStatus("WebTransport connected");
+      // WebTransport gets video + meeting_control (NOT audio)
+      const wtChannels = allChannelNames.filter(ch => !isHybridAudioCh(ch));
+      // WebRTC gets only mic audio
+      const rtcChannels = allChannelNames.filter(ch => isHybridAudioCh(ch));
+
+      log("[Publisher] Hybrid mode — WebTransport channels:", wtChannels);
+      log("[Publisher] Hybrid mode — WebRTC audio channels:", rtcChannels);
+
+      // 1. Init WebTransport streams (video + control)
+      await this.streamManager.initWebTransportStreams(webTransport, wtChannels);
+
+      // 2. Init WebRTC for audio channels
+      if (rtcChannels.length > 0) {
+        this.webRtcManager = new WebRTCManager(
+          webRtcHost!,
+          this.options.roomId || "",
+          this.options.streamId || ""
+        );
+        this.streamManager.setWebRTCManager(this.webRtcManager);
+
+        // Initialize FEC worker for WebRTC audio encoding
+        await this.streamManager.initFecWorkerForHybrid();
+
+        await this.webRtcManager.connectMultipleChannels(rtcChannels, this.streamManager);
+
+        // 3. NOW send publisher_state — all channels (WT + WebRTC) are connected
+        this.streamManager.sendDeferredPublisherState();
+
+        // 4. Start WebRTC stats poller → feeds GCC stats to CongestionController
+        const peerConnections = this.webRtcManager.getPeerConnections();
+        // Use the first audio channel's peer connection for stats
+        const firstAudioPC = peerConnections.get(rtcChannels[0]);
+        if (firstAudioPC) {
+          this.webRTCStatsPoller = new WebRTCStatsPoller();
+          this.webRTCStatsPoller.start(
+            firstAudioPC,
+            this.streamManager.getCongestionController(),
+          );
+          log("[Publisher] WebRTC stats poller started on", rtcChannels[0]);
+        }
+      }
+    } else {
+      // ─── Standard WebTransport-only mode ───
+      log("[Publisher] WebTransport-only mode, channels:", allChannelNames);
+      await this.streamManager.initWebTransportStreams(webTransport, allChannelNames);
+    }
+
+    this.updateStatus(useHybrid ? "Hybrid (WT+WebRTC) connected" : "WebTransport connected");
     this.emit("connected");
     globalEventBus.emit(GlobalEvents.PUBLISHER_CONNECTED, { streamId: this.options.streamId });
   }
@@ -520,9 +575,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         // MEETING_CONTROL is always required
         if (channelName === ChannelName.MEETING_CONTROL) return true;
         // MICROPHONE only if we have audio
-        if (channelName === ChannelName.MICROPHONE) return this.hasAudio;
+        if (channelName === ChannelName.MIC_48K) return this.hasAudio;
         // Video channels only if we have video
-        if (channelName === ChannelName.VIDEO_360P || channelName === ChannelName.VIDEO_720P || channelName === ChannelName.VIDEO_1080P || channelName === ChannelName.VIDEO_1440P) return this.hasVideo;
+        if (channelName === ChannelName.CAM_360P || channelName === ChannelName.CAM_720P || channelName === ChannelName.CAM_1080P || channelName === ChannelName.CAM_1440P) return this.hasVideo;
         // Allow other channels by default
         return true;
       });
@@ -570,13 +625,13 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     if (this.hasAudio) {
       const audioConfig = {
-        sampleRate: 48000,
-        numberOfChannels: 2,
+        sampleRate: AUDIO_CONFIG.SAMPLE_RATE,
+        numberOfChannels: AUDIO_CONFIG.CHANNEL_COUNT,
       };
 
       if (this.options.audioCodec === "aac") {
         // AAC path — uses FDK-AAC WASM or native WebCodecs AudioEncoder
-        const aacManager = new AACEncoderManager(ChannelName.MICROPHONE, audioConfig);
+        const aacManager = new AACEncoderManager(ChannelName.MIC_48K, audioConfig);
         // audioEncoderManager field is typed AudioEncoderManager | null in Publisher.
         // We cast via the shared base type to comply until Publisher class is updated.
         this.audioEncoderManager = aacManager as unknown as AudioEncoderManager;
@@ -584,7 +639,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         this.audioProcessor = new AudioProcessor(
           aacManager,
           this.streamManager,
-          ChannelName.MICROPHONE,
+          ChannelName.MIC_48K,
         );
       } else {
         // Default Opus path (uses Recorder.js WASM)
@@ -595,7 +650,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         }
 
         this.audioEncoderManager = new AudioEncoderManager(
-          ChannelName.MICROPHONE,
+          ChannelName.MIC_48K,
           audioConfig,
           this.InitAudioRecorder,
         );
@@ -603,7 +658,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         this.audioProcessor = new AudioProcessor(
           this.audioEncoderManager,
           this.streamManager,
-          ChannelName.MICROPHONE,
+          ChannelName.MIC_48K,
         );
       }
 
@@ -637,28 +692,28 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
           // Update subStreams with calculated dimensions
           this.subStreams = this.subStreams.map(subStream => {
-            if (subStream.channelName === ChannelName.VIDEO_360P) {
+            if (subStream.channelName === ChannelName.CAM_360P) {
               return {
                 ...subStream,
                 width: video360p.width,
                 height: video360p.height
               };
             }
-            if (subStream.channelName === ChannelName.VIDEO_720P) {
+            if (subStream.channelName === ChannelName.CAM_720P) {
               return {
                 ...subStream,
                 width: video720p.width,
                 height: video720p.height
               };
             }
-            if (subStream.channelName === ChannelName.VIDEO_1080P) {
+            if (subStream.channelName === ChannelName.CAM_1080P) {
               return {
                 ...subStream,
                 width: video1080p.width,
                 height: video1080p.height
               };
             }
-            if (subStream.channelName === ChannelName.VIDEO_1440P) {
+            if (subStream.channelName === ChannelName.CAM_1440P) {
               return {
                 ...subStream,
                 width: video1440p.width,
@@ -902,7 +957,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       timestamp: Date.now(),
       ...(data || {}),
     };
-    console.warn(`[Publisher] 📤 Sending meeting event:`, JSON.stringify(event, null, 2));
+    log(`[Publisher] Sending event: ${eventType}`);
     await this.streamManager.sendEvent(event);
   }
 
@@ -961,8 +1016,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     try {
       this.updateStatus("Stopping publisher...");
 
-      // Stop congestion control monitoring
-      this.stopCongestionControl();
+
 
       // Stop connection health monitoring
       this.stopConnectionHealthMonitoring();
@@ -1002,6 +1056,11 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       if (this.webTransportManager) {
         await this.webTransportManager.close();
         this.webTransportManager = null;
+      }
+
+      if (this.webRTCStatsPoller) {
+        this.webRTCStatsPoller.stop();
+        this.webRTCStatsPoller = null;
       }
 
       if (this.webRtcManager) {
@@ -1049,7 +1108,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
    * When banned, server sends STOP_SENDING to close the stream but the stream still exists
    * on client side. We need to close the old stream and create a new one.
    * 
-   * @param channelNames - Array of channel names to reconnect (e.g., ["mic_48k", "video_360p", "video_720p"])
+   * @param channelNames - Array of channel names to reconnect (e.g., ["mic_48k", "cam_360p", "cam_720p"])
    */
   async reconnectStreams(channelNames: ChannelName[]): Promise<void> {
     if (!this.isPublishing || !this.streamManager) {
@@ -1114,7 +1173,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       // Resend config for reconnected channels
       // Audio config
-      if (channelNames.includes(ChannelName.MICROPHONE) && this.audioProcessor && this.audioEncoderManager) {
+      if (channelNames.includes(ChannelName.MIC_48K) && this.audioProcessor && this.audioEncoderManager) {
         log("[Publisher] Resending audio config...");
         // Manually resend saved audio config
         await this.audioProcessor.resendConfig();
@@ -1122,7 +1181,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       // Video config - resend saved config directly
       const videoChannels = channelNames.filter(
-        (ch: ChannelName) => ch === ChannelName.VIDEO_360P || ch === ChannelName.VIDEO_720P
+        (ch: ChannelName) => ch === ChannelName.CAM_360P || ch === ChannelName.CAM_720P
       );
       if (videoChannels.length > 0 && this.videoProcessor) {
         log("[Publisher] Video channels reconnected, resending config...");
@@ -1199,7 +1258,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     if (hasScreenAudio) {
       const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
       if (AudioContextClass) {
-        screenAudioContext = new AudioContextClass({ sampleRate: 48000 }) as AudioContext;
+        screenAudioContext = new AudioContextClass({ sampleRate: AUDIO_CONFIG.SAMPLE_RATE }) as AudioContext;
         screenAudioContext.resume().catch(() => { });
       }
     }
@@ -1250,13 +1309,13 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
       // Wait for video config to be sent before announcing screen share
       log(`[Publisher] Waiting for screen share video config to be sent...`);
-      await this.waitForConfigSent(ChannelName.SCREEN_SHARE_720P, 5000);
+      await this.waitForConfigSent(ChannelName.SCREEN_SHARE_720P, TRANSPORT.CONFIG_WAIT_TIMEOUT);
       log(`[Publisher] Screen share video config sent successfully`);
 
       // Also wait for audio config if we have audio
       if (hasAudio) {
         log(`[Publisher] Waiting for screen share audio config to be sent...`);
-        await this.waitForConfigSent(ChannelName.SCREEN_SHARE_AUDIO, 5000);
+        await this.waitForConfigSent(ChannelName.SCREEN_SHARE_AUDIO, TRANSPORT.CONFIG_WAIT_TIMEOUT);
         log(`[Publisher] Screen share audio config sent successfully`);
       }
 
@@ -1399,21 +1458,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       updatedSubStreams as any
     );
 
-    // Register screen share channels with congestion controller for GCC monitoring
-    if (this.adaptiveMediaController) {
-      for (const sub of updatedSubStreams) {
-        if (sub.bitrate && sub.framerate) {
-          this.adaptiveMediaController.registerChannel(sub.channelName, sub.bitrate, sub.framerate);
-        }
-      }
-      this.adaptiveMediaController.setScreenVideoProcessor(this.screenVideoProcessor);
 
-      // Update monitor's initial bitrate to include screen share demand
-      const totalBitrate = this.adaptiveMediaController.getTotalRegisteredBitrate();
-      this.networkQualityMonitor?.updateInitialBitrate(totalBitrate);
-
-      log("[Publisher] Screen share channels registered with GCC allocator");
-    }
 
     this.screenVideoProcessor.on("encoderError", (error) => {
       console.error("[Publisher] Screen video encoder error:", error);
@@ -1452,7 +1497,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     }
 
     const audioConfig = {
-      sampleRate: 48000,
+      sampleRate: AUDIO_CONFIG.SAMPLE_RATE,
       numberOfChannels: 2,
     };
 
@@ -1501,18 +1546,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         this.screenVideoProcessor = null;
       }
 
-      // Unregister screen share channels from congestion controller
-      if (this.adaptiveMediaController) {
-        this.adaptiveMediaController.unregisterChannel(ChannelName.SCREEN_SHARE_720P);
-        this.adaptiveMediaController.unregisterChannel(ChannelName.SCREEN_SHARE_AUDIO);
-        this.adaptiveMediaController.setScreenVideoProcessor(null);
 
-        // Update monitor's initial bitrate to exclude screen share demand
-        const totalBitrate = this.adaptiveMediaController.getTotalRegisteredBitrate();
-        this.networkQualityMonitor?.updateInitialBitrate(totalBitrate);
-
-        log("[Publisher] Screen share channels unregistered from GCC allocator");
-      }
 
       // Close video encoder manager
       if (this.screenVideoEncoderManager) {
@@ -1807,126 +1841,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
   // ---- GCC Congestion Control (draft-ietf-rmcat-gcc-02) ----
 
-  /**
-   * Start GCC-based congestion control.
-   * Called after publishing starts successfully.
-   */
-  private startCongestionControl(): void {
-    // Create GCC engine
-    this.networkQualityMonitor = new NetworkQualityMonitor();
 
-    // Create bitrate allocator and register video channels
-    this.adaptiveMediaController = new AdaptiveMediaController();
-    this.adaptiveMediaController.setVideoProcessor(this.videoProcessor);
-
-    // Calculate initial total bitrate from substream configs
-    let initialBitrate = 0;
-    for (const sub of this.subStreams) {
-      if (sub.bitrate && sub.framerate) {
-        this.adaptiveMediaController.registerChannel(
-          sub.channelName,
-          sub.bitrate,
-          sub.framerate,
-        );
-        initialBitrate += sub.bitrate;
-      }
-    }
-
-    // Wire up: GCC target bitrate → allocate across channels
-    this.networkQualityMonitor.on("targetBitrateChanged", ({ targetBitrate }) => {
-      this.adaptiveMediaController?.applyTargetBitrate(targetBitrate);
-    });
-
-    // Wire up: quality change → global event bus for UI notifications
-    //          + immediate video pause on POOR/CRITICAL to free bandwidth for audio
-    this.networkQualityMonitor.on("networkQualityChanged", (data) => {
-      globalEventBus.emit(GlobalEvents.NETWORK_QUALITY_CHANGED, {
-        quality: data.quality,
-        previousQuality: data.previousQuality,
-        signals: data.signals,
-        rttMs: data.rttMs,
-        backpressureRate: data.backpressureRate,
-      });
-
-      // Immediate video kill: when quality drops to POOR/CRITICAL, pause all
-      // video channels NOW to free 100% bandwidth for audio. Don't wait for
-      // the targetBitrateChanged → applyTargetBitrate flow — that path goes
-      // through proportional allocation which may still give video some budget.
-      if (data.quality === 'POOR' || data.quality === 'CRITICAL') {
-        this.adaptiveMediaController?.pauseAllVideo();
-        console.log(
-          `[Publisher] ⚡ Quality=${data.quality} — paused ALL video to protect audio`,
-        );
-      }
-    });
-
-    // Set the adaptive controller on StreamManager so it can skip frames
-    if (this.streamManager) {
-      this.streamManager.setAdaptiveController(this.adaptiveMediaController);
-
-      // Wire GOP abort: when controller pauses a channel, abort its GOP stream
-      // to flush buffered video frames and stop clogging bandwidth
-      this.adaptiveMediaController.setGopAbortCallback((channelName) =>
-        this.streamManager!.abortGopForChannel(channelName)
-      );
-
-      // Route arrival_feedback and app_rtt from StreamManager → GCC engine
-      this.streamManager.setArrivalFeedbackCallback((feedback) => {
-        if (feedback.type === 'app_rtt') {
-          this.networkQualityMonitor?.onAppRtt(feedback.rtt_ms, feedback.seq);
-        } else {
-          this.onArrivalFeedback(feedback);
-        }
-      });
-
-      // Provide local write failure rate as loss signal
-      // (since Node doesn't have per-frame tracking yet)
-      const sm = this.streamManager;
-      this.networkQualityMonitor.setLocalLossProvider(() => sm.getBackpressureStats());
-    }
-
-    this.networkQualityMonitor.start(initialBitrate > 0 ? initialBitrate : undefined);
-    log("[Publisher] GCC congestion control started");
-  }
-
-  /**
-   * Stop GCC congestion control and clean up.
-   */
-  private stopCongestionControl(): void {
-    if (this.networkQualityMonitor) {
-      this.networkQualityMonitor.stop();
-      this.networkQualityMonitor.removeAllListeners();
-      this.networkQualityMonitor = null;
-    }
-    if (this.adaptiveMediaController) {
-      this.adaptiveMediaController.dispose();
-      this.adaptiveMediaController = null;
-    }
-    if (this.streamManager) {
-      this.streamManager.setAdaptiveController(null);
-      this.streamManager.setArrivalFeedbackCallback(null);
-    }
-    log("[Publisher] GCC congestion control stopped");
-  }
-
-  /**
-   * Get current GCC stats for monitoring UI.
-   * Returns null if congestion control is not active.
-   */
-  getNetworkQuality(): { stats: GCCStats | null; allocation: AllocationSummary | null } {
-    return {
-      stats: this.networkQualityMonitor?.getStats() ?? null,
-      allocation: this.adaptiveMediaController?.getAllocationSummary() ?? null,
-    };
-  }
-
-  /**
-   * Feed an ArrivalFeedback message from Meeting Node.
-   * Called when the MeetingControl bidi stream receives an arrival_feedback event.
-   */
-  onArrivalFeedback(feedback: ArrivalFeedback): void {
-    this.networkQualityMonitor?.onArrivalFeedback(feedback);
-  }
 
   /**
    * Start monitoring connection health
@@ -1961,7 +1876,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
         log("[Publisher] ⚠️ Connection health check failed, attempting reconnection...");
         await this.handleConnectionFailure();
       }
-    }, 5000);
+    }, TRANSPORT.CONFIG_WAIT_TIMEOUT);
   }
 
   /**
@@ -2310,7 +2225,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       log("[Publisher] Tab capture already in progress, waiting...");
       const startTime = Date.now();
       while (this.isCapturingTab) {
-        if (Date.now() - startTime > 30000) { // 30s timeout
+        if (Date.now() - startTime > TRANSPORT.RECONNECT_POLL_TIMEOUT) { // 30s timeout
           throw new Error("Timeout waiting for pending tab capture");
         }
         await new Promise((resolve) => setTimeout(resolve, 200));
@@ -2485,7 +2400,7 @@ export class Publisher extends EventEmitter<PublisherEvents> {
     // Audio processor for livestream - use AAC encoder for HLS compatibility
     if (this.mixedAudioStream) {
       const audioConfig = {
-        sampleRate: 48000,
+        sampleRate: AUDIO_CONFIG.SAMPLE_RATE,
         numberOfChannels: 2, // Stereo for better HLS compatibility
       };
 
@@ -2746,8 +2661,8 @@ export class Publisher extends EventEmitter<PublisherEvents> {
       // Wait for configs to be sent before sending START_RECORD
       log("[Publisher] Waiting for recording configs to be sent...");
       await Promise.all([
-        this.waitForConfigSent(ChannelName.LIVESTREAM_720P, 5000),
-        this.waitForConfigSent(ChannelName.LIVESTREAM_AUDIO, 5000),
+        this.waitForConfigSent(ChannelName.LIVESTREAM_720P, TRANSPORT.CONFIG_WAIT_TIMEOUT),
+        this.waitForConfigSent(ChannelName.LIVESTREAM_AUDIO, TRANSPORT.CONFIG_WAIT_TIMEOUT),
       ]);
       log("[Publisher] Recording configs sent, sending START_RECORD event");
 

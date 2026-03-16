@@ -4,7 +4,6 @@ import { ChannelName, FrameType, getStreamPriority } from "../../../types/media/
 import type {
   StreamData,
   ServerEvent,
-  StreamDataGop,
 } from "../../../types/media/publisher.types";
 import { PacketBuilder } from "../../shared/utils/PacketBuilder";
 import type { RaptorQConfig } from "../../shared/utils/PacketBuilder";
@@ -13,8 +12,14 @@ import { LengthDelimitedReader } from "../../shared/utils/LengthDelimitedReader"
 import CommandSender, { PublisherState } from "../ClientCommand";
 import { log } from "../../../utils";
 import type { WebRTCManager } from "./WebRTCManager";
-import { GopStreamSender } from "./GopStreamSender";
-import type { AdaptiveMediaController } from "../congestion/AdaptiveMediaController";
+import { GopStreamSender, type StreamDataGop } from "./GopStreamSender";
+import { AudioStreamSender, type StreamDataAudio } from "./AudioStreamSender";
+import { AudioDatagramSender } from "./AudioDatagramSender";
+import { VideoSendStrategy } from "../strategies/VideoSendStrategy";
+import { AudioSendStrategy } from "../strategies/AudioSendStrategy";
+import { CongestionController, CongestionLevel } from "../controllers/CongestionController";
+import { SendGate } from "../controllers/SendGate";
+import { TRANSPORT, FEC, WEBRTC_BUFFER } from "../../../constants/transportConstants";
 
 // Default publisher state - will be updated by Publisher
 const DEFAULT_PUBLISHER_STATE: PublisherState = {
@@ -61,6 +66,12 @@ export class StreamManager extends EventEmitter<{
   streamReady: { channelName: ChannelName };
   configSent: { channelName: ChannelName };
   serverEvent: ServerEvent; // Events received from server
+  connectionQuality: {
+    level: CongestionLevel;
+    previousLevel: CongestionLevel;
+    videoPaused: boolean;
+    latencyEMA: number;
+  };
 }> {
   private streams = new Map<ChannelName, StreamData>();
   private isWebRTC: boolean;
@@ -86,35 +97,36 @@ export class StreamManager extends EventEmitter<{
   public streamId: string;
   private publisherState: PublisherState = { ...DEFAULT_PUBLISHER_STATE };
   private gopSenders = new Map<ChannelName, StreamDataGop>();
-  private readonly VIDEO_GOP_SIZE = 30;
-  private readonly AUDIO_GOP_SIZE = 50; // 50 frames per stream — ~1 second of audio
+  private audioSenders = new Map<ChannelName, StreamDataAudio>();
+  private readonly VIDEO_GOP_SIZE = TRANSPORT.VIDEO_GOP_SIZE;
+  private readonly AUDIO_BATCH_SIZE = TRANSPORT.AUDIO_BATCH_SIZE;
 
-  // Network congestion handling (client-side)
-  private _adaptiveController: AdaptiveMediaController | null = null;
-  private _writeTimeoutReportTimer: ReturnType<typeof setInterval> | null = null;
-  private _arrivalFeedbackCallback: ((feedback: any) => void) | null = null;
+  // --- Congestion controller (progressive degradation) ---
+  private _congestionController = new CongestionController();
+  private _sendGate: SendGate;
 
-  // Central write failure tracking (10s sliding window)
-  // Tracks ALL write attempts and failures across all senders
-  private _centralWriteAttempts: number[] = []; // timestamps
-  private _centralWriteFailures: number[] = []; // timestamps
-  private static readonly FAILURE_WINDOW_MS = 5_000;
-
-  // Audio TX packet loss diagnostics
-  private _audioTxSent = 0;
-  private _audioTxDropped = 0;
-  private _audioTxRetried = 0;
-  private static readonly AUDIO_TX_LOG_INTERVAL = 500;
 
   // Platform detection — Android MIC needs GOP batching to avoid backpressure
   private readonly isAndroid: boolean;
+  // Hybrid mode: audio channels use WebRTC, video uses WebTransport
+  private readonly isHybrid: boolean;
 
-  constructor(isWebRTC: boolean = false, streamID?: string) {
+  // Media send strategies (separated video / audio logic)
+  private videoStrategy: VideoSendStrategy;
+  private audioStrategy: AudioSendStrategy;
+
+  // Audio datagrams (unreliable, low-latency path)
+  private readonly useAudioDatagrams: boolean;
+  private datagramSender: AudioDatagramSender | null = null;
+
+  constructor(isWebRTC: boolean = false, streamID?: string, isHybrid: boolean = false, useAudioDatagrams: boolean = false, useSendGate: boolean = false) {
     super();
     this.isWebRTC = isWebRTC;
+    this.isHybrid = isHybrid;
+    this.useAudioDatagrams = useAudioDatagrams;
     this.streamId = streamID || "default_stream";
     this.isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
-    console.log(`[StreamManager] isAndroid: ${this.isAndroid}`);
+    log(`[StreamManager] isAndroid: ${this.isAndroid}, isHybrid: ${this.isHybrid}`);
 
     if (isWebRTC) {
       // Eagerly start the FEC worker so WASM is loaded before the first packet
@@ -123,6 +135,7 @@ export class StreamManager extends EventEmitter<{
       });
     }
 
+    // In hybrid mode, command sender uses WebTransport (meeting_control stays on WT)
     this.commandSender = isWebRTC ? new CommandSender({
       protocol: "webrtc",
       sendDataFn: this.sendViaDataChannel.bind(this),
@@ -130,6 +143,31 @@ export class StreamManager extends EventEmitter<{
       protocol: "webtransport",
       sendDataFn: this.sendViaWebTransport.bind(this),
     });
+
+    // Initialize send gate (virtual queue) and media send strategies
+    this._sendGate = new SendGate(this._congestionController);
+    const sendPacket = this.sendPacket.bind(this);
+    const getSeq = this.getAndIncrementSequence.bind(this);
+
+    this.videoStrategy = new VideoSendStrategy(
+      this.gopSenders,
+      sendPacket,
+      getSeq,
+      isWebRTC,
+      this.VIDEO_GOP_SIZE,
+      useSendGate ? this._sendGate : undefined,
+    );
+
+    // In hybrid mode, audio takes the WebRTC (sendPacket fallback) path
+    // even though isWebRTC is false for the overall StreamManager
+    this.audioStrategy = new AudioSendStrategy(
+      this.audioSenders,
+      sendPacket,
+      getSeq,
+      isWebRTC || isHybrid, // hybrid audio → WebRTC DataChannel path
+      this.isAndroid,
+      this.AUDIO_BATCH_SIZE,
+    );
   }
 
   /**
@@ -236,6 +274,16 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
+   * Initialize FEC worker for hybrid mode.
+   * Called by Publisher when audio channels will use WebRTC DataChannels.
+   * In pure WebRTC mode this is done eagerly in the constructor;
+   * in hybrid mode it must be called explicitly since isWebRTC is false.
+   */
+  async initFecWorkerForHybrid(): Promise<void> {
+    return this.initFecWorker();
+  }
+
+  /**
    * Offload RaptorQ FEC encoding to the worker thread.
    * Returns the array of encoded FEC packet buffers and the RaptorQ config
    * needed to build the on-wire packet headers.
@@ -272,18 +320,49 @@ export class StreamManager extends EventEmitter<{
 
     for (const channelName of channelNames) {
       await this.createBidirectionalStream(channelName);
-      // Initialize GOP sender for video channels
-      const gopSender = new GopStreamSender(this.webTransport, this.streamId);
-      this.gopSenders.set(channelName, {
-        gopId: 0,
-        gopSender,
-        currentGopFrames: 0,
-      });
+
+      if (this.isAudioChannel(channelName)) {
+        // Audio channels use AudioStreamSender
+        const audioSender = new AudioStreamSender(this.webTransport, this.streamId, this._congestionController);
+        this.audioSenders.set(channelName, {
+          batchId: 0,
+          audioSender,
+          currentBatchFrames: 0,
+        });
+      } else {
+        // Video channels use GopStreamSender
+        const gopSender = new GopStreamSender(
+          this.webTransport, this.streamId,
+          this._congestionController,
+        );
+        this.gopSenders.set(channelName, {
+          gopId: 0,
+          gopSender,
+          currentGopFrames: 0,
+        });
+      }
     }
 
     log(
       `[StreamManager] Initialized ${channelNames.length} WebTransport streams`,
     );
+
+    // --- Audio datagrams: create sender and rebuild strategy ---
+    if (this.useAudioDatagrams && !this.isWebRTC) {
+      this.datagramSender = new AudioDatagramSender(webTransport);
+      const sendPacket = this.sendPacket.bind(this);
+      const getSeq = this.getAndIncrementSequence.bind(this);
+      this.audioStrategy = new AudioSendStrategy(
+        this.audioSenders,
+        sendPacket,
+        getSeq,
+        this.isWebRTC || this.isHybrid,
+        this.isAndroid,
+        this.AUDIO_BATCH_SIZE,
+        this.datagramSender,
+      );
+      log('[StreamManager] Audio datagrams ENABLED — audio will use unreliable datagrams');
+    }
   }
 
   /**
@@ -296,21 +375,38 @@ export class StreamManager extends EventEmitter<{
       return;
     }
 
-    if (this.isWebRTC) {
-      // Create WebRTC data channel for screen share
+    // In hybrid mode, route hybrid audio channels (MIC, screen share audio)
+    // to WebRTC DataChannel; everything else goes to WebTransport.
+    const useWebRTC = this.isWebRTC || (this.isHybrid && this.isHybridAudioChannel(channelName));
+
+    if (useWebRTC) {
+      // Create WebRTC data channel
       await this.createDataChannelForScreenShare(channelName);
     } else {
       // Create WebTransport bidirectional stream
       await this.createBidirectionalStream(channelName);
-      // Also create GOP sender so media goes through uni-streams (not bidi)
-      if (this.webTransport && !this.gopSenders.has(channelName)) {
-        const gopSender = new GopStreamSender(this.webTransport, this.streamId);
-        this.gopSenders.set(channelName, {
-          gopId: 0,
-          gopSender,
-          currentGopFrames: 0,
-        });
-        console.log(`[StreamManager] Created GOP sender for dynamically added channel: ${channelName}`);
+      // Also create stream sender so media goes through uni-streams (not bidi)
+      if (this.webTransport) {
+        if (this.isAudioChannel(channelName) && !this.audioSenders.has(channelName)) {
+          const audioSender = new AudioStreamSender(this.webTransport, this.streamId, this._congestionController);
+          this.audioSenders.set(channelName, {
+            batchId: 0,
+            audioSender,
+            currentBatchFrames: 0,
+          });
+          log(`[StreamManager] Created audio sender for dynamically added channel: ${channelName}`);
+        } else if (!this.isAudioChannel(channelName) && !this.gopSenders.has(channelName)) {
+          const gopSender = new GopStreamSender(
+            this.webTransport, this.streamId,
+            this._congestionController,
+          );
+          this.gopSenders.set(channelName, {
+            gopId: 0,
+            gopSender,
+            currentGopFrames: 0,
+          });
+          log(`[StreamManager] Created GOP sender for dynamically added channel: ${channelName}`);
+        }
       }
     }
   }
@@ -371,7 +467,9 @@ export class StreamManager extends EventEmitter<{
       if (channelName === ChannelName.MEETING_CONTROL) {
         const streamData = this.streams.get(channelName);
         // Use the publisher state set by Publisher
-        if (streamData) {
+        // In hybrid mode, defer publisher_state until WebRTC channels are also connected
+        // (see sendDeferredPublisherState called from Publisher after connectMultipleChannels)
+        if (streamData && !this.isHybrid) {
           this.commandSender?.sendPublisherState(streamData, this.publisherState);
           log("[StreamManager] Sent initial publisher state (WebTransport):", this.publisherState);
           this.commandSender?.startHeartbeat(streamData);
@@ -449,19 +547,15 @@ export class StreamManager extends EventEmitter<{
 
           try {
             const event = JSON.parse(messageStr);
-            if (event.type !== 'arrival_feedback' && event.type !== 'pong') {
+
+            // Intercept connection_stats — feed to congestion controller, don't emit globally
+            if (event.type === 'connection_stats') {
+              this._congestionController.updateFromServerStats(event);
+              continue;
+            }
+
+            if (event.type !== 'pong') {
               log(`[StreamManager] Received server event:`, event);
-            }
-
-            // Route arrival_feedback directly to GCC engine
-            if (event.type === "arrival_feedback" && this._arrivalFeedbackCallback) {
-              this._arrivalFeedbackCallback(event);
-            }
-
-            // Route pong for app-level RTT measurement
-            if (event.type === "pong" && event.ts && this._arrivalFeedbackCallback) {
-              const appRttMs = Date.now() - event.ts;
-              this._arrivalFeedbackCallback({ type: "app_rtt", rtt_ms: appRttMs, seq: event.seq });
             }
 
             // Emit to global event bus
@@ -503,19 +597,8 @@ export class StreamManager extends EventEmitter<{
         const serverEvent = JSON.parse(messageStr);
 
         // Skip logging noisy high-frequency events
-        if (serverEvent.type !== 'arrival_feedback' && serverEvent.type !== 'pong') {
+        if (serverEvent.type !== 'pong') {
           log(`[StreamManager] Received server event via data channel (${channelName}):`, serverEvent);
-        }
-
-        // Route arrival_feedback directly to GCC engine (same as WebTransport path)
-        if (serverEvent.type === "arrival_feedback" && this._arrivalFeedbackCallback) {
-          this._arrivalFeedbackCallback(serverEvent);
-        }
-
-        // Route pong for app-level RTT measurement (same as WebTransport path)
-        if (serverEvent.type === "pong" && serverEvent.ts && this._arrivalFeedbackCallback) {
-          const appRttMs = Date.now() - serverEvent.ts;
-          this._arrivalFeedbackCallback({ type: "app_rtt", rtt_ms: appRttMs, seq: serverEvent.seq });
         }
 
         // Emit to global event bus
@@ -548,18 +631,13 @@ export class StreamManager extends EventEmitter<{
 
     log(`[StreamManager] Data channel created for ${channelName}, readyState: ${dataChannel.readyState}`);
 
-    const bufferAmounts = {
-      SMALL: 8192,
-      LOW: 16384,
-      MEDIUM: 32768,
-      HIGH: 65536,
-    };
+    const bufferAmounts = WEBRTC_BUFFER;
 
     if (channelName.includes("1080p")) {
       dataChannel.bufferedAmountLowThreshold = bufferAmounts.HIGH;
     } else if (channelName.includes("720p")) {
       dataChannel.bufferedAmountLowThreshold = bufferAmounts.MEDIUM;
-    } else if (channelName.includes("360p") || channelName === ChannelName.MICROPHONE) {
+    } else if (channelName.includes("360p") || channelName === ChannelName.MIC_48K) {
       dataChannel.bufferedAmountLowThreshold = bufferAmounts.LOW;
     } else {
       dataChannel.bufferedAmountLowThreshold = bufferAmounts.MEDIUM;
@@ -634,7 +712,7 @@ export class StreamManager extends EventEmitter<{
           }
 
           // Start heartbeat for WebRTC meeting_control channel
-          console.log("[StreamManager] Starting heartbeat for WebRTC meeting_control channel");
+          log("[StreamManager] Starting heartbeat for WebRTC meeting_control channel");
           this.commandSender?.startHeartbeat(streamData);
         }
 
@@ -684,9 +762,8 @@ export class StreamManager extends EventEmitter<{
     await this.commandSender?.sendEvent(streamData, event);
   }
   /**
-   * Send video chunk (EXACT copy from JS handleVideoChunk logic)
-   * Handles both native EncodedVideoChunk (with copyTo method) and 
-   * WASM encoder chunks (with data property as ArrayBuffer/Uint8Array)
+   * Send video chunk.
+   * Delegates actual send logic to VideoSendStrategy.
    */
   async sendVideoChunk(
     channelName: ChannelName,
@@ -695,129 +772,17 @@ export class StreamManager extends EventEmitter<{
     _metadata?: EncodedVideoChunkMetadata,
   ): Promise<void> {
     const streamData = this.streams.get(channelName);
-    if (!streamData) {
-      return;
-    }
+    if (!streamData) return;
 
     // Skip if config not sent yet
-    if (!streamData.configSent) {
-      return;
-    }
+    if (!streamData.configSent) return;
 
-    // Adaptive congestion: check if this frame should be skipped
-    if (this._adaptiveController?.shouldSkipFrame(channelName)) {
-      return;
-    }
-
-    const chunkType: "key" | "delta" = chunk.type === "key" ? "key" : "delta";
-    const frameType = FrameTypeHelper.getFrameType(channelName, chunkType);
-
-    let arrayBuffer: ArrayBuffer;
-
-    // Handle both native EncodedVideoChunk and WASM encoder chunks
-    // Prioritize chunk.data (WASM) as it is direct access and avoids potential copyTo issues
-    if (chunk.data) {
-      // WASM encoder chunk - data is already ArrayBuffer or Uint8Array
-      if (chunk.data instanceof ArrayBuffer) {
-        arrayBuffer = chunk.data;
-      } else if (chunk.data instanceof Uint8Array) {
-        arrayBuffer = chunk.data.buffer.slice(
-          chunk.data.byteOffset,
-          chunk.data.byteOffset + chunk.data.byteLength
-        );
-      } else {
-        console.error('[StreamManager] Unknown chunk data type:', typeof chunk.data);
-        return;
-      }
-    } else if (typeof chunk.copyTo === 'function') {
-      // Native EncodedVideoChunk - use copyTo method
-      try {
-        arrayBuffer = new ArrayBuffer(chunk.byteLength);
-        chunk.copyTo(arrayBuffer);
-      } catch (err) {
-        console.error('[StreamManager] chunk.copyTo failed:', err);
-        return;
-      }
-    } else {
-      console.error('[StreamManager] Unknown chunk format - no copyTo or data property');
-      return;
-    }
-
-    const sequenceNumber = this.getAndIncrementSequence(channelName);
-    const packet = PacketBuilder.createPacket(
-      arrayBuffer,
-      chunk.timestamp,
-      frameType,
-      sequenceNumber,
-    );
-
-    let channel: number;
-    switch (channelName) {
-      case ChannelName.MEETING_CONTROL:
-        channel = 0;
-        break;
-      case ChannelName.VIDEO_360P:
-        channel = 1;
-        break;
-      case ChannelName.VIDEO_720P:
-        channel = 2;
-        break;
-      case ChannelName.SCREEN_SHARE_720P:
-        channel = 3;
-        break;
-      case ChannelName.SCREEN_SHARE_1080P:
-        channel = 4;
-        break;
-      case ChannelName.MICROPHONE:
-        channel = 5;
-        break;
-      case ChannelName.SCREEN_SHARE_AUDIO:
-        channel = 6;
-        break;
-      case ChannelName.VIDEO_1080P:
-        channel = 9;
-        break;
-      case ChannelName.VIDEO_1440P:
-        channel = 10;
-        break;
-      default:
-        channel = 2; // Default to Video720p
-    }
-
-    const isKeyframe = chunk.type === "key";
-
-    const gopData = this.gopSenders.get(channelName);
-    const gopSender = gopData?.gopSender;
-    // use GOP sender if iswebtransport
-    if (!this.isWebRTC && gopSender) {
-      if (isKeyframe) {
-        await gopSender.startGop(channel, this.VIDEO_GOP_SIZE, getStreamPriority(channelName));
-        gopData.currentGopFrames = 0;
-      }
-
-      // Send frame
-      const sent = await gopSender.sendFrame(
-        packet,
-        chunk.timestamp,
-        frameType
-      );
-
-      // Track write result centrally for congestion detection
-      if (sent) {
-        this._recordCentralWrite(false);
-      } else {
-        this._recordCentralWrite(true);
-      }
-
-      gopData.currentGopFrames++;
-    } else {
-      console.warn(`[StreamManager] ⚠️ Video fallback to BIDI stream: channel=${channelName} isWebRTC=${this.isWebRTC} gopSender=${!!gopSender} gopData=${!!gopData}`);
-      await this.sendPacket(channelName, packet, frameType);
-    }
+    await this.videoStrategy.send(channelName, chunk, _metadata);
   }
 
   /**
    * Send audio chunk.
+   * Handles transport-level readiness checks, then delegates to AudioSendStrategy.
    */
   async sendAudioChunk(
     channelName: ChannelName,
@@ -829,7 +794,7 @@ export class StreamManager extends EventEmitter<{
     // Wait for stream to be ready if not yet available (fixes Safari timing issue)
     if (!streamData) {
       try {
-        streamData = await this.waitForStream(channelName, 5000); // 5 second timeout
+        streamData = await this.waitForStream(channelName, TRANSPORT.CONFIG_WAIT_TIMEOUT);
         log(`[StreamManager] Stream ${channelName} is now ready for audio`);
       } catch (error) {
         console.warn(`[StreamManager] Failed to wait for stream ${channelName} for audio:`, error);
@@ -851,72 +816,7 @@ export class StreamManager extends EventEmitter<{
       return;
     }
 
-    const sequenceNumber = this.getAndIncrementSequence(channelName);
-    const packet = PacketBuilder.createPacket(
-      audioData,
-      timestamp,
-      FrameType.AUDIO,
-      sequenceNumber,
-    );
-
-    // On WebTransport, route audio through uni-streams.
-    // Android MIC: use 50-frame GOP batch rotation (avoids backpressure on Android WebView).
-    // All other audio: single persistent uni-stream (avoids broadcast race / packet reordering).
-    const gopData = this.gopSenders.get(channelName);
-    const gopSender = gopData?.gopSender;
-    if (!this.isWebRTC && gopSender) {
-      const channel = channelName === ChannelName.SCREEN_SHARE_AUDIO ? 6 : 5;
-      const useGopBatching = this.isAndroid && channelName === ChannelName.MICROPHONE;
-
-      if (useGopBatching) {
-        // Android MIC: rotate stream every AUDIO_GOP_SIZE frames
-        if (gopData.currentGopFrames >= this.AUDIO_GOP_SIZE || gopData.currentGopFrames === 0) {
-          await gopSender.startGopGraceful(channel, this.AUDIO_GOP_SIZE, getStreamPriority(channelName));
-          gopData.currentGopFrames = 0;
-        }
-      } else {
-        // Persistent stream for all other audio
-        await gopSender.ensurePersistentStream(channel, getStreamPriority(channelName));
-      }
-
-      let sent = await gopSender.sendFrame(packet, timestamp, FrameType.AUDIO);
-      if (sent) {
-        this._audioTxSent++;
-        this._recordCentralWrite(false);
-        if (useGopBatching) gopData.currentGopFrames++;
-      } else {
-        // Stream died — reopen and retry
-        this._audioTxRetried++;
-        this._recordCentralWrite(true);
-        console.warn(`[Audio TX] SEND FAILED seq=${sequenceNumber}, reopening stream…`);
-        if (useGopBatching) {
-          await gopSender.startGopGraceful(channel, this.AUDIO_GOP_SIZE, getStreamPriority(channelName));
-          gopData.currentGopFrames = 0;
-        } else {
-          await gopSender.ensurePersistentStream(channel, getStreamPriority(channelName));
-        }
-
-        // Retry the failed frame on the new stream
-        sent = await gopSender.sendFrame(packet, timestamp, FrameType.AUDIO);
-        if (sent) {
-          this._audioTxSent++;
-          this._recordCentralWrite(false);
-          if (useGopBatching) gopData.currentGopFrames++;
-        } else {
-          this._audioTxDropped++;
-          this._recordCentralWrite(true);
-          console.error(`[Audio TX] RETRY FAILED seq=${sequenceNumber} — frame dropped`);
-        }
-      }
-
-      // Periodic summary log
-      const totalAttempts = this._audioTxSent + this._audioTxDropped;
-      if (totalAttempts > 0 && totalAttempts % StreamManager.AUDIO_TX_LOG_INTERVAL === 0) {
-        console.log(`[Audio TX] sent=${this._audioTxSent} dropped=${this._audioTxDropped} retried=${this._audioTxRetried} lastSeq=${sequenceNumber} android=${this.isAndroid}`);
-      }
-    } else {
-      await this.sendPacket(channelName, packet, FrameType.AUDIO);
-    }
+    await this.audioStrategy.send(channelName, audioData, timestamp);
   }
 
   /**
@@ -928,7 +828,7 @@ export class StreamManager extends EventEmitter<{
     mediaType: "video" | "audio",
   ): Promise<void> {
     let streamData = this.streams.get(channelName);
-    console.log(`[StreamManager] sendConfig for ${channelName}, streamData:`, streamData, "config", config);
+    log(`[StreamManager] sendConfig for ${channelName}, streamData:`, streamData, "config", config);
 
     if (!streamData) {
       log(`[StreamManager] Stream ${channelName} not ready yet for config, waiting...`);
@@ -987,7 +887,27 @@ export class StreamManager extends EventEmitter<{
       };
     }
 
-    this.commandSender?.sendMediaConfig(channelName, streamData, JSON.stringify(configPacket));
+    // In hybrid mode, audio channels use WebRTC DataChannels.
+    // Send config directly to the DataChannel WITHOUT FEC encoding to guarantee
+    // it arrives before any audio frames (FEC encoding is async via worker).
+    // The WebRTC backend parses non-FEC PKT_PUBLISHER_COMMAND as raw UTF-8 JSON.
+    // Packet format: [chunkId:4][fecMarker:1=0x00][packetType:1=0xff][json_bytes]
+    const isHybridAudio = this.isHybrid && this.isHybridAudioChannel(channelName);
+    if (isHybridAudio && streamData.dataChannel && streamData.dataChannelReady) {
+      const configJson = JSON.stringify({ type: "media_config", data: JSON.stringify(configPacket) });
+      const jsonBytes = new TextEncoder().encode(configJson);
+      const sequenceNumber = this.getAndIncrementSequence(channelName);
+      // Build raw DataChannel packet: [chunkId:4][fecMarker:1][packetType:1][payload]
+      const raw = new Uint8Array(4 + 1 + 1 + jsonBytes.length);
+      const dv = new DataView(raw.buffer);
+      dv.setUint32(0, sequenceNumber, false); // chunkId
+      raw[4] = 0x00; // fecMarker = not FEC
+      raw[5] = 0xff; // packetType = PUBLISHER_COMMAND
+      raw.set(jsonBytes, 6);
+      streamData.dataChannel.send(raw);
+    } else if (!isHybridAudio) {
+      this.commandSender?.sendMediaConfig(channelName, streamData, JSON.stringify(configPacket));
+    }
 
 
     streamData.configSent = true;
@@ -1001,7 +921,7 @@ export class StreamManager extends EventEmitter<{
   /**
    * Wait for a stream to be ready
    */
-  private waitForStream(channelName: ChannelName, timeout = 10000): Promise<StreamData> {
+  private waitForStream(channelName: ChannelName, timeout: number = TRANSPORT.STREAM_WAIT_TIMEOUT): Promise<StreamData> {
     return new Promise((resolve, reject) => {
       // Check if already ready
       const existingStream = this.streams.get(channelName);
@@ -1088,7 +1008,9 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
-   * Send packet over transport
+   * Send packet over transport.
+   * In hybrid mode, route based on the stream's transport type
+   * (DataChannel for audio, WebTransport writer for video).
    */
   private async sendPacket(
     channelName: ChannelName,
@@ -1102,16 +1024,15 @@ export class StreamManager extends EventEmitter<{
     }
 
     try {
-      if (this.isWebRTC) {
+      // In hybrid mode, check per-stream transport type.
+      // Audio channels have dataChannel set, video channels have writer set.
+      const useDataChannel = this.isWebRTC || (this.isHybrid && !!streamData.dataChannel);
+      if (useDataChannel) {
         await this.sendViaDataChannel(channelName, streamData, packet, frameType);
       } else {
         await this.sendViaWebTransport(streamData, packet);
       }
     } catch (error) {
-      // console.error(
-      //   `[StreamManager] Error sending packet on ${channelName}:`,
-      //   error,
-      // );
       this.emit("sendError", { channelName, error });
       throw error;
     }
@@ -1129,13 +1050,8 @@ export class StreamManager extends EventEmitter<{
     }
 
     if (streamData.writer.desiredSize !== null && streamData.writer.desiredSize <= 0) {
-      // Report backpressure to monitor (buffer full = real congestion)
-      // this._networkMonitor?.reportBackpressure(true);
       return;
     }
-
-    // Report successful write (no backpressure)
-    // this._networkMonitor?.reportBackpressure(false);
 
     // Wrap packet with length-delimited format (4 bytes length prefix)
     const len = packet.length;
@@ -1181,12 +1097,12 @@ export class StreamManager extends EventEmitter<{
           await this.initFecWorker();
         }
 
-        const MAX_MTU = 512;
-        const MIN_MTU = 100;
-        const MIN_CHUNKS = 5;
-        const MAX_REDUNDANCY = 10;
-        const MIN_REDUNDANCY = 1;
-        const REDUNDANCY_RATIO = 0.1;
+        const MAX_MTU = FEC.MAX_MTU;
+        const MIN_MTU = FEC.MIN_MTU;
+        const MIN_CHUNKS = FEC.MIN_CHUNKS;
+        const MAX_REDUNDANCY = FEC.MAX_REDUNDANCY;
+        const MIN_REDUNDANCY = FEC.MIN_REDUNDANCY;
+        const REDUNDANCY_RATIO = FEC.REDUNDANCY_RATIO;
 
         let MTU = Math.ceil(packet.length / MIN_CHUNKS);
 
@@ -1206,10 +1122,10 @@ export class StreamManager extends EventEmitter<{
         }
 
         if (frameType === FrameType.CONFIG) {
-          redundancy = 3;
+          redundancy = FEC.CONFIG_REDUNDANCY;
         }
 
-        const HEADER_SIZE = 20;
+        const HEADER_SIZE = FEC.HEADER_SIZE;
         const chunkSize = MTU - HEADER_SIZE;
 
         // Offload the synchronous WASM encoding to the FEC worker
@@ -1291,78 +1207,14 @@ export class StreamManager extends EventEmitter<{
     return streamData.writer !== null;
   }
 
-  /**
-   * Set the adaptive media controller for frame skipping during congestion.
-   */
-  setAdaptiveController(controller: AdaptiveMediaController | null): void {
-    this._adaptiveController = controller;
-  }
 
-  /**
-   * Abort the current GOP stream for a channel, immediately discarding
-   * any buffered video frames in the QUIC write buffer.
-   * Called by AdaptiveMediaController when pausing a channel during congestion
-   * to prevent stale frames from clogging bandwidth.
-   */
-  async abortGopForChannel(channelName: ChannelName): Promise<void> {
-    const gopData = this.gopSenders.get(channelName);
-    if (gopData?.gopSender) {
-      await gopData.gopSender.abortCurrentGop('Congestion pause — flushing buffer');
-      gopData.currentGopFrames = 0;
-      console.log(`[StreamManager] Aborted GOP for ${channelName} — buffer flushed`);
-    }
-  }
-
-  /**
-   * Set callback to receive arrival_feedback events from Meeting Node.
-   * Used by Publisher to route feedback directly to GCC engine.
-   */
-  setArrivalFeedbackCallback(cb: ((feedback: any) => void) | null): void {
-    this._arrivalFeedbackCallback = cb;
-  }
-
-  /**
-   * Get the current backpressure ratio (0.0–1.0) for congestion detection.
-   * Uses the CENTRAL write failure tracker that counts ALL GOP + audio write
-   * failures across the last 10 seconds. This survives GopStreamSender abort/recreate.
-   */
-  getBackpressureStats(): number {
-    const now = Date.now();
-    const cutoff = now - StreamManager.FAILURE_WINDOW_MS;
-    this._pruneCentralWindow(cutoff);
-
-    if (this._centralWriteAttempts.length === 0) return 0;
-    return this._centralWriteFailures.length / this._centralWriteAttempts.length;
-  }
-
-  /** Record a write attempt (success or failure) in the central tracker. */
-  private _recordCentralWrite(failed: boolean): void {
-    const now = Date.now();
-    this._centralWriteAttempts.push(now);
-    if (failed) {
-      this._centralWriteFailures.push(now);
-    }
-    // Prune old entries
-    const cutoff = now - StreamManager.FAILURE_WINDOW_MS;
-    this._pruneCentralWindow(cutoff);
-  }
-
-  /** Remove entries older than cutoff from central sliding windows. */
-  private _pruneCentralWindow(cutoff: number): void {
-    while (this._centralWriteAttempts.length > 0 && this._centralWriteAttempts[0] < cutoff) {
-      this._centralWriteAttempts.shift();
-    }
-    while (this._centralWriteFailures.length > 0 && this._centralWriteFailures[0] < cutoff) {
-      this._centralWriteFailures.shift();
-    }
-  }
 
   /**
    * Wait for a stream to be ready (data channel open for WebRTC)
    * @param channelName - Channel to wait for
    * @param timeout - Timeout in milliseconds (default 10000ms)
    */
-  async waitForStreamReady(channelName: ChannelName, timeout = 10000): Promise<void> {
+  async waitForStreamReady(channelName: ChannelName, timeout: number = TRANSPORT.STREAM_WAIT_TIMEOUT): Promise<void> {
     const streamData = this.streams.get(channelName);
 
     // For WebTransport, stream is ready when writer is available (already sync)
@@ -1441,6 +1293,22 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
+   * Send publisher state + start heartbeat on the meeting_control channel.
+   * Called by Publisher in hybrid mode AFTER WebRTC channels are connected,
+   * so the server only learns about audio channels when their configs can be registered.
+   */
+  sendDeferredPublisherState(): void {
+    const streamData = this.streams.get(ChannelName.MEETING_CONTROL);
+    if (!streamData) {
+      console.warn("[StreamManager] Cannot send deferred publisher state — meeting_control not ready");
+      return;
+    }
+    this.commandSender?.sendPublisherState(streamData, this.publisherState);
+    log("[StreamManager] Sent deferred publisher state (hybrid):", this.publisherState);
+    this.commandSender?.startHeartbeat(streamData);
+  }
+
+  /**
    * Close specific stream
    */
   async closeStream(channelName: ChannelName): Promise<void> {
@@ -1467,23 +1335,77 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
-   * Cleanup all GOP senders
-   * Should be called when connection closes to prevent LocallyClosed errors
+   * Check if a channel name corresponds to an audio channel.
    */
-  cleanupGopSenders(): void {
+  private isAudioChannel(channelName: ChannelName): boolean {
+    return (
+      channelName === ChannelName.MIC_48K ||
+      channelName === ChannelName.SCREEN_SHARE_AUDIO ||
+      channelName === ChannelName.LIVESTREAM_AUDIO
+    );
+  }
+
+  /**
+   * Check if a channel should use WebRTC in hybrid mode.
+   * MIC_48K + SCREEN_SHARE_AUDIO — livestream audio stays on WebTransport.
+   */
+  private isHybridAudioChannel(channelName: ChannelName): boolean {
+    return (
+      channelName === ChannelName.MIC_48K ||
+      channelName === ChannelName.SCREEN_SHARE_AUDIO
+    );
+  }
+
+  // --- Congestion controller ---
+
+  /** Expose the congestion controller for VideoProcessor to subscribe. */
+  get congestionController(): CongestionController {
+    return this._congestionController;
+  }
+
+  /** Public accessor for CongestionController (used by Publisher for WebRTC stats). */
+  getCongestionController(): CongestionController {
+    return this._congestionController;
+  }
+
+  /** Current congestion level (0-4). */
+  get congestionLevel(): CongestionLevel {
+    return this._congestionController.level;
+  }
+
+  /**
+   * Cleanup all stream senders (both video GOP and audio senders).
+   * Should be called when connection closes to prevent LocallyClosed errors.
+   */
+  cleanupStreamSenders(): void {
     for (const [channelName, gopData] of this.gopSenders) {
       gopData.gopSender.cleanup();
       log(`[StreamManager] Cleaned up GOP sender for ${channelName}`);
     }
     this.gopSenders.clear();
+
+    for (const [channelName, audioData] of this.audioSenders) {
+      audioData.audioSender.cleanup();
+      log(`[StreamManager] Cleaned up audio sender for ${channelName}`);
+    }
+    this.audioSenders.clear();
+
+    // Cleanup datagram sender
+    if (this.datagramSender) {
+      this.datagramSender.cleanup();
+      this.datagramSender = null;
+    }
+
+    // Stop congestion controller timers
+    this._congestionController.dispose();
   }
 
   /**
    * Close all streams
    */
   async closeAll(): Promise<void> {
-    // Cleanup GOP senders first to prevent LocallyClosed errors
-    this.cleanupGopSenders();
+    // Cleanup stream senders first to prevent LocallyClosed errors
+    this.cleanupStreamSenders();
 
     const closePromises: Promise<void>[] = [];
 
@@ -1506,21 +1428,6 @@ export class StreamManager extends EventEmitter<{
       this.fecWorkerReadyPromise = null;
       log('[StreamManager] FEC worker terminated');
     }
-
-    // Stop network monitoring
-    if (this._writeTimeoutReportTimer) {
-      clearInterval(this._writeTimeoutReportTimer);
-      this._writeTimeoutReportTimer = null;
-    }
-    // if (this._networkMonitor) {
-    //   this._networkMonitor.stop();
-    //   this._networkMonitor = null;
-    // }
-    // if (this._adaptiveController) {
-    //   this._adaptiveController.destroy();
-    //   this._adaptiveController = null;
-    // }
-
     log("[StreamManager] All streams closed");
   }
 

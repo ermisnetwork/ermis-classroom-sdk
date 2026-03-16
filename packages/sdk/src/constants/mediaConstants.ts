@@ -19,51 +19,35 @@ export const PACKET_HEADER = {
  */
 export const DATA_CHANNEL_IDS: Record<ChannelName, number> = {
   [ChannelName.MEETING_CONTROL]: 0,
-  [ChannelName.MICROPHONE]: 1,
-  [ChannelName.VIDEO_360P]: 2,
-  [ChannelName.VIDEO_720P]: 3,
-  [ChannelName.VIDEO_1080P]: 9,
+  [ChannelName.MIC_48K]: 1,
+  [ChannelName.CAM_360P]: 2,
+  [ChannelName.CAM_720P]: 3,
+  [ChannelName.CAM_1080P]: 9,
   [ChannelName.SCREEN_SHARE_720P]: 4,
   [ChannelName.SCREEN_SHARE_1080P]: 5,
   [ChannelName.SCREEN_SHARE_AUDIO]: 6,
   [ChannelName.LIVESTREAM_720P]: 7,
   [ChannelName.LIVESTREAM_AUDIO]: 8,
-  [ChannelName.VIDEO_1440P]: 10,
+  [ChannelName.CAM_1440P]: 10,
 } as const;
 
 /**
- * Media constraints defaults
+ * WebTransport uni-stream channel numbers.
+ * Used in GOP stream headers to identify the channel on the wire.
+ * Must stay in sync with MeetingChannel::to_u8() on the Rust backend.
  */
-export const MEDIA_CONSTRAINTS = {
-  AUDIO: {
-    SAMPLE_RATE: 48000,
-    CHANNEL_COUNT: 2,
-    ECHO_CANCELLATION: true,
-    NOISE_SUPPRESSION: true,
-  },
-  VIDEO: {
-    DEFAULT_WIDTH: 1280,
-    DEFAULT_HEIGHT: 720,
-    DEFAULT_FRAMERATE: 30,
-    DEFAULT_BITRATE: 1_500_000,
-  },
-} as const;
-
-/**
- * Stream timeouts and intervals
- */
-export const TIMEOUTS = {
-  DATA_CHANNEL_OPEN: 5000,
-  CONNECTION_TIMEOUT: 10000,
-  RECONNECT_INTERVAL: 3000,
-} as const;
-
-/**
- * Audio encoder settings
- */
-export const AUDIO_ENCODER = {
-  SAMPLES_PER_CHUNK: 960, // 20ms at 48kHz
-  SAMPLE_RATE: 48000,
+export const CHANNEL_NUMBERS: Record<ChannelName, number> = {
+  [ChannelName.MEETING_CONTROL]: 0,
+  [ChannelName.CAM_360P]: 1,
+  [ChannelName.CAM_720P]: 2,
+  [ChannelName.SCREEN_SHARE_720P]: 3,
+  [ChannelName.SCREEN_SHARE_1080P]: 4,
+  [ChannelName.MIC_48K]: 5,
+  [ChannelName.SCREEN_SHARE_AUDIO]: 6,
+  [ChannelName.LIVESTREAM_720P]: 7,
+  [ChannelName.LIVESTREAM_AUDIO]: 8,
+  [ChannelName.CAM_1080P]: 9,
+  [ChannelName.CAM_1440P]: 10,
 } as const;
 
 /**
@@ -91,3 +75,13 @@ export const AUDIO_CONFIG = {
   OPUS_SAMPLES_PER_CHUNK: 960, // 20ms at 48kHz
   BITRATE: 64000,
 } as const;
+
+/**
+ * Video chunk type strings (WebCodecs API convention)
+ */
+export const CHUNK_TYPE = {
+  KEY: 'key',
+  DELTA: 'delta',
+} as const;
+
+export type ChunkType = (typeof CHUNK_TYPE)[keyof typeof CHUNK_TYPE];

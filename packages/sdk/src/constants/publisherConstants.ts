@@ -1,4 +1,6 @@
 import { ChannelName, FrameType, StreamTypes, SubStream, TransportPacketType } from '../types';
+import { CHUNK_TYPE } from './mediaConstants';
+import type { ChunkType } from './mediaConstants';
 
 export { FrameType, ChannelName, TransportPacketType, StreamTypes };
 
@@ -18,96 +20,69 @@ export type ClientCommand = (typeof CLIENT_COMMANDS)[keyof typeof CLIENT_COMMAND
 /**
  * Helper function to get frame type based on channel name and chunk type
  */
-export function getFrameType(channelName: string, chunkType: 'key' | 'delta'): number {
+export function getFrameType(channelName: string, chunkType: ChunkType): number {
   switch (channelName) {
-    case ChannelName.VIDEO_360P:
-      return chunkType === 'key' ? FrameType.CAM_360P_KEY : FrameType.CAM_360P_DELTA;
-    case ChannelName.VIDEO_720P:
-      return chunkType === 'key' ? FrameType.CAM_720P_KEY : FrameType.CAM_720P_DELTA;
-    case ChannelName.VIDEO_1080P:
-      return chunkType === 'key' ? FrameType.CAM_1080P_KEY : FrameType.CAM_1080P_DELTA;
-    case ChannelName.VIDEO_1440P:
-      return chunkType === 'key' ? FrameType.CAM_1440P_KEY : FrameType.CAM_1440P_DELTA;
+    case ChannelName.CAM_360P:
+      return chunkType === CHUNK_TYPE.KEY ? FrameType.CAM_360P_KEY : FrameType.CAM_360P_DELTA;
+    case ChannelName.CAM_720P:
+      return chunkType === CHUNK_TYPE.KEY ? FrameType.CAM_720P_KEY : FrameType.CAM_720P_DELTA;
+    case ChannelName.CAM_1080P:
+      return chunkType === CHUNK_TYPE.KEY ? FrameType.CAM_1080P_KEY : FrameType.CAM_1080P_DELTA;
+    case ChannelName.CAM_1440P:
+      return chunkType === CHUNK_TYPE.KEY ? FrameType.CAM_1440P_KEY : FrameType.CAM_1440P_DELTA;
     case ChannelName.SCREEN_SHARE_720P:
-      return chunkType === 'key' ? FrameType.SCREEN_SHARE_KEY : FrameType.SCREEN_SHARE_DELTA;
+      return chunkType === CHUNK_TYPE.KEY ? FrameType.SCREEN_SHARE_KEY : FrameType.SCREEN_SHARE_DELTA;
     case ChannelName.SCREEN_SHARE_1080P:
-      return chunkType === 'key' ? FrameType.SCREEN_SHARE_KEY : FrameType.SCREEN_SHARE_DELTA;
+      return chunkType === CHUNK_TYPE.KEY ? FrameType.SCREEN_SHARE_KEY : FrameType.SCREEN_SHARE_DELTA;
     case ChannelName.LIVESTREAM_720P:
-      return chunkType === 'key' ? FrameType.LIVESTREAM_KEY : FrameType.LIVESTREAM_DELTA;
+      return chunkType === CHUNK_TYPE.KEY ? FrameType.LIVESTREAM_KEY : FrameType.LIVESTREAM_DELTA;
     default:
       return FrameType.CAM_720P_KEY;
   }
 }
 
-/**
- * Helper function to get data channel ID from channel name
- */
-export function getDataChannelId(
-  channelName: string,
-  type: 'camera' | 'screenShare' | 'livestream' = 'camera',
-): number {
-  const mapping: Record<string, Record<string, number>> = {
-    camera: {
-      [ChannelName.MEETING_CONTROL]: 0,
-      [ChannelName.MICROPHONE]: 1,
-      [ChannelName.VIDEO_360P]: 2,
-      [ChannelName.VIDEO_720P]: 3,
-      [ChannelName.VIDEO_1080P]: 9,
-      [ChannelName.VIDEO_1440P]: 10,
-    },
-    screenShare: {
-      [ChannelName.SCREEN_SHARE_720P]: 5,
-      [ChannelName.SCREEN_SHARE_AUDIO]: 6,
-    },
-    livestream: {
-      [ChannelName.LIVESTREAM_720P]: 7,
-      [ChannelName.LIVESTREAM_AUDIO]: 8,
-    },
-  };
 
-  return mapping[type]?.[channelName] ?? 5;
-}
 
 export const SUB_STREAMS: Record<string, SubStream> = {
   MEETING_CONTROL: {
     name: 'meeting_control',
     channelName: ChannelName.MEETING_CONTROL,
   },
-  MIC_AUDIO: {
-    name: 'mic_audio',
-    channelName: ChannelName.MICROPHONE,
+  MIC_48K: {
+    name: 'mic_48k',
+    channelName: ChannelName.MIC_48K,
   },
-  VIDEO_360P: {
-    name: 'video_360p',
+  CAM_360P: {
+    name: 'cam_360p',
     width: 640,
     height: 360,
     bitrate: 150_000,
     framerate: 15,
-    channelName: ChannelName.VIDEO_360P,
+    channelName: ChannelName.CAM_360P,
   },
-  VIDEO_720P: {
-    name: 'video_720p',
+  CAM_720P: {
+    name: 'cam_720p',
     width: 1280,
     height: 720,
     bitrate: 800_000,
     framerate: 30,
-    channelName: ChannelName.VIDEO_720P,
+    channelName: ChannelName.CAM_720P,
   },
-  VIDEO_1080P: {
-    name: 'video_1080p',
+  CAM_1080P: {
+    name: 'cam_1080p',
     width: 1920,
     height: 1080,
     bitrate: 2_500_000,
     framerate: 30,
-    channelName: ChannelName.VIDEO_1080P,
+    channelName: ChannelName.CAM_1080P,
   },
-  VIDEO_1440P: {
-    name: 'video_1440p',
+  CAM_1440P: {
+    name: 'cam_1440p',
     width: 2560,
     height: 1440,
     bitrate: 5_000_000,
     framerate: 30,
-    channelName: ChannelName.VIDEO_1440P,
+    channelName: ChannelName.CAM_1440P,
   },
   SCREEN_SHARE_AUDIO: {
     name: 'screen_share_audio',
@@ -159,10 +134,10 @@ export function getSubStreams(
 
   // Video channels that can be filtered by videoResolutions
   const videoChannels = new Set([
-    ChannelName.VIDEO_360P,
-    ChannelName.VIDEO_720P,
-    ChannelName.VIDEO_1080P,
-    ChannelName.VIDEO_1440P,
+    ChannelName.CAM_360P,
+    ChannelName.CAM_720P,
+    ChannelName.CAM_1080P,
+    ChannelName.CAM_1440P,
   ]);
 
   let baseSubStreams: SubStream[];
@@ -173,11 +148,11 @@ export function getSubStreams(
     // Include all possible video resolutions, filter will select which ones to use
     baseSubStreams = [
       SUB_STREAMS.MEETING_CONTROL,
-      SUB_STREAMS.MIC_AUDIO,
-      SUB_STREAMS.VIDEO_360P,
-      SUB_STREAMS.VIDEO_720P,
-      SUB_STREAMS.VIDEO_1080P,
-      SUB_STREAMS.VIDEO_1440P,
+      SUB_STREAMS.MIC_48K,
+      SUB_STREAMS.CAM_360P,
+      SUB_STREAMS.CAM_720P,
+      SUB_STREAMS.CAM_1080P,
+      SUB_STREAMS.CAM_1440P,
     ];
   } else {
     throw new Error(`Invalid publisher type, cannot get sub streams for type: ${streamType}`);
@@ -200,7 +175,7 @@ export function getSubStreams(
     }
 
     // Default behavior: when videoResolutions is NOT specified, only keep 360p
-    if (!videoResolutions && sub.channelName !== ChannelName.VIDEO_360P && videoChannels.has(sub.channelName)) {
+    if (!videoResolutions && sub.channelName !== ChannelName.CAM_360P && videoChannels.has(sub.channelName)) {
       return false;
     }
 

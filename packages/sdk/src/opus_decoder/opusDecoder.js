@@ -3,9 +3,7 @@ let recorderScriptLoading = false;
 let recorderScriptLoadPromise = null;
 let configNumberOfChannels = 1; // Default to stereo
 
-console.log(
-  "[Opus Decoder] Initializing OpusAudioDecoder module, version 1.0.0"
-);
+// OpusAudioDecoder module initialized
 
 /**
  * Ensures the Recorder.js script is loaded
@@ -35,7 +33,7 @@ export async function ensureRecorderScriptLoaded() {
     script.onload = () => {
       recorderScriptLoaded = true;
       recorderScriptLoading = false;
-      console.log("Recorder.js loaded successfully");
+      // Recorder.js loaded
       resolve();
     };
 
@@ -90,7 +88,7 @@ export async function initAudioRecorder(audioStream, options = {}, existingAudio
 
   try {
     // const audioStream = new MediaStream([source]);
-    console.log("Using provided MediaStreamTrack");
+    // Using provided MediaStreamTrack
 
     // Reuse existing AudioContext if provided (required for iOS 15 where
     // AudioContext.resume() must be called within the user gesture handler).
@@ -98,8 +96,7 @@ export async function initAudioRecorder(audioStream, options = {}, existingAudio
     let context;
     if (existingAudioContext && existingAudioContext.state !== 'closed') {
       context = existingAudioContext;
-      console.log("Reusing existing AudioContext, state:", context.state,
-        "sampleRate:", context.sampleRate);
+      // Reusing existing AudioContext
       // On iOS Safari, the existing AudioContext may have a different sample
       // rate (e.g. 44100 on older iPads).  Recorder.js resamples internally,
       // but log the mismatch for debugging.
@@ -123,7 +120,7 @@ export async function initAudioRecorder(audioStream, options = {}, existingAudio
     if (context.state === 'suspended') {
       try {
         await context.resume();
-        console.log("[AudioRecorder] AudioContext resumed, state:", context.state);
+        // AudioContext resumed
       } catch (err) {
         console.warn("[AudioRecorder] Failed to resume AudioContext:", err);
       }
@@ -145,14 +142,14 @@ export async function initAudioRecorder(audioStream, options = {}, existingAudio
       encoderComplexity: finalOptions.encoderComplexity,
       maxFramesPerPage: finalOptions.maxFramesPerPage,
     };
-    console.log("Recorder options:", recorderOptions);
+    // Recorder options ready
 
     const recorder = new Recorder(recorderOptions);
 
-    recorder.onstart = () => console.log("Recorder started");
-    recorder.onstop = () => console.log("Recorder stopped");
-    recorder.onpause = () => console.log("Recorder paused");
-    recorder.onresume = () => console.log("Recorder resumed");
+    recorder.onstart = () => {};
+    recorder.onstop = () => {};
+    recorder.onpause = () => {};
+    recorder.onresume = () => {};
 
     return recorder;
   } catch (err) {
@@ -162,11 +159,7 @@ export async function initAudioRecorder(audioStream, options = {}, existingAudio
 }
 
 function log(message, ...args) {
-  if (args.length === 0) {
-    console.log(`[Opus Decoder] ${message}`);
-  } else {
-    console.log(`[Opus Decoder] ${message}`, ...args);
-  }
+  // Conditional logging — enable via proxyConsole when enableLogging is set
 }
 
 class OpusAudioDecoder {
@@ -241,7 +234,7 @@ class OpusAudioDecoder {
       //    workers are not supported), use it — the actual Worker was created
       //    on the main thread and messages are relayed through this port.
       if (this._externalDecoderPort) {
-        console.log('[Opus Decoder] configure: using external decoder port (main-thread bridge)');
+        // Using external decoder port (main-thread bridge)
         return await this._configurePortDecoder(this._externalDecoderPort);
       }
 
@@ -288,11 +281,11 @@ class OpusAudioDecoder {
             return false; // Nested workers work
           } catch (e) {
             URL.revokeObjectURL(testUrl);
-            console.log('[Opus Decoder] No nested worker support, using inline decoder');
+            // No nested worker support, using inline decoder
             return true; // Nested workers don't work - iOS 15
           }
         } catch (e) {
-          console.log('[Opus Decoder] Nested worker test error:', e.message);
+          // Nested worker test error
           return true; // Assume iOS 15 if test fails
         }
       }
@@ -318,11 +311,11 @@ class OpusAudioDecoder {
       // relative URL
     }
 
-    console.log("[OpusDecoder] Worker URL", workerUrl);
+    // Worker URL resolved
     
     try {
       this.decoderWorker = new Worker(workerUrl);
-      console.log("[OpusDecoder] DecoderWorker created successfully", this.decoderWorker);
+      // DecoderWorker created successfully
       // Worker created successfully
     } catch (workerError) {
       console.warn('[Opus Decoder] Worker creation failed, falling back to inline decoder:', workerError.message);
@@ -371,7 +364,7 @@ class OpusAudioDecoder {
       this._wasmReadyResolve();
       this._wasmReadyResolve = null;
     }
-    console.log('[Opus Decoder] Decoder worker ready (worker mode) — WASM will queue until loaded');
+    // Decoder worker ready (worker mode) — WASM will queue until loaded
 
     this.state = "configured";
     this.baseTimestamp = 0;
@@ -418,7 +411,7 @@ class OpusAudioDecoder {
       this._wasmReadyResolve();
       this._wasmReadyResolve = null;
     }
-    console.log('[Opus Decoder] Decoder worker ready (port bridge) — WASM will queue until loaded');
+    // Decoder worker ready (port bridge) — WASM will queue until loaded
 
     this.state = "configured";
     this.baseTimestamp = 0;
@@ -434,7 +427,7 @@ class OpusAudioDecoder {
    * @private
    */
   async _configureInlineDecoder() {
-    console.log('[Opus Decoder] Using inline decoder (iOS 15 fallback)');
+    // Using inline decoder (iOS 15 fallback)
 
     try {
       const timestamp = Date.now();
@@ -462,7 +455,7 @@ class OpusAudioDecoder {
         wasmResponse.arrayBuffer(),
       ]);
 
-      console.log('[Opus Decoder] Inline decoder: JS', scriptContent.length, 'bytes, WASM', wasmBinary.byteLength, 'bytes');
+      // Inline decoder assets loaded
 
       // Pre-load WASM binary into Module so the eval'd script does not
       // need to fetch it (URL resolution is broken in eval/new Function context).
@@ -588,9 +581,7 @@ class OpusAudioDecoder {
       chunk.copyTo(encodedData);
 
       if (this.frameCounter <= 2) {
-        console.log('[Opus Decoder] decode #' + (this.frameCounter + 1),
-          'len:', encodedData.length, 'mode:', this.useInlineDecoder ? 'inline' : 'worker',
-          'wasmReady:', this._wasmReady);
+        // First few decode frames logged for diagnostics
       }
 
       if (this.useInlineDecoder && this.inlineDecoder) {
@@ -612,8 +603,7 @@ class OpusAudioDecoder {
         }
 
         if (this.frameCounter <= 2) {
-          console.log('[Opus Decoder] send to worker decode #' + (this.frameCounter + 1),
-            'len:', encodedData.length);
+          // First few worker decode frames
         }
         this.decoderWorker.postMessage(
           {

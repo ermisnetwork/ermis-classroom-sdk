@@ -1,9 +1,9 @@
-// import { AacAudioDecoder } from "../aac_decoder/aacDecoder.js";
 import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
 import {log} from "../utils/index.ts";
 import { H264Decoder, isNativeH264DecoderSupported } from "../codec-polyfill/video-codec-polyfill.js";
+import { CHUNK_TYPE, BUFFER_THRESHOLD, PLAYBACK_SPEED, AUDIO } from "./publisherConstants.js";
 
 let videoDecoder360p;
 let videoDecoder720p;
@@ -148,7 +148,7 @@ function logStats() {
       videoFrameBuffer.length,
       audioFrameBuffer.length
     );
-  }, 5000);
+  }, AUDIO.LOG_INTERVAL_MS);
 }
 
 function startSendingVideo(interval) {
@@ -156,21 +156,21 @@ function startSendingVideo(interval) {
   videoIntervalID = setInterval(() => {
     const len = videoFrameBuffer.length;
 
-    if (len > 15 && curVideoInterval.speed !== 3) {
+    if (len > BUFFER_THRESHOLD.CRITICAL && curVideoInterval.speed !== 3) {
       curVideoInterval.speed = 3;
-      curVideoInterval.rate = (1000 / videoFrameRate) * 0.75;
+      curVideoInterval.rate = (1000 / videoFrameRate) * PLAYBACK_SPEED.FAST;
       startSendingVideo(curVideoInterval);
-    } else if (len > 10 && len <= 15 && curVideoInterval.speed !== 2) {
+    } else if (len > BUFFER_THRESHOLD.HIGH && len <= BUFFER_THRESHOLD.CRITICAL && curVideoInterval.speed !== 2) {
       curVideoInterval.speed = 2;
-      curVideoInterval.rate = (1000 / videoFrameRate) * 0.85;
+      curVideoInterval.rate = (1000 / videoFrameRate) * PLAYBACK_SPEED.MEDIUM_FAST;
       startSendingVideo(curVideoInterval);
-    } else if (len <= 10 && len > 5 && curVideoInterval.speed !== 1) {
+    } else if (len <= BUFFER_THRESHOLD.HIGH && len > BUFFER_THRESHOLD.LOW && curVideoInterval.speed !== 1) {
       curVideoInterval.speed = 1;
       curVideoInterval.rate = 1000 / videoFrameRate;
       startSendingVideo(curVideoInterval);
-    } else if (len <= 5 && curVideoInterval.speed !== 0) {
+    } else if (len <= BUFFER_THRESHOLD.LOW && curVideoInterval.speed !== 0) {
       curVideoInterval.speed = 0;
-      curVideoInterval.rate = (1000 / videoFrameRate) * 1.05;
+      curVideoInterval.rate = (1000 / videoFrameRate) * PLAYBACK_SPEED.SLOW;
       startSendingVideo(curVideoInterval);
     }
 
@@ -187,30 +187,30 @@ function startSendingAudio(interval) {
   audioIntervalID = setInterval(() => {
     const len = audioFrameBuffer.length;
 
-    if (len > 15 && curAudioInterval.speed !== 2) {
+    if (len > BUFFER_THRESHOLD.CRITICAL && curAudioInterval.speed !== 2) {
       curAudioInterval.speed = 2;
-      curAudioInterval.rate = (1000 / audioFrameRate) * 0.85;
+      curAudioInterval.rate = (1000 / audioFrameRate) * PLAYBACK_SPEED.MEDIUM_FAST;
       startSendingAudio(curAudioInterval);
       return;
     }
 
-    if (len > 10 && len <= 15 && curAudioInterval.speed !== 1) {
+    if (len > BUFFER_THRESHOLD.HIGH && len <= BUFFER_THRESHOLD.CRITICAL && curAudioInterval.speed !== 1) {
       curAudioInterval.speed = 1;
-      curAudioInterval.rate = (1000 / audioFrameRate) * 0.93;
+      curAudioInterval.rate = (1000 / audioFrameRate) * PLAYBACK_SPEED.MEDIUM_SLOW;
       startSendingAudio(curAudioInterval);
       return;
     }
 
-    if (len <= 10 && len > 5 && curAudioInterval.speed !== 0) {
+    if (len <= BUFFER_THRESHOLD.HIGH && len > BUFFER_THRESHOLD.LOW && curAudioInterval.speed !== 0) {
       curAudioInterval.speed = 0;
       curAudioInterval.rate = 1000 / audioFrameRate;
       startSendingAudio(curAudioInterval);
       return;
     }
 
-    if (len <= 5 && curAudioInterval.speed !== -1) {
+    if (len <= BUFFER_THRESHOLD.LOW && curAudioInterval.speed !== -1) {
       curAudioInterval.speed = -1;
-      curAudioInterval.rate = (1000 / audioFrameRate) * 1.05;
+      curAudioInterval.rate = (1000 / audioFrameRate) * PLAYBACK_SPEED.SLOW;
       startSendingAudio(curAudioInterval);
       return;
     }
@@ -332,7 +332,7 @@ async function initializeDecoders() {
   }
 
   curVideoInterval = { speed: 0, rate: 1000 / 30 };
-  curAudioInterval = { speed: 0, rate: 1000 / (48000 / 1024) };
+  curAudioInterval = { speed: 0, rate: 1000 / (AUDIO.SAMPLE_RATE / AUDIO.AAC_FRAME_SIZE) };
 }
 
 function setupWebSockets(initialQuality = "360p") {
@@ -475,9 +475,9 @@ async function handleVideoMessage(event, quality) {
     const data = event.data.slice(5);
 
     // frameType: 0 = key, 1 = delta
-    const type = frameType === 0 ? "key" : "delta";
+    const type = frameType === 0 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
 
-    if (type === "key") {
+    if (type === CHUNK_TYPE.KEY) {
       keyFrameReceived = true;
     }
 
@@ -550,7 +550,7 @@ function handleAudioMessage(event) {
 
     const chunk = new EncodedAudioChunk({
       timestamp: timestamp * 1000,
-      type: "key",
+      type: CHUNK_TYPE.KEY,
       data,
     });
 
@@ -622,7 +622,7 @@ function configureAudioDecoder() {
   try {
     if (audioDecoder.state === "unconfigured") {
       audioDecoder.configure(audioConfig);
-      audioFrameRate = audioConfig.sampleRate / 1024;
+      audioFrameRate = audioConfig.sampleRate / AUDIO.AAC_FRAME_SIZE;
     }
 
     audioCodecReceived = true;

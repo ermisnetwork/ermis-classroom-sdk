@@ -45,42 +45,38 @@ const FRAME_TYPE = {
   CAM_360P_DELTA: 1,
   CAM_720P_KEY: 2,
   CAM_720P_DELTA: 3,
-  MIC_AUDIO: 6,
-  SS_720P_KEY: 4,
-  SS_720P_DELTA: 5,
-  SS_1080P_KEY: 7,
-  SS_1080P_DELTA: 8,
-  SS_AUDIO: 9,
-  LIVESTREAM_720P_KEY: 10,
-  LIVESTREAM_720P_DELTA: 11,
-  LIVESTREAM_AUDIO: 12,
+  SCREEN_SHARE_KEY: 4,
+  SCREEN_SHARE_DELTA: 5,
+  AUDIO: 6,
+  LIVESTREAM_KEY: 10,
+  LIVESTREAM_DELTA: 11,
   CAM_1080P_KEY: 13,
   CAM_1080P_DELTA: 14,
   CAM_1440P_KEY: 15,
   CAM_1440P_DELTA: 16,
   CONFIG: 0xfd,
   EVENT: 0xfe,
-  PING: 0xff,
+  PUBLISHER_COMMAND: 0xff,
 };
 /**
  * Helper function to get frame type based on channel name and chunk type
  */
 function getFrameType(channelName, chunkType) {
   switch (channelName) {
-    case CHANNEL_NAME.VIDEO_360P:
-      return chunkType === "key" ? FRAME_TYPE.CAM_360P_KEY : FRAME_TYPE.CAM_360P_DELTA;
-    case CHANNEL_NAME.VIDEO_720P:
-      return chunkType === "key" ? FRAME_TYPE.CAM_720P_KEY : FRAME_TYPE.CAM_720P_DELTA;
-    case CHANNEL_NAME.VIDEO_1080P:
-      return chunkType === "key" ? FRAME_TYPE.CAM_1080P_KEY : FRAME_TYPE.CAM_1080P_DELTA;
-    case CHANNEL_NAME.VIDEO_1440P:
-      return chunkType === "key" ? FRAME_TYPE.CAM_1440P_KEY : FRAME_TYPE.CAM_1440P_DELTA;
+    case CHANNEL_NAME.CAM_360P:
+      return chunkType === CHUNK_TYPE.KEY ? FRAME_TYPE.CAM_360P_KEY : FRAME_TYPE.CAM_360P_DELTA;
+    case CHANNEL_NAME.CAM_720P:
+      return chunkType === CHUNK_TYPE.KEY ? FRAME_TYPE.CAM_720P_KEY : FRAME_TYPE.CAM_720P_DELTA;
+    case CHANNEL_NAME.CAM_1080P:
+      return chunkType === CHUNK_TYPE.KEY ? FRAME_TYPE.CAM_1080P_KEY : FRAME_TYPE.CAM_1080P_DELTA;
+    case CHANNEL_NAME.CAM_1440P:
+      return chunkType === CHUNK_TYPE.KEY ? FRAME_TYPE.CAM_1440P_KEY : FRAME_TYPE.CAM_1440P_DELTA;
     case CHANNEL_NAME.SCREEN_SHARE_720P:
-      return chunkType === "key" ? FRAME_TYPE.SS_720P_KEY : FRAME_TYPE.SS_720P_DELTA;
+      return chunkType === CHUNK_TYPE.KEY ? FRAME_TYPE.SCREEN_SHARE_KEY : FRAME_TYPE.SCREEN_SHARE_DELTA;
     case CHANNEL_NAME.SCREEN_SHARE_1080P:
-      return chunkType === "key" ? FRAME_TYPE.SS_1080P_KEY : FRAME_TYPE.SS_1080P_DELTA;
+      return chunkType === CHUNK_TYPE.KEY ? FRAME_TYPE.SCREEN_SHARE_KEY : FRAME_TYPE.SCREEN_SHARE_DELTA;
     case CHANNEL_NAME.LIVESTREAM_720P:
-      return chunkType === "key" ? FRAME_TYPE.LIVESTREAM_720P_KEY : FRAME_TYPE.LIVESTREAM_720P_DELTA;
+      return chunkType === CHUNK_TYPE.KEY ? FRAME_TYPE.LIVESTREAM_KEY : FRAME_TYPE.LIVESTREAM_DELTA;
     default:
       return FRAME_TYPE.CAM_720P_KEY;
   }
@@ -91,7 +87,7 @@ function getFrameType(channelName, chunkType) {
  */
 function getTransportPacketType(frameType) {
   switch (frameType) {
-    case FRAME_TYPE.PING:
+    case FRAME_TYPE.PUBLISHER_COMMAND:
     case FRAME_TYPE.EVENT:
     case FRAME_TYPE.CONFIG:
       return TRANSPORT_PACKET_TYPE.PUBLISHER_COMMAND;
@@ -107,11 +103,11 @@ function getTransportPacketType(frameType) {
  */
 const CHANNEL_NAME = {
   MEETING_CONTROL: "meeting_control",
-  MIC_AUDIO: "mic_48k",
-  VIDEO_360P: "video_360p",
-  VIDEO_720P: "video_720p",
-  VIDEO_1080P: "video_1080p",
-  VIDEO_1440P: "video_1440p",
+  MIC_48K: "mic_48k",
+  CAM_360P: "cam_360p",
+  CAM_720P: "cam_720p",
+  CAM_1080P: "cam_1080p",
+  CAM_1440P: "cam_1440p",
   SCREEN_SHARE_720P: "screen_share_720p",
   SCREEN_SHARE_1080P: "screen_share_1080p",
   SCREEN_SHARE_AUDIO: "screen_share_audio",
@@ -126,11 +122,11 @@ function getDataChannelId(channelName, type = "camera") {
   const mapping = {
     camera: {
       [CHANNEL_NAME.MEETING_CONTROL]: 0,
-      [CHANNEL_NAME.MIC_AUDIO]: 1,
-      [CHANNEL_NAME.VIDEO_360P]: 2,
-      [CHANNEL_NAME.VIDEO_720P]: 3,
-      [CHANNEL_NAME.VIDEO_1080P]: 9,
-      [CHANNEL_NAME.VIDEO_1440P]: 10,
+      [CHANNEL_NAME.MIC_48K]: 1,
+      [CHANNEL_NAME.CAM_360P]: 2,
+      [CHANNEL_NAME.CAM_720P]: 3,
+      [CHANNEL_NAME.CAM_1080P]: 9,
+      [CHANNEL_NAME.CAM_1440P]: 10,
     },
     screenShare: {
       [CHANNEL_NAME.SCREEN_SHARE_720P]: 5,
@@ -147,41 +143,41 @@ const SUB_STREAMS = {
     name: "meeting_control",
     channelName: CHANNEL_NAME.MEETING_CONTROL,
   },
-  MIC_AUDIO: {
-    name: "mic_audio",
-    channelName: CHANNEL_NAME.MIC_AUDIO,
+  MIC_48K: {
+    name: "mic_48k",
+    channelName: CHANNEL_NAME.MIC_48K,
   },
-  VIDEO_360P: {
-    name: "video_360p",
+  CAM_360P: {
+    name: "cam_360p",
     width: 640,
     height: 360,
     bitrate: 150_000,
     framerate: 15,
-    channelName: CHANNEL_NAME.VIDEO_360P,
+    channelName: CHANNEL_NAME.CAM_360P,
   },
-  VIDEO_720P: {
-    name: "video_720p",
+  CAM_720P: {
+    name: "cam_720p",
     width: 1280,
     height: 720,
     bitrate: 800_000,
     framerate: 30,
-    channelName: CHANNEL_NAME.VIDEO_720P,
+    channelName: CHANNEL_NAME.CAM_720P,
   },
-  VIDEO_1080P: {
-    name: "video_1080p",
+  CAM_1080P: {
+    name: "cam_1080p",
     width: 1920,
     height: 1080,
     bitrate: 2_500_000,
     framerate: 30,
-    channelName: CHANNEL_NAME.VIDEO_1080P,
+    channelName: CHANNEL_NAME.CAM_1080P,
   },
-  VIDEO_1440P: {
-    name: "video_1440p",
+  CAM_1440P: {
+    name: "cam_1440p",
     width: 2560,
     height: 1440,
     bitrate: 5_000_000,
     framerate: 30,
-    channelName: CHANNEL_NAME.VIDEO_1440P,
+    channelName: CHANNEL_NAME.CAM_1440P,
   },
   SCREEN_SHARE_AUDIO: {
     name: "screen_share_audio",
@@ -210,7 +206,7 @@ function getSubStreams(streamType) {
     return [SUB_STREAMS.SCREEN_SHARE_AUDIO, SUB_STREAMS.SCREEN_SHARE_720P]; //, SUB_STREAMS.SCREEN_SHARE_1080P];
   } else if (streamType === STREAM_TYPE.CAMERA) {
     // Default: 360p and 720p. 1080p only when explicitly specified
-    return [SUB_STREAMS.MIC_AUDIO, SUB_STREAMS.VIDEO_360P, SUB_STREAMS.VIDEO_720P, SUB_STREAMS.MEETING_CONTROL];
+    return [SUB_STREAMS.MIC_48K, SUB_STREAMS.CAM_360P, SUB_STREAMS.CAM_720P, SUB_STREAMS.MEETING_CONTROL];
   } else {
     return new Error("Invalid publisher type, cannot get sub streams for type:", streamType);
   }
@@ -251,6 +247,43 @@ const MEETING_EVENTS = {
   MEETING_ENDED: "meeting_ended", // Khi host kết thúc phòng
 };
 
+/**
+ * Chunk type strings (WebCodecs API convention)
+ */
+const CHUNK_TYPE = {
+  KEY: "key",
+  DELTA: "delta",
+};
+
+/**
+ * Subscriber buffer thresholds for adaptive jitter control
+ */
+const BUFFER_THRESHOLD = {
+  CRITICAL: 15,
+  HIGH: 10,
+  LOW: 5,
+};
+
+/**
+ * Playback speed multipliers for buffer catch-up/slowdown
+ */
+const PLAYBACK_SPEED = {
+  FAST: 0.75,
+  MEDIUM_FAST: 0.85,
+  NORMAL: 1.0,
+  MEDIUM_SLOW: 0.93,
+  SLOW: 1.05,
+};
+
+/**
+ * Audio constants
+ */
+const AUDIO = {
+  SAMPLE_RATE: 48000,
+  AAC_FRAME_SIZE: 1024,
+  LOG_INTERVAL_MS: 5000,
+};
+
 export {
   STREAM_TYPE,
   SUBSCRIBE_TYPE,
@@ -263,4 +296,8 @@ export {
   SUB_STREAMS,
   getSubStreams,
   MEETING_EVENTS,
+  CHUNK_TYPE,
+  BUFFER_THRESHOLD,
+  PLAYBACK_SPEED,
+  AUDIO,
 };

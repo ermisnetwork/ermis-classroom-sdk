@@ -108,7 +108,7 @@ function handleEncode({ requestId, packet, chunkSize, redundancy }) {
     }
     pendingMessages.length = 0;
 
-    console.log('[RaptorQFecWorker] WASM initialized, worker ready');
+    // WASM initialized
   } catch (err) {
     self.postMessage({
       type: 'error',

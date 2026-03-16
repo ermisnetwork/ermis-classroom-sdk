@@ -8,7 +8,7 @@ import type { ConnectionStatus } from '../core/ermisClient.types';
 export type { ConnectionStatus } from '../core/ermisClient.types';
 
 // Quality levels for bitrate switching
-export type QualityLevel = 'video_360p' | 'video_720p' | 'video_1080p' | 'video_1440p';
+export type QualityLevel = 'cam_360p' | 'cam_720p' | 'cam_1080p' | 'cam_1440p';
 
 // Protocol types for subscriber
 export type SubscriberProtocol = 'webtransport' | 'webrtc' | 'websocket';

@@ -28,8 +28,8 @@ export interface ErmisClassroomConfig extends ErmisClientConfig {
   subscribeProtocol?: string;
   /**
    * Video resolutions to publish. Default: 360p + 720p.
-   * To enable 1080p: [ChannelName.VIDEO_1080P]
-   * To publish only one: [ChannelName.VIDEO_720P]
+   * To enable 1080p: [ChannelName.CAM_1080P]
+   * To publish only one: [ChannelName.CAM_720P]
    */
   videoResolutions?: ChannelName[];
   /**

@@ -39,5 +39,4 @@ export { EventEmitter } from './events/EventEmitter';
 export { globalEventBus, GlobalEvents } from './events/GlobalEventBus';
 export type { GlobalEventMap } from './events/GlobalEventBus';
 
-// Export network quality types for UI integration
-export { NetworkQuality } from './media/publisher/congestion/NetworkQualityMonitor';
+

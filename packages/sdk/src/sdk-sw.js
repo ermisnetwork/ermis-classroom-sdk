@@ -39,13 +39,13 @@ async function withCoepHeaders(response) {
 
 // Activate immediately without waiting for existing clients to close
 self.addEventListener('install', (event) => {
-  console.log('[sdk-sw] Installing...');
+  // Installing
   self.skipWaiting();
 });
 
 // Claim all clients immediately so the SW takes effect on first load
 self.addEventListener('activate', (event) => {
-  console.log('[sdk-sw] Activating...');
+  // Activating
   event.waitUntil(self.clients.claim());
 });
 
@@ -61,7 +61,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     (async () => {
       try {
-        console.log('[sdk-sw] Intercepting:', url.pathname, 'mode:', event.request.mode);
+        // Intercepting SDK asset request
 
         // Strip query params (e.g. ?t=timestamp) when looking up cache
         // Assets are cached without query strings
@@ -71,7 +71,7 @@ self.addEventListener('fetch', (event) => {
 
         // Search all sdk-assets caches
         const cacheNames = await caches.keys();
-        console.log('[sdk-sw] Available caches:', cacheNames);
+        // Searching caches
         for (const name of cacheNames) {
           if (!name.startsWith(SDK_CACHE_PREFIX)) continue;
           const cache = await caches.open(name);
@@ -96,7 +96,7 @@ self.addEventListener('fetch', (event) => {
         // Not in cache — try basic (same-origin) fetch as fallback
         // Works when files exist locally in public/ (dev mode)
         try {
-          console.log('[sdk-sw] Cache MISS for', url.pathname, '- trying basic fetch');
+          // Cache MISS - trying basic fetch
           const basicResponse = await fetch(event.request);
           return withCoepHeaders(basicResponse);
         } catch (basicErr) {

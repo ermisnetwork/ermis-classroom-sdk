@@ -6,6 +6,8 @@ import type {
 } from "../../../types/media/publisher.types";
 import { VideoEncoderManager } from "../managers/VideoEncoderManager";
 import { StreamManager } from "../transports/StreamManager";
+import { CongestionLevel, DEGRADATION_PROFILES } from "../controllers/CongestionController";
+import { TRANSPORT } from "../../../constants/transportConstants";
 import { log } from "../../../utils";
 
 /**
@@ -67,6 +69,11 @@ export class VideoProcessor extends EventEmitter<{
   private isCapturingConfig = false;
   private configCaptureComplete = false;
 
+  // Congestion throttling — progressive degradation via CongestionController
+  private _congestionPaused = false;
+  /** Original encoder configs, stored on first degradation so we can restore */
+  private _originalConfigs = new Map<string, { bitrate: number; framerate: number }>();
+
   // Sub-stream configurations
   private subStreams: SubStream[] = [];
 
@@ -82,6 +89,74 @@ export class VideoProcessor extends EventEmitter<{
     this.subStreams = subStreams.filter((s) =>
       s.width !== undefined && s.height !== undefined
     );
+
+    // Subscribe to progressive congestion level changes
+    this.streamManager.congestionController.on('levelChanged', ({ level, previousLevel }) => {
+      this._handleCongestionLevel(level, previousLevel);
+    });
+  }
+
+  /**
+   * Handle a congestion level transition.
+   * All levels reconfigure encoders with reduced fps/bitrate.
+   * Video is NEVER fully killed — even CRITICAL sends minimum keyframes.
+   * Recovery: step back up, reconfigure, request keyframe.
+   */
+  private _handleCongestionLevel(level: CongestionLevel, previousLevel: CongestionLevel): void {
+    const levelNames = ['NORMAL', 'MILD', 'MODERATE', 'SEVERE', 'CRITICAL'];
+    log(`[VideoProcessor] Congestion level: ${levelNames[previousLevel]} → ${levelNames[level]}`);
+
+    const wasPaused = this._congestionPaused;
+    this._congestionPaused = false; // Video is NEVER paused
+
+    // Save original configs once (before first degradation)
+    if (this._originalConfigs.size === 0) {
+      for (const sub of this.subStreams) {
+        this._originalConfigs.set(sub.name, {
+          bitrate: sub.bitrate!,
+          framerate: sub.framerate!,
+        });
+      }
+    }
+
+    // Apply degradation profile to all encoders
+    // CRITICAL: fpsCap=2, bitrateFactor=0.05 — minimum size keyframes
+    const profile = DEGRADATION_PROFILES[level];
+    for (const sub of this.subStreams) {
+      const original = this._originalConfigs.get(sub.name);
+      if (!original) continue;
+
+      // 50kbps = safe minimum for H264 decodability across all devices
+      // (mobile ultra-low H264 at 240p = 60kbps, YouTube 144p ≈ 49kbps)
+      // At CRITICAL: bitrateFactor=0.05 × 800kbps = 40kbps → clamped to 50kbps
+      const newBitrate = Math.max(TRANSPORT.CONGESTION_MIN_VIDEO_BITRATE, Math.round(original.bitrate * profile.bitrateFactor));
+      const newFps = Math.min(original.framerate, profile.fpsCap);
+
+      this.videoEncoderManager.reconfigureEncoder(sub.name, {
+        bitrate: newBitrate,
+        framerate: newFps,
+      }).catch((err) => {
+        console.warn(`[VideoProcessor] Failed to reconfigure ${sub.name}:`, err);
+      });
+    }
+
+    // Recovery from CRITICAL: all video was dropped at the gate, so
+    // subscriber is frozen on the last frame. Request keyframes now
+    // so the first frame through the gate starts a decodable GOP.
+    if (previousLevel === CongestionLevel.CRITICAL && level < CongestionLevel.CRITICAL) {
+      log('[VideoProcessor] 🔑 Recovering from CRITICAL — requesting keyframes for all encoders');
+      for (const sub of this.subStreams) {
+        this.videoEncoderManager.requestKeyframe(sub.name);
+      }
+    }
+
+    // If coming back from a previously paused state, request keyframes
+    if (wasPaused) {
+      log('[VideoProcessor] ▶️ Video resumed — requesting keyframes');
+      for (const sub of this.subStreams) {
+        this.videoEncoderManager.requestKeyframe(sub.name);
+      }
+    }
   }
 
   /**
@@ -109,7 +184,7 @@ export class VideoProcessor extends EventEmitter<{
       for (const subStream of this.subStreams) {
         // Skip high-res encoders for WASM fallback (single instance limitation)
         if (isWasmFallback && subStream.name.includes("720")) {
-          console.log(`[VideoProcessor] Skipping ${subStream.name} encoder (WASM single instance limitation)`);
+          log(`[VideoProcessor] Skipping ${subStream.name} encoder (WASM single instance limitation)`);
           continue;
         }
         
@@ -295,7 +370,8 @@ export class VideoProcessor extends EventEmitter<{
         }
 
         // Determine if we should encode this frame
-        const shouldEncode = this.cameraEnabled || (this.isCapturingConfig && !this.configCaptureComplete);
+        const shouldEncode = (this.cameraEnabled || (this.isCapturingConfig && !this.configCaptureComplete))
+                             && !this._congestionPaused;
 
         if (!shouldEncode) {
           frame.close();
