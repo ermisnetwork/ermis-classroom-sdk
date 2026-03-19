@@ -147,6 +147,10 @@ export interface SubStream {
   height?: number;
   bitrate?: number;
   framerate?: number;
+  /** Number of frames per GOP (Group of Pictures) for this channel.
+   *  Also used as the encoder keyframe interval.
+   *  Defaults to TRANSPORT.VIDEO_GOP_SIZE if not specified. */
+  gopSize?: number;
 }
 
 // Stream data structure (supports both WebTransport and WebRTC)

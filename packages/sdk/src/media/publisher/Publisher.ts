@@ -438,6 +438,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     this.streamManager = new StreamManager(false, this.options.streamId, useHybrid, this.options.useAudioDatagrams, this.options.useSendGate, this.options.disablePublisherCongestionControl);
 
+    // Set per-channel GOP sizes before media starts flowing
+    this.streamManager.setGopSizeMap(this.subStreams);
+
     // Set publisher state before initializing streams so correct state is sent to server
     // Include publish_channels to notify server about which channels we will publish
     const publishChannels = this.subStreams
@@ -541,6 +544,9 @@ export class Publisher extends EventEmitter<PublisherEvents> {
 
     // Initialize StreamManager first
     this.streamManager = new StreamManager(true, this.options.streamId);
+
+    // Set per-channel GOP sizes before media starts flowing
+    this.streamManager.setGopSizeMap(this.subStreams);
 
     // Set publisher state before initializing streams so correct state is sent to server
     // Include publish_channels to notify server about which channels we will publish

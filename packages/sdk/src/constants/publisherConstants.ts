@@ -58,6 +58,7 @@ export const SUB_STREAMS: Record<string, SubStream> = {
     height: 360,
     bitrate: 150_000,
     framerate: 15,
+    gopSize: 15,
     channelName: ChannelName.CAM_360P,
   },
   CAM_720P: {
@@ -66,6 +67,7 @@ export const SUB_STREAMS: Record<string, SubStream> = {
     height: 720,
     bitrate: 800_000,
     framerate: 30,
+    gopSize: 30,
     channelName: ChannelName.CAM_720P,
   },
   CAM_1080P: {
@@ -74,6 +76,7 @@ export const SUB_STREAMS: Record<string, SubStream> = {
     height: 1080,
     bitrate: 2_500_000,
     framerate: 30,
+    gopSize: 30,
     channelName: ChannelName.CAM_1080P,
   },
   CAM_1440P: {
@@ -82,6 +85,7 @@ export const SUB_STREAMS: Record<string, SubStream> = {
     height: 1440,
     bitrate: 5_000_000,
     framerate: 30,
+    gopSize: 30,
     channelName: ChannelName.CAM_1440P,
   },
   SCREEN_SHARE_AUDIO: {
@@ -92,8 +96,9 @@ export const SUB_STREAMS: Record<string, SubStream> = {
     name: 'screen_share_720p',
     width: 1280,
     height: 720,
-    bitrate: 500_000,
+    bitrate: 800_000,
     framerate: 15,
+    gopSize: 15,
     channelName: ChannelName.SCREEN_SHARE_720P,
   },
   SCREEN_SHARE_1080P: {
@@ -102,6 +107,7 @@ export const SUB_STREAMS: Record<string, SubStream> = {
     height: 1080,
     bitrate: 1_000_000,
     framerate: 15,
+    gopSize: 15,
     channelName: ChannelName.SCREEN_SHARE_1080P,
   },
   LIVESTREAM_720P: {
@@ -110,6 +116,7 @@ export const SUB_STREAMS: Record<string, SubStream> = {
     height: 720,
     bitrate: 500_000,
     framerate: 15,
+    gopSize: 15,
     channelName: ChannelName.LIVESTREAM_720P,
   },
   LIVESTREAM_AUDIO: {

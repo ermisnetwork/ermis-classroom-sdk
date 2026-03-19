@@ -1636,10 +1636,10 @@ async function readGopStream(receiveStream, gopIndex) {
     }
     // GOP stream error: decoder may have partial data → reset keyframe flag
     if (channelName) {
-      console.warn(`[GOP] readGopStream error, resetting keyframe flag for ch=${channel}`);
+      // console.warn(`[GOP] readGopStream error, resetting keyframe flag for ch=${channel}`);
       setKeyFrameReceived(channelName, false);
     }
-    proxyConsole.error(`[GOP] readGopStream #${gopIndex} error:`, err);
+    // proxyConsole.error(`[GOP] readGopStream #${gopIndex} error:`, err);
   }
 }
 

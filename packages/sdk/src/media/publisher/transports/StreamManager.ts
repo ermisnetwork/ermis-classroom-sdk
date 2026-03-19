@@ -98,7 +98,8 @@ export class StreamManager extends EventEmitter<{
   private publisherState: PublisherState = { ...DEFAULT_PUBLISHER_STATE };
   private gopSenders = new Map<ChannelName, StreamDataGop>();
   private audioSenders = new Map<ChannelName, StreamDataAudio>();
-  private readonly VIDEO_GOP_SIZE = TRANSPORT.VIDEO_GOP_SIZE;
+  private readonly defaultGopSize = TRANSPORT.VIDEO_GOP_SIZE;
+  private gopSizeMap = new Map<ChannelName, number>();
   private readonly AUDIO_BATCH_SIZE = TRANSPORT.AUDIO_BATCH_SIZE;
 
   // --- Congestion controller (progressive degradation) ---
@@ -155,7 +156,8 @@ export class StreamManager extends EventEmitter<{
       sendPacket,
       getSeq,
       isWebRTC,
-      this.VIDEO_GOP_SIZE,
+      this.gopSizeMap,
+      this.defaultGopSize,
       useSendGate ? this._sendGate : undefined,
     );
 
@@ -185,6 +187,22 @@ export class StreamManager extends EventEmitter<{
    */
   getPublisherState(): PublisherState {
     return { ...this.publisherState };
+  }
+
+  /**
+   * Set per-channel GOP sizes from SubStream configurations.
+   * The gopSizeMap is shared by reference with VideoSendStrategy,
+   * so this must be called before media starts flowing.
+   *
+   * @param subStreams - Array of SubStream configs containing optional gopSize
+   */
+  setGopSizeMap(subStreams: { channelName: ChannelName; gopSize?: number }[]): void {
+    for (const sub of subStreams) {
+      if (sub.gopSize !== undefined) {
+        this.gopSizeMap.set(sub.channelName as ChannelName, sub.gopSize);
+      }
+    }
+    log("[StreamManager] GOP size map set:", Object.fromEntries(this.gopSizeMap));
   }
 
   /**
