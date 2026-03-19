@@ -214,9 +214,12 @@ export class VideoEncoderManager extends EventEmitter<{
   allEncodersClosed: undefined;
 }> {
   private encoders = new Map<string, VideoEncoderObject>();
-  private frameCounter = 0;
-  private keyframeInterval: number = VIDEO_CONFIG.KEYFRAME_INTERVAL;
-  // private chunkCounters = new Map<string, number>(); // DEBUG: Track chunks per encoder
+  /** Per-encoder frame counters for independent keyframe generation */
+  private frameCounters = new Map<string, number>();
+  /** Per-encoder keyframe intervals (GOP size) */
+  private keyframeIntervals = new Map<string, number>();
+  /** Default keyframe interval for encoders without explicit gopSize */
+  private defaultKeyframeInterval: number = VIDEO_CONFIG.KEYFRAME_INTERVAL;
 
   // Worker-based WASM encoder (iOS 15 — offloads x264 to separate thread)
   private encoderWorker: Worker | null = null;
@@ -241,6 +244,8 @@ export class VideoEncoderManager extends EventEmitter<{
       metadata: EncodedVideoChunkMetadata,
     ) => void,
     onError: (error: Error) => void,
+    /** GOP size for this encoder — determines keyframe interval. Falls back to VIDEO_CONFIG.KEYFRAME_INTERVAL. */
+    gopSize?: number,
   ): Promise<VideoEncoder | any> {
     if (this.encoders.has(name)) {
       throw new Error(`Encoder ${name} already exists`);
@@ -327,6 +332,11 @@ export class VideoEncoderManager extends EventEmitter<{
       onOutput: wrappedOnOutput,
       onError: wrappedOnError,
     } as VideoEncoderObject);
+
+    // Initialize per-encoder keyframe state
+    this.frameCounters.set(name, 0);
+    this.keyframeIntervals.set(name, gopSize ?? this.defaultKeyframeInterval);
+    log(`[VideoEncoder] Keyframe interval for "${name}": ${gopSize ?? this.defaultKeyframeInterval}`);
 
     this.emit("encoderCreated", { name, channelName, config: encoderConfig });
 
@@ -458,13 +468,18 @@ export class VideoEncoderManager extends EventEmitter<{
     const isImageDataFallback = frame && frame.type === 'imagedata' && frame.data;
     const isRealVideoFrame = typeof VideoFrame !== 'undefined' && frame instanceof VideoFrame;
 
-    this.frameCounter++;
-    const isKeyFrame = this.frameCounter % this.keyframeInterval === 0;
+    // Per-encoder keyframe decision is made inside the loop below
 
-    // Encode frame for each encoder
+    // Encode frame for each encoder — each has its own frame counter + keyframe interval
     for (let i = 0; i < targetEncoders.length; i++) {
       const [name, encoderObj] = targetEncoders[i];
       const isLastEncoder = i === targetEncoders.length - 1;
+
+      // Increment per-encoder frame counter
+      const count = (this.frameCounters.get(name) ?? 0) + 1;
+      this.frameCounters.set(name, count);
+      const interval = this.keyframeIntervals.get(name) ?? this.defaultKeyframeInterval;
+      const isKeyFrame = count % interval === 0;
 
       // Check if encoder has capacity - but ALWAYS encode keyframes
       const isQueueFull = encoderObj.encoder.encodeQueueSize > VIDEO_CONFIG.MAX_QUEUE_SIZE;
@@ -757,7 +772,8 @@ export class VideoEncoderManager extends EventEmitter<{
 
     await Promise.all(closePromises);
     this.encoders.clear();
-    this.frameCounter = 0;
+    this.frameCounters.clear();
+    this.keyframeIntervals.clear();
 
     // Terminate encoder worker if it exists
     if (this.encoderWorker) {
@@ -778,7 +794,7 @@ export class VideoEncoderManager extends EventEmitter<{
    */
   getStats(): {
     totalEncoders: number;
-    frameCounter: number;
+    frameCounters: Record<string, number>;
     encoders: Record<
       string,
       {
@@ -813,27 +829,38 @@ export class VideoEncoderManager extends EventEmitter<{
 
     return {
       totalEncoders: this.encoders.size,
-      frameCounter: this.frameCounter,
+      frameCounters: Object.fromEntries(this.frameCounters),
       encoders: encoderStats,
     };
   }
 
   /**
-   * Reset frame counter
+   * Reset frame counters for all encoders
    */
   resetFrameCounter(): void {
-    this.frameCounter = 0;
-    log("[VideoEncoder] Frame counter reset");
+    for (const name of this.frameCounters.keys()) {
+      this.frameCounters.set(name, 0);
+    }
+    log("[VideoEncoder] All frame counters reset");
   }
 
   /**
-   * Set keyframe interval
+   * Set keyframe interval for all encoders (or a specific encoder).
    *
    * @param interval - Number of frames between keyframes
+   * @param encoderName - Optional: set only for a specific encoder
    */
-  setKeyframeInterval(interval: number): void {
-    this.keyframeInterval = interval;
-    log(`[VideoEncoder] Keyframe interval set to ${interval}`);
+  setKeyframeInterval(interval: number, encoderName?: string): void {
+    if (encoderName) {
+      this.keyframeIntervals.set(encoderName, interval);
+      log(`[VideoEncoder] Keyframe interval for "${encoderName}" set to ${interval}`);
+    } else {
+      this.defaultKeyframeInterval = interval;
+      for (const name of this.keyframeIntervals.keys()) {
+        this.keyframeIntervals.set(name, interval);
+      }
+      log(`[VideoEncoder] All keyframe intervals set to ${interval}`);
+    }
   }
 
   /**
@@ -888,9 +915,9 @@ export class VideoEncoderManager extends EventEmitter<{
       return;
     }
 
-    // Set frameCounter to make next frame a keyframe
-    // By setting it to keyframeInterval - 1, the next encodeFrame will produce a keyframe
-    this.frameCounter = this.keyframeInterval - 1;
+    // Set per-encoder frameCounter to make next frame a keyframe
+    const interval = this.keyframeIntervals.get(name) ?? this.defaultKeyframeInterval;
+    this.frameCounters.set(name, interval - 1);
     log(`[VideoEncoder] Keyframe requested for ${name}, next frame will be keyframe`);
   }
 

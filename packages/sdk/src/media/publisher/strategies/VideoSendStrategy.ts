@@ -17,17 +17,20 @@ import type { SendGate } from "../controllers/SendGate";
  * - WebRTC / fallback path: delegate to sendPacket
  */
 export class VideoSendStrategy {
-  private readonly VIDEO_GOP_SIZE: number;
+  private readonly gopSizeMap: Map<ChannelName, number>;
+  private readonly defaultGopSize: number;
 
   constructor(
     private gopSenders: Map<ChannelName, StreamDataGop>,
     private sendPacketFallback: (ch: ChannelName, pkt: Uint8Array, ft: FrameType) => Promise<void>,
     private getAndIncrementSequence: (ch: ChannelName) => number,
     private isWebRTC: boolean,
-    gopSize: number,
+    gopSizeMap: Map<ChannelName, number>,
+    defaultGopSize: number,
     private sendGate?: SendGate,
   ) {
-    this.VIDEO_GOP_SIZE = gopSize;
+    this.gopSizeMap = gopSizeMap;
+    this.defaultGopSize = defaultGopSize;
   }
 
   /**
@@ -59,7 +62,8 @@ export class VideoSendStrategy {
           }
         }
 
-        await gopSender.startGop(channel, this.VIDEO_GOP_SIZE, getStreamPriority(channelName));
+        const gopSize = this.gopSizeMap.get(channelName) ?? this.defaultGopSize;
+        await gopSender.startGop(channel, gopSize, getStreamPriority(channelName));
         gopData.currentGopFrames = 0;
       }
 
