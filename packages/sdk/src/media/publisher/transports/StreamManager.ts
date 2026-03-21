@@ -130,12 +130,8 @@ export class StreamManager extends EventEmitter<{
     this._congestionController = new CongestionController(disableCongestionControl);
     log(`[StreamManager] isAndroid: ${this.isAndroid}, isHybrid: ${this.isHybrid}`);
 
-    if (isWebRTC) {
-      // Eagerly start the FEC worker so WASM is loaded before the first packet
-      this.initFecWorker().catch((err) => {
-        console.error('[StreamManager] FEC worker initialization failed:', err);
-      });
-    }
+    // FEC worker is lazy-initialized on first use (see ensureFecWorker())
+    // to avoid downloading ~5MB WASM on page load when FEC is not needed yet.
 
     // In hybrid mode, command sender uses WebTransport (meeting_control stays on WT)
     this.commandSender = isWebRTC ? new CommandSender({
@@ -303,18 +299,41 @@ export class StreamManager extends EventEmitter<{
   }
 
   /**
+   * Ensure the FEC worker is initialized before use.
+   * On first call, creates & loads the worker; subsequent calls return immediately.
+   */
+  private ensureFecWorker(): Promise<void> {
+    if (this.fecWorkerReady) return Promise.resolve();
+    return this.initFecWorker();
+  }
+
+  /**
    * Offload RaptorQ FEC encoding to the worker thread.
    * Returns the array of encoded FEC packet buffers and the RaptorQ config
    * needed to build the on-wire packet headers.
    */
-  private encodeWithFecWorker(
+  private async encodeWithFecWorker(
     packet: Uint8Array,
     chunkSize: number,
     redundancy: number,
   ): Promise<FecEncodeResult> {
+    await this.ensureFecWorker();
+
     return new Promise<FecEncodeResult>((resolve, reject) => {
       const requestId = this._fecRequestId++;
-      this._fecCallbacks.set(requestId, { resolve, reject });
+
+      // Timeout — prevent memory leak if worker is unresponsive
+      const timeout = setTimeout(() => {
+        if (this._fecCallbacks.has(requestId)) {
+          this._fecCallbacks.delete(requestId);
+          reject(new Error(`FEC encode timeout (requestId=${requestId})`));
+        }
+      }, 5000);
+
+      this._fecCallbacks.set(requestId, {
+        resolve: (r) => { clearTimeout(timeout); resolve(r); },
+        reject: (e) => { clearTimeout(timeout); reject(e); },
+      });
 
       // slice() gives us a fresh ArrayBuffer with byteOffset === 0 that is
       // safe to transfer (avoids aliasing issues with shared backing buffers).
@@ -689,6 +708,9 @@ export class StreamManager extends EventEmitter<{
 
     dataChannel.onopen = async () => {
       log(`[StreamManager] Data channel ${channelName} OPENED! readyState: ${dataChannel.readyState}`);
+
+      // Pre-warm FEC worker so WASM is ready before the first video packet
+      this.ensureFecWorker().catch(() => {});
 
       // Match JS Publisher exactly
       this.streams.set(channelName, {
