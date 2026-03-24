@@ -15,28 +15,44 @@
 class AACCaptureProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.frameSize = 1024;
+    this.buffers = [];
+    this.offset = 0;
   }
 
-  /**
-   * Called per audio rendering quantum (128 frames by spec).
-   * @param {Float32Array[][]} inputs - inputs[0] is the first input, each
-   *   element is a channel array.
-   */
   process(inputs, _outputs, _params) {
     const input = inputs[0];
     if (!input || input.length === 0) return true;
 
-    // Slice each channel so we can transfer to main thread without copy.
-    const channelData = [];
-    const transferable = [];
-    for (let ch = 0; ch < input.length; ch++) {
-      const buf = input[ch].slice(); // always 128 Float32 samples
-      channelData.push(buf);
-      transferable.push(buf.buffer);
+    const numChannels = input.length;
+    const inputLen = input[0].length;
+
+    if (this.buffers.length < numChannels) {
+      for (let i = 0; i < numChannels; i++) {
+        this.buffers.push(new Float32Array(this.frameSize));
+      }
     }
 
-    this.port.postMessage({ channelData }, transferable);
-    return true; // keep processor alive
+    for (let ch = 0; ch < numChannels; ch++) {
+      this.buffers[ch].set(input[ch], this.offset);
+    }
+    this.offset += inputLen;
+
+    if (this.offset >= this.frameSize) {
+      const channelData = [];
+      const transferable = [];
+      
+      for (let ch = 0; ch < numChannels; ch++) {
+        const buf = this.buffers[ch].slice(); 
+        channelData.push(buf);
+        transferable.push(buf.buffer);
+      }
+      
+      this.port.postMessage({ channelData }, transferable);
+      this.offset = 0;
+    }
+
+    return true; 
   }
 }
 

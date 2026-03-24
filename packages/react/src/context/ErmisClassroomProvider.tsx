@@ -35,10 +35,10 @@ export function ErmisClassroomProvider({
     // Validate: subscriberInitQuality must be in videoResolutions if both are provided
     if (config.subscriberInitQuality && config.videoResolutions?.length) {
       const qualityToChannel: Record<string, string> = {
-        'video_360p': 'video_360p',
-        'video_720p': 'video_720p',
-        'video_1080p': 'video_1080p',
-        'video_1440p': 'video_1440p',
+        'cam_360p': 'cam_360p',
+        'cam_720p': 'cam_720p',
+        'cam_1080p': 'cam_1080p',
+        'cam_1440p': 'cam_1440p',
       };
       const channelForQuality = qualityToChannel[config.subscriberInitQuality];
       const videoResolutionStrings = config.videoResolutions.map(r => r as string);

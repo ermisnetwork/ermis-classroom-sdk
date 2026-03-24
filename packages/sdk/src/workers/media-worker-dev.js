@@ -1,22 +1,163 @@
 import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
 import "../polyfills/audioData.js";
 import "../polyfills/encodedAudioChunk.js";
-import { CHANNEL_NAME, STREAM_TYPE, CHUNK_TYPE } from "./publisherConstants.js";
+import { CHANNEL_NAME, STREAM_TYPE, CHUNK_TYPE, FRAME_TYPE } from "./publisherConstants.js";
 import { H264Decoder, isNativeH264DecoderSupported } from "../codec-polyfill/video-codec-polyfill.js";
 import { AACDecoder } from "../codec-polyfill/audio-codec-polyfill.js";
 import raptorqInit, { WasmFecManager } from '../raptorQ/raptorq_wasm.js';
 
 import CommandSender from "./ClientCommand.js";
 
-// ── Jitter Buffer feature flags ──
-const USE_VIDEO_JITTER_BUFFER = false;
-const USE_SCREEN_SHARE_JITTER_BUFFER = false;
+// ── Constants ──────────────────────────────────────────────────────────────
+// All magic strings/numbers extracted here for maintainability.
+
+// Message types (self.onmessage & postMessage)
+const MSG = {
+  INIT: "init",
+  ATTACH_WEB_SOCKET: "attachWebSocket",
+  ATTACH_WEB_TRANSPORT_URL: "attachWebTransportUrl",
+  ATTACH_STREAM: "attachStream",
+  ATTACH_DATA_CHANNEL: "attachDataChannel",
+  TOGGLE_AUDIO: "toggleAudio",
+  SWITCH_BITRATE: "switchBitrate",
+  START_STREAM: "startStream",
+  STOP_STREAM: "stopStream",
+  PAUSE_STREAM: "pauseStream",
+  RESUME_STREAM: "resumeStream",
+  RESET: "reset",
+  STOP: "stop",
+  // Outgoing
+  VIDEO_DATA: "videoData",
+  AUDIO_DATA: "audioData",
+  AUDIO_TOGGLED: "audio-toggled",
+  BITRATE_CHANGED: "bitrateChanged",
+  ERROR: "error",
+  LOG: "log",
+  CONGESTION_LEVEL: "congestionLevel",
+  RAPTORQ_INITIALIZED: "raptorq-initialized",
+  CODEC_RECEIVED: "codecReceived",
+  STOP_EVENT: "stop",
+  RESET_EVENT: "reset",
+  // External decoder worker messages
+  READY: "ready",
+  CONFIGURED: "configured",
+  CONFIGURE: "configure",
+  DECODE: "decode",
+  RESET_ALL: "resetAll",
+  CONFIGURE_DECODER: "configureDecoder",
+};
+
+// JSON message types from server
+const SERVER_MSG = {
+  DECODER_CONFIGS: "DecoderConfigs",
+  STREAM_CONFIG: "StreamConfig",
+  SUBSCRIBER_CONNECTION_STATS: "subscriber_connection_stats",
+};
+
+// Protocol identifiers
+const PROTOCOL = {
+  WEBRTC: "webrtc",
+  WEBSOCKET: "websocket",
+  WEBTRANSPORT: "webtransport",
+};
+
+// Command types
+const COMMAND_TYPE = {
+  SUBSCRIBER: "subscriber_command",
+};
+
+// Codec identifiers
+const CODEC = {
+  AAC: "mp4a.40.2",
+  H264_BASELINE: "avc1.42001f",
+};
+
+// Audio format constants
+const AUDIO_FORMAT = {
+  F32_PLANAR: "f32-planar",
+  SAMPLE_RATE_48K: 48000,
+  MONO_CHANNELS: 1,
+};
+
+// Video frame format
+const VIDEO_FORMAT = {
+  YUV420: "yuv420",
+};
+
+// Media types in stream config
+const MEDIA_TYPE = {
+  VIDEO: "video",
+  AUDIO: "audio",
+};
+
+// Decoder states (WebCodecs API)
+const DECODER_STATE = {
+  CLOSED: "closed",
+  UNCONFIGURED: "unconfigured",
+};
+
+// Binary protocol sizes (bytes)
+const BINARY = {
+  JSON_OPEN_BRACE: 0x7B,            // '{' — used to detect JSON vs binary
+  FEC_FLAG: 0xff,                    // FEC packet marker
+  MEDIA_HEADER_SIZE: 9,              // seq(4) + ts(4) + frameType(1)
+  GOP_FRAME_HEADER_SIZE: 13,         // seq(4) + ts(4) + frameType(1) + payloadSize(4)
+  WEBRTC_HEADER_SIZE: 6,             // seq(4) + fec(1) + type(1)
+  LENGTH_PREFIX_SIZE: 4,             // big-endian u32 length prefix
+  STREAM_ID_LEN_SIZE: 2,             // big-endian u16 stream-id length
+  GOP_META_EXTRA: 7,                 // channel(1) + gopId(4) + expected(2)
+};
+
+// Guard limits
+const LIMITS = {
+  MAX_PAYLOAD_BYTES: 10_000_000,     // 10 MB — implausible frame guard
+  MAX_BUFFER_BYTES: 5 * 1024 * 1024, // 5 MB — LengthDelimitedReader overflow
+  DECODER_READY_TIMEOUT_MS: 5000,    // waitForReady() timeout
+};
+
+// Timestamp conversion
+const TIMESTAMP_US_PER_MS = 1000;
+
+// Congestion level indices
+const CONGESTION_LEVEL = {
+  NORMAL: 0,
+  MILD: 1,
+  MODERATE: 2,
+  SEVERE: 3,
+};
+
+const CONGESTION_LEVEL_NAMES = ['NORMAL', 'MILD', 'MODERATE', 'SEVERE'];
+
+// GOP channel byte → CHANNEL_NAME mapping (MeetingChannel::to_u8() on server)
+const GOP_CHANNEL_BYTE = {
+  CAM_360P: 1,
+  CAM_720P: 2,
+  SCREEN_SHARE_720P: 3,
+  CAM_1080P: 9,
+  CAM_1440P: 10,
+};
+
+// WebRTC DataChannel name prefixes for command routing
+const DC_PREFIX = {
+  VIDEO: "video_",
+  SCREEN_SHARE: "screen_share_",
+  AUDIO: "audio",
+};
+
+// Bitrate switch inline command strings
+const BITRATE_CMD = {
+  PAUSE: "pause",
+  RESUME: "resume",
+};
+
+// ── End Constants ──────────────────────────────────────────────────────────
 
 let subscribeType = STREAM_TYPE.CAMERA;
 
 let currentVideoChannel = CHANNEL_NAME.CAM_360P;
 
-let workletPort = null;
+let workletPort = null; // DEPRECATED — kept for legacy compat; audio now goes via audioDecoderPort
+let audioDecoderPort = null; // MessagePort to dedicated audio decoder worker
 let audioEnabled = true;
 
 // Audio subscription control - received from init message
@@ -89,10 +230,10 @@ let isWebSocket = false;
 //   >5%  loss → moderate degradation
 //   >2%  loss → mild degradation (hold/don't increase)
 //   ≤2%  loss → normal (can increase quality)
-const QUALITY_LADDER = ['cam_360p', 'cam_720p', 'cam_1080p', 'cam_1440p'];
+const QUALITY_LADDER = [CHANNEL_NAME.CAM_360P, CHANNEL_NAME.CAM_720P, CHANNEL_NAME.CAM_1080P, CHANNEL_NAME.CAM_1440P];
 let _dlPrevLostPackets = 0;
 let _dlPrevSentPackets = 0;
-let _dlLevel = 0; // 0=NORMAL, 1=MILD, 2=MODERATE, 3=SEVERE
+let _dlLevel = CONGESTION_LEVEL.NORMAL;
 let _dlRecoveryStartTime = 0;
 const DL_RECOVERY_HOLD_MS = 8000; // 8s hold before upgrading quality
 
@@ -110,13 +251,13 @@ function evaluateDownlinkCongestion(stats) {
   const lossRate = sentDelta > 0 ? lostDelta / sentDelta : 0;
 
   // Determine target level (loss-based, per GCC)
-  let target = 0; // NORMAL
+  let target = CONGESTION_LEVEL.NORMAL;
   if (lossRate >= DL_LOSS_SEVERE) {
-    target = 3; // SEVERE: ≥10% loss
+    target = CONGESTION_LEVEL.SEVERE;
   } else if (lossRate >= DL_LOSS_MODERATE) {
-    target = 2; // MODERATE: ≥5% loss
+    target = CONGESTION_LEVEL.MODERATE;
   } else if (lossRate >= DL_LOSS_MILD) {
-    target = 1; // MILD: ≥2% loss
+    target = CONGESTION_LEVEL.MILD;
   }
 
   const prevLevel = _dlLevel;
@@ -132,7 +273,7 @@ function evaluateDownlinkCongestion(stats) {
     if (_dlRecoveryStartTime === 0) {
       _dlRecoveryStartTime = performance.now();
     } else if (performance.now() - _dlRecoveryStartTime >= DL_RECOVERY_HOLD_MS) {
-      _dlLevel = Math.max(0, _dlLevel - 1);
+      _dlLevel = Math.max(CONGESTION_LEVEL.NORMAL, _dlLevel - 1);
       _dlRecoveryStartTime = 0;
       applyDownlinkQuality();
     }
@@ -142,14 +283,16 @@ function evaluateDownlinkCongestion(stats) {
 
   // Debug log + forward to audio worklet
   if (_dlLevel !== prevLevel) {
-    const levels = ['NORMAL', 'MILD', 'MODERATE', 'SEVERE'];
     console.warn(
-      `[DownlinkCongestion] ${levels[prevLevel]} → ${levels[_dlLevel]}` +
+      `[DownlinkCongestion] ${CONGESTION_LEVEL_NAMES[prevLevel]} → ${CONGESTION_LEVEL_NAMES[_dlLevel]}` +
       `  (rtt=${stats.rtt_ms.toFixed(1)}ms, loss=${(lossRate*100).toFixed(1)}%)`
     );
 
     if (workletPort) {
-      workletPort.postMessage({ type: "congestionLevel", data: _dlLevel });
+      workletPort.postMessage({ type: MSG.CONGESTION_LEVEL, data: _dlLevel });
+    }
+    if (audioDecoderPort) {
+      audioDecoderPort.postMessage({ type: MSG.CONGESTION_LEVEL, data: _dlLevel });
     }
   }
 }
@@ -223,14 +366,26 @@ async function createPolyfillDecoder(channelName) {
   decoder.onOutput = init.output;
   decoder.onError = init.error;
   // IMPORTANT: Must call configure() to initialize the underlying WASM decoder
-  await decoder.configure({ codec: 'avc1.42001f' });
+  await decoder.configure({ codec: CODEC.H264_BASELINE });
   return decoder;
+}
+
+let _nativeH264Supported = undefined;
+async function cachedIsNativeH264Supported() {
+  if (_nativeH264Supported === undefined) {
+    try {
+      _nativeH264Supported = await isNativeH264DecoderSupported();
+    } catch {
+      _nativeH264Supported = false;
+    }
+  }
+  return _nativeH264Supported;
 }
 
 // Helper: Create decoder with fallback
 async function createVideoDecoderWithFallback(channelName) {
   try {
-    const nativeSupported = await isNativeH264DecoderSupported();
+    const nativeSupported = await cachedIsNativeH264Supported();
     proxyConsole.log(`[VideoDecoder] Native H264 decoder supported: ${nativeSupported}`);
     if (nativeSupported) {
       return new VideoDecoder(createVideoInit(channelName));
@@ -252,7 +407,7 @@ const createVideoInit = (channelName) => ({
       if (!self._frameCount) self._frameCount = 0;
       self._frameCount++;
       try {
-        self.postMessage({ type: "videoData", frame, quality: channelName }, [frame]);
+        self.postMessage({ type: MSG.VIDEO_DATA, frame, quality: channelName }, [frame]);
       } catch (postMessageError) {
         // Transfer failed (can happen on Safari 15) — must close frame to free GPU memory
         console.error('[Worker] VideoFrame transfer FAILED, closing frame:', postMessageError);
@@ -270,9 +425,9 @@ const createVideoInit = (channelName) => ({
         // NOTE: Don't use transferables on iOS 15 - it can silently fail
         // Just copy the data instead (slightly slower but more compatible)
         self.postMessage({ 
-          type: "videoData", 
+          type: MSG.VIDEO_DATA, 
           frame: { 
-            format: 'yuv420',
+            format: VIDEO_FORMAT.YUV420,
             yPlane: yPlane,
             uPlane: uPlane,
             vPlane: vPlane,
@@ -293,7 +448,7 @@ const createVideoInit = (channelName) => ({
   error: (e) => {
     proxyConsole.error(`Video decoder error (${channelName}):`, e);
     self.postMessage({
-      type: 'error',
+      type: MSG.ERROR,
       message: `${channelName} decoder: ${e.message}`,
     });
     // Attempt to recover by resetting keyframe flag - next keyframe will reinitialize decoder
@@ -304,30 +459,31 @@ const createVideoInit = (channelName) => ({
 
 const audioInit = {
   output: (audioData) => {
-    // Always close AudioData in finally to prevent memory leak even if an error occurs
+    // This callback is used when audio decoder runs in this worker (legacy/fallback).
+    // With audioDecoderPort, audio decoding happens in the audio-decoder-worker
+    // and this callback is NOT used.
     try {
       const channelData = [];
    
       // if mono, duplicate to create stereo  
-      if (audioData.numberOfChannels === 1) {
+      if (audioData.numberOfChannels === AUDIO_FORMAT.MONO_CHANNELS) {
         const monoChannel = new Float32Array(audioData.numberOfFrames);
-        audioData.copyTo(monoChannel, { planeIndex: 0, format: 'f32-planar' });
+        audioData.copyTo(monoChannel, { planeIndex: 0, format: AUDIO_FORMAT.F32_PLANAR });
         channelData.push(monoChannel);
         channelData.push(new Float32Array(monoChannel));
       } else {
         for (let i = 0; i < audioData.numberOfChannels; i++) {
           const channel = new Float32Array(audioData.numberOfFrames);
-          audioData.copyTo(channel, { planeIndex: i, format: 'f32-planar' });
+          audioData.copyTo(channel, { planeIndex: i, format: AUDIO_FORMAT.F32_PLANAR });
           channelData.push(channel);
         }
       }
-    
 
-      if (workletPort) {
-        // Log first few frames and sample values to verify data integrity
-        workletPort.postMessage(
+      const port = workletPort;
+      if (port) {
+        port.postMessage(
           {
-            type: "audioData",
+            type: MSG.AUDIO_DATA,
             channelData,
             timestamp: audioData.timestamp,
             sampleRate: audioData.sampleRate,
@@ -337,7 +493,7 @@ const audioInit = {
           channelData.map((c) => c.buffer),
         );
       } else {
-        console.error('[Audio] workletPort is NULL, cannot send audio data');
+        console.error('[Audio] No audio output port available');
       }
     } finally {
       // Must always close AudioData to release underlying memory (Safari 15 critical)
@@ -345,7 +501,7 @@ const audioInit = {
     }
   },
   error: (e) => {
-    self.postMessage({ type: 'error', message: e.message });
+    self.postMessage({ type: MSG.ERROR, message: e.message });
   },
 };
 
@@ -357,11 +513,11 @@ self.onmessage = async function (e) {
   const { type, port, quality, readable, writable, channelName, dataChannel, wsUrl, localStreamId } = e.data;
 
   switch (type) {
-    case "init":
+    case MSG.INIT:
       protocol = e.data.protocol;
-      if (protocol === 'webrtc') {
+      if (protocol === PROTOCOL.WEBRTC) {
         await initRaptorQWasm();
-        this.postMessage({ type: 'raptorq-initialized' });
+        this.postMessage({ type: MSG.RAPTORQ_INITIALIZED });
       }
       if (e.data.enableLogging) {
         const methods = ['log', 'error', 'warn', 'debug', 'info', 'trace', 'group', 'groupEnd'];
@@ -369,7 +525,14 @@ self.onmessage = async function (e) {
           if (console[m]) proxyConsole[m] = console[m].bind(console);
         }
       }
-      if (port instanceof MessagePort) workletPort = port;
+      // Legacy: if workletPort is sent directly (for backward compat)
+      if (e.data.port instanceof MessagePort) workletPort = e.data.port;
+      // New: audioDecoderPort — raw audio packets are forwarded here for
+      // decoding on a dedicated thread (prevents video blocking audio)
+      if (e.data.audioDecoderPort instanceof MessagePort) {
+        audioDecoderPort = e.data.audioDecoderPort;
+        audioDecoderPort.start();
+      }
       subscribeType = e.data.subscribeType || STREAM_TYPE.CAMERA;
       // Get audioEnabled from init message - for screen share, this determines if we should subscribe to audio
       subscriptionAudioEnabled = e.data.audioEnabled !== undefined ? e.data.audioEnabled : true;
@@ -379,7 +542,7 @@ self.onmessage = async function (e) {
       if (videoDecoderPort) {
         setupVideoDecoderPort(videoDecoderPort);
       }
-      proxyConsole.log(`[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}, initialQuality=${initialQuality}`);
+      proxyConsole.log(`[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}, initialQuality=${initialQuality}, audioDecoderPort=${!!audioDecoderPort}`);
       try {
         await initializeDecoders();
         proxyConsole.log(`[Worker] Decoders initialized successfully`);
@@ -388,13 +551,13 @@ self.onmessage = async function (e) {
       }
       break;
 
-    case "attachWebSocket":
+    case MSG.ATTACH_WEB_SOCKET:
       if (wsUrl) {
         commandSender = new CommandSender({
           localStreamId,
           sendDataFn: sendOverWebSocket,
-          protocol: "websocket",
-          commandType: "subscriber_command",
+          protocol: PROTOCOL.WEBSOCKET,
+          commandType: COMMAND_TYPE.SUBSCRIBER,
         });
 
         isWebSocket = true;
@@ -402,7 +565,7 @@ self.onmessage = async function (e) {
       }
       break;
 
-    case "attachWebTransportUrl":
+    case MSG.ATTACH_WEB_TRANSPORT_URL:
       // Worker creates the WebTransport session itself so we can directly
       // call incomingUnidirectionalStreams.getReader() following the MDN pattern,
       // without any postMessage transfer issues.
@@ -410,8 +573,8 @@ self.onmessage = async function (e) {
         commandSender = new CommandSender({
           localStreamId: e.data.localStreamId,
           sendDataFn: sendOverStream,
-          protocol: "webtransport",
-          commandType: "subscriber_command",
+          protocol: PROTOCOL.WEBTRANSPORT,
+          commandType: COMMAND_TYPE.SUBSCRIBER,
         });
         proxyConsole.warn(`[Worker] Connecting WebTransport inside worker: ${e.data.url}`);
         attachWebTransportFromUrl(e.data.url, e.data.channelName).catch((err) => {
@@ -420,20 +583,20 @@ self.onmessage = async function (e) {
       }
       break;
 
-    case "attachStream":
+    case MSG.ATTACH_STREAM:
       if (readable && writable) {
         commandSender = new CommandSender({
           localStreamId,
           sendDataFn: sendOverStream,
-          protocol: "webtransport",
-          commandType: "subscriber_command",
+          protocol: PROTOCOL.WEBTRANSPORT,
+          commandType: COMMAND_TYPE.SUBSCRIBER,
         });
         proxyConsole.warn(`[Publisher worker]: Attaching WebTransport stream!`);
         attachWebTransportStream(readable, writable, channelName);
       }
       break;
 
-    case "attachDataChannel":
+    case MSG.ATTACH_DATA_CHANNEL:
       if (channelName && dataChannel) {
         proxyConsole.warn(`[Publisher worker]: Attaching WebRTC data channel for ${channelName}`);
         attachWebRTCDataChannel(channelName, dataChannel);
@@ -443,46 +606,44 @@ self.onmessage = async function (e) {
           commandSender = new CommandSender({
             localStreamId,
             sendDataFn: sendOverDataChannel,
-            protocol: "websocket", // uses string JSON format (non-webtransport path)
-            commandType: "subscriber_command",
+            protocol: PROTOCOL.WEBSOCKET, // uses string JSON format (non-webtransport path)
+            commandType: COMMAND_TYPE.SUBSCRIBER,
           });
         }
       }
       break;
 
-    case "toggleAudio":
+    case MSG.TOGGLE_AUDIO:
       audioEnabled = !audioEnabled;
-      self.postMessage({ type: "audio-toggled", audioEnabled });
+      self.postMessage({ type: MSG.AUDIO_TOGGLED, audioEnabled });
       break;
 
-    case "switchBitrate":
+    case MSG.SWITCH_BITRATE:
       handleBitrateSwitch(quality);
       break;
     
-    case "startStream":
+    case MSG.START_STREAM:
       if (commandSender) commandSender.startStream();
       break;
 
-    case "stopStream":
+    case MSG.STOP_STREAM:
       if (commandSender) commandSender.stopStream();
       break;
 
-    case "pauseStream":
+    case MSG.PAUSE_STREAM:
       resetAllKeyFrameFlags(); // Reset so decoder waits for keyframe on resume
       if (commandSender) commandSender.pauseStream();
       break;
 
-    case "resumeStream":
-      if (self._audioReorderBuffer) self._audioReorderBuffer.reset();
-      self._lastAudioSeq = undefined;
+    case MSG.RESUME_STREAM:
       if (commandSender) commandSender.resumeStream();
       break;
 
-    case "reset":
+    case MSG.RESET:
       resetDecoders();
       break;
 
-    case "stop":
+    case MSG.STOP:
       stopAll();
       break;
   }
@@ -550,14 +711,13 @@ function attachWebRTCDataChannel(channelName, channel) {
 
   channel.onopen = () => {
     proxyConsole.log(`[WebRTC] Data channel opened: ${channelName}`);
-
     const initText = `subscribe:${channelName}`;
     const initData = new TextEncoder().encode(initText);
     const len = initData.length;
-    const out = new Uint8Array(4 + len);
+    const out = new Uint8Array(BINARY.LENGTH_PREFIX_SIZE + len);
     const view = new DataView(out.buffer);
     view.setUint32(0, len, false);
-    out.set(initData, 4);
+    out.set(initData, BINARY.LENGTH_PREFIX_SIZE);
 
     channel.send(out);
     proxyConsole.log(`[WebRTC] Sent subscribe message for ${channelName}`);
@@ -587,7 +747,7 @@ function attachWebRTCDataChannel(channelName, channel) {
 async function sendOverDataChannel(json) {
   // Send to all video/screen-share DataChannels (pause/resume affects video)
   for (const [name, channel] of webRtcDataChannels) {
-    if ((name.startsWith('video_') || (name.startsWith('screen_share_') && !name.includes('audio'))) && channel.readyState === 'open') {
+    if ((name.startsWith(DC_PREFIX.VIDEO) || (name.startsWith(DC_PREFIX.SCREEN_SHARE) && !name.includes(DC_PREFIX.AUDIO))) && channel.readyState === 'open') {
       try {
         channel.send(json);
         proxyConsole.warn(`[WebRTC] Sent command to ${name}: ${json}`);
@@ -598,240 +758,24 @@ async function sendOverDataChannel(json) {
   }
 }
 
-// ======================================
-// Jitter Buffer for WebRTC packet reordering
-// ======================================
-class JitterBuffer {
-  constructor(options = {}) {
-    this.buffer = new Map(); // sequenceNumber -> { data, timestamp }
-    this.lastProcessedSeq = -1;
-    this.maxBufferSize = options.maxBufferSize || 50;
-    this.maxWaitMs = options.maxWaitMs || 100; // Max time to wait for missing packet
-    this.flushIntervalMs = options.flushIntervalMs || 50;
-    this.onPacketReady = options.onPacketReady || (() => {});
-    
-    // Start periodic flush timer
-    this.flushTimer = setInterval(() => this.flushStalePackets(), this.flushIntervalMs);
-  }
-
-  /**
-   * Add a packet to the buffer
-   * @param {number} sequenceNumber 
-   * @param {Uint8Array} data 
-   */
-  addPacket(sequenceNumber, data) {
-    const now = Date.now();
-    
-    // If this is the first packet or the expected next packet
-    if (this.lastProcessedSeq === -1) {
-      this.lastProcessedSeq = sequenceNumber - 1;
-    }
-
-    // If packet is too old (already processed or too far behind), drop it
-    if (sequenceNumber <= this.lastProcessedSeq) {
-      // console.log(`[JitterBuffer] Dropping old packet seq=${sequenceNumber}, lastProcessed=${this.lastProcessedSeq}`);
-      return;
-    }
-
-    // If it's the next expected packet, process immediately
-    if (sequenceNumber === this.lastProcessedSeq + 1) {
-      this.lastProcessedSeq = sequenceNumber;
-      this.onPacketReady(data);
-      
-      // Try to flush any buffered packets that are now in order
-      this.flushBufferedPackets();
-      return;
-    }
-
-    // Otherwise, buffer the packet for reordering
-    this.buffer.set(sequenceNumber, { data, timestamp: now });
-
-    // If buffer is too large, force flush oldest packets
-    if (this.buffer.size > this.maxBufferSize) {
-      this.forceFlushOldest();
-    }
-  }
-
-  /**
-   * Flush buffered packets that are now in order
-   */
-  flushBufferedPackets() {
-    let nextSeq = this.lastProcessedSeq + 1;
-    
-    while (this.buffer.has(nextSeq)) {
-      const packet = this.buffer.get(nextSeq);
-      this.buffer.delete(nextSeq);
-      this.lastProcessedSeq = nextSeq;
-      this.onPacketReady(packet.data);
-      nextSeq++;
-    }
-  }
-
-  /**
-   * Flush packets that have been waiting too long
-   */
-  flushStalePackets() {
-    if (this.buffer.size === 0) return;
-    
-    const now = Date.now();
-    const staleThreshold = now - this.maxWaitMs;
-    
-    // Find the minimum sequence number in buffer
-    let minSeq = Infinity;
-    for (const seq of this.buffer.keys()) {
-      if (seq < minSeq) minSeq = seq;
-    }
-    
-    // Check if the oldest packet is stale
-    if (minSeq !== Infinity) {
-      const packet = this.buffer.get(minSeq);
-      if (packet && packet.timestamp < staleThreshold) {
-        // Skip the missing packets and process from minSeq
-        console.warn(`[JitterBuffer] Skipping missing packets ${this.lastProcessedSeq + 1} to ${minSeq - 1}, forcing flush`);
-        this.lastProcessedSeq = minSeq - 1;
-        this.flushBufferedPackets();
-      }
-    }
-  }
-
-  /**
-   * Force flush the oldest packets when buffer is full
-   */
-  forceFlushOldest() {
-    // Sort sequence numbers and get the oldest
-    const seqNumbers = Array.from(this.buffer.keys()).sort((a, b) => a - b);
-    
-    // Flush half of the buffer
-    const flushCount = Math.floor(seqNumbers.length / 2);
-    for (let i = 0; i < flushCount; i++) {
-      const seq = seqNumbers[i];
-      const packet = this.buffer.get(seq);
-      this.buffer.delete(seq);
-      
-      if (seq > this.lastProcessedSeq) {
-        this.lastProcessedSeq = seq;
-        this.onPacketReady(packet.data);
-      }
-    }
-    console.warn(`[JitterBuffer] Buffer overflow, force flushed ${flushCount} packets`);
-  }
-
-  /**
-   * Get buffer stats for debugging
-   */
-  getStats() {
-    return {
-      bufferSize: this.buffer.size,
-      lastProcessedSeq: this.lastProcessedSeq,
-      pendingSeqs: Array.from(this.buffer.keys()).sort((a, b) => a - b),
-    };
-  }
-
-  /**
-   * Clear the buffer and reset state
-   */
-  reset() {
-    this.buffer.clear();
-    this.lastProcessedSeq = -1;
-  }
-
-  /**
-   * Stop the flush timer
-   */
-  destroy() {
-    if (this.flushTimer) {
-      clearInterval(this.flushTimer);
-      this.flushTimer = null;
-    }
-    this.buffer.clear();
-  }
-}
-
-// Create jitter buffers for video and screen share packets
-let videoJitterBuffer = null;
-let screenShareJitterBuffer = null;
-
-function initVideoJitterBuffer() {
-  if (videoJitterBuffer) {
-    videoJitterBuffer.destroy();
-  }
-  videoJitterBuffer = new JitterBuffer({
-    maxBufferSize: 30,
-    maxWaitMs: 100,
-    flushIntervalMs: 50,
-    onPacketReady: (data) => {
-      processIncomingMessage(data);
-    },
-  });
-}
-
-function initScreenShareJitterBuffer() {
-  if (screenShareJitterBuffer) {
-    screenShareJitterBuffer.destroy();
-  }
-  screenShareJitterBuffer = new JitterBuffer({
-    maxBufferSize: 30,
-    maxWaitMs: 100,
-    flushIntervalMs: 50,
-    onPacketReady: (data) => {
-      processIncomingMessage(data);
-    },
-  });
-}
-
-/**
- * Check if a channel name is a video or screen share channel (not audio/control)
- */
-function isVideoChannel(channelName) {
-  return channelName.startsWith('video_') || 
-         (channelName.startsWith('screen_share_') && !channelName.includes('audio'));
-}
-
-/**
- * Get the appropriate jitter buffer for a channel, initializing if needed
- */
-function getJitterBufferForChannel(channelName) {
-  if (USE_VIDEO_JITTER_BUFFER && channelName.startsWith('video_')) {
-    if (!videoJitterBuffer) initVideoJitterBuffer();
-    return videoJitterBuffer;
-  }
-  if (USE_SCREEN_SHARE_JITTER_BUFFER && channelName.startsWith('screen_share_') && !channelName.includes('audio')) {
-    if (!screenShareJitterBuffer) initScreenShareJitterBuffer();
-    return screenShareJitterBuffer;
-  }
-  return null;
-}
-
-let fecDisabled = false; // Set to true after first WASM crash to avoid repeated errors
-
 function handleWebRtcMessage(channelName, message) {
     const { sequenceNumber, isFec, packetType, payload } = parseWebRTCPacket(new Uint8Array(message));
-    
-    const jitterBuffer = getJitterBufferForChannel(channelName);
 
     if (isFec) {
       const channelFecManager = getOrCreateFecManager(channelName);
       const result = channelFecManager.process_fec_packet(payload, sequenceNumber);
       if (result) {
         const decodedData = result[0][1];
-        if (jitterBuffer) {
-          jitterBuffer.addPacket(sequenceNumber, decodedData);
-        } else {
-          processIncomingMessage(decodedData);
-        }
+        processIncomingMessage(decodedData);
         return;
       }
     } else {
-      if (jitterBuffer) {
-        jitterBuffer.addPacket(sequenceNumber, payload);
-      } else {
-        processIncomingMessage(payload);
-      }
+      processIncomingMessage(payload);
     }
 }
 
 function parseWebRTCPacket(packet) {
-  if (packet.length < 6) {
+  if (packet.length < BINARY.WEBRTC_HEADER_SIZE) {
     throw new Error("Invalid packet: too short");
   }
 
@@ -844,33 +788,32 @@ function parseWebRTCPacket(packet) {
   // 1 byte packet type
   const packetType = view.getUint8(5);
   // Remaining bytes are the payload
-  // const payload = packet.subarray(6);
-  const payload = packet.slice(6);
+  const payload = packet.subarray(6);
 
   return {
     sequenceNumber,
-    isFec: fecFlag === 0xff,
+    isFec: fecFlag === BINARY.FEC_FLAG,
     packetType,
     payload,
   };
 }
 
 function handleStreamConfigs(json) {
-  if (json.type !== "DecoderConfigs") return;
+  if (json.type !== SERVER_MSG.DECODER_CONFIGS) return;
 
   for (const [key, value] of Object.entries(json)) {
     if (key === "type") continue;
 
     try {
       const stream = (typeof value === "string") ? JSON.parse(value) : value;
-      if (!stream || stream.type !== "StreamConfig") continue;
+      if (!stream || stream.type !== SERVER_MSG.STREAM_CONFIG) continue;
 
       const channelName = stream.channelName;
       const cfg = stream.config;
       const desc = base64ToUint8Array(cfg.description);
 
       proxyConsole.log(`Configuring decoder for ${key} (${channelName})`, { cfg });
-      if (stream.mediaType === "video") {
+      if (stream.mediaType === MEDIA_TYPE.VIDEO) {
         // Check if this is a native VideoDecoder or WASM polyfill
         const decoder = mediaDecoders.get(channelName);
         // Guard against VideoDecoder not existing on iOS 15
@@ -921,7 +864,7 @@ function handleStreamConfigs(json) {
         } else {
           proxyConsole.warn(`No decoder for video channel ${channelName}`);
         }
-      } else if (stream.mediaType === "audio") {
+      } else if (stream.mediaType === MEDIA_TYPE.AUDIO) {
         const audioConfig = {
           codec: cfg.codec,
           sampleRate: cfg.sampleRate,
@@ -931,99 +874,115 @@ function handleStreamConfigs(json) {
 
         mediaConfigs.set(channelName, audioConfig);
 
-        const isAAC = cfg.codec === "mp4a.40.2";
-
-        if (isAAC) {
-          // ── AAC path: swap out any existing decoder for AACDecoder ──────────────
-          const existingDecoder = mediaDecoders.get(channelName);
-          // close old Opus decoder if it was already created
-          if (existingDecoder && typeof existingDecoder.stop === 'function') {
-            try { existingDecoder.stop(); } catch { /* ignore */ }
-          }
-
-          const aacDecoder = new AACDecoder();
-          aacDecoder.onOutput = audioInit.output;
-          aacDecoder.onError = audioInit.error;
-
-          mediaDecoders.set(channelName, aacDecoder);
-
-          // DEBUG: Log ASC bytes for diagnostics (critical for cross-browser debugging)
-          if (desc && desc.length > 0) {
-            proxyConsole.log(`[Audio] AAC ASC bytes for ${channelName}: [${Array.from(desc).map(b => b.toString(16).padStart(2, '0')).join(' ')}], len=${desc.length}`);
-          } else {
-            console.warn(`[Audio] ⚠️ No ASC description for AAC channel ${channelName}`);
-          }
-
-          aacDecoder.configure({
-            codec: 'mp4a.40.2',
-            sampleRate: cfg.sampleRate,
-            numberOfChannels: cfg.numberOfChannels,
-            description: desc, // AudioSpecificConfig
-          }).then(() => {
-            aacDecoder.isReadyForAudio = true;
-            proxyConsole.log(`[Audio] AACDecoder configured for ${channelName} — using ${aacDecoder.usingNative ? 'native WebCodecs' : 'FAAD2 WASM'}, state: ${aacDecoder.state}`);
-          }).catch((err) => {
-            console.error(`[Audio] AACDecoder configure failed for ${channelName}:`, err);
+        // ── Forward to dedicated audio decoder worker ──
+        // When audioDecoderPort is active, audio decoding happens on a
+        // separate thread. Just forward the config and let the audio
+        // decoder worker handle decoder creation.
+        if (audioDecoderPort) {
+          proxyConsole.log(`[Audio] Forwarding decoder config to audio decoder worker for ${channelName}`);
+          // Transfer description as a copy (the port can't transfer views into shared buffers)
+          const descCopy = desc ? new Uint8Array(desc) : null;
+          audioDecoderPort.postMessage({
+            type: MSG.CONFIGURE_DECODER,
+            config: {
+              codec: cfg.codec,
+              sampleRate: cfg.sampleRate,
+              numberOfChannels: cfg.numberOfChannels,
+              description: descCopy,
+            },
           });
         } else {
-          // ── Opus path (unchanged) ─────────────────────────────────────────────────
-          const decoder = mediaDecoders.get(channelName);
-          if (decoder) {
-            try {
-              decoder.configure({ ...audioConfig, decoderPort: externalDecoderPort })
-                .then((configResult) => {
-                  proxyConsole.log(`[Audio] configured successfully for ${channelName}, result:`, configResult, "state:", decoder.state);
-                  // Wait for the decoder worker's WASM to be truly ready instead
-                  // of relying on a hardcoded delay (which was unreliable on slow
-                  // iOS 15 devices).
-                  return decoder.waitForReady(5000);
-                })
-                .then(() => {
-                  try {
-                    proxyConsole.log(`[Audio] Decoder WASM ready for ${channelName}, sending description chunk`);
+          // ── Legacy inline decode path ──
+          const isAAC = cfg.codec === CODEC.AAC;
 
-                    const dataView = new DataView(desc.buffer, desc.byteOffset, desc.byteLength);
-                    const timestamp = dataView.getUint32(4, false);
-                    const data = desc.slice(9);
-
-                    const chunk = new EncodedAudioChunk({
-                      timestamp: timestamp * 1000,
-                      type: CHUNK_TYPE.KEY,
-                      data,
-                    });
-                    decoder.decode(chunk);
-                    decoder.isReadyForAudio = true; // Flag to allow normal packets
-                    proxyConsole.log(`[Audio] Sent description chunk for ${channelName}, now ready for audio packets`);
-
-                    // Replay any audio packets that arrived before the description
-                    if (decoder._preConfigBuffer && decoder._preConfigBuffer.length > 0) {
-                      proxyConsole.log(`[Audio] Replaying ${decoder._preConfigBuffer.length} pre-config buffered packets for ${channelName}`);
-                      for (const buffered of decoder._preConfigBuffer) {
-                        try {
-                          const bufferedChunk = new EncodedAudioChunk({
-                            timestamp: buffered.timestamp * 1000,
-                            type: CHUNK_TYPE.KEY,
-                            data: buffered.data,
-                          });
-                          decoder.decode(bufferedChunk);
-                        } catch (err) {
-                          console.warn(`[Audio] Error replaying buffered chunk for ${channelName}:`, err);
-                        }
-                      }
-                      decoder._preConfigBuffer = null;
-                    }
-                  } catch (err) {
-                    console.warn(`[Audio] Error decoding first audio frame (${channelName}):`, err);
-                  }
-                })
-                .catch((err) => {
-                  console.error(`[Audio] configure/ready REJECTED for ${channelName}:`, err);
-                });
-            } catch (err) {
-              console.error(`[Audio] Configure decoder FAIL ${channelName}:`, err);
+          if (isAAC) {
+            // ── AAC path: swap out any existing decoder for AACDecoder ──────────────
+            const existingDecoder = mediaDecoders.get(channelName);
+            // close old Opus decoder if it was already created
+            if (existingDecoder && typeof existingDecoder.stop === 'function') {
+              try { existingDecoder.stop(); } catch { /* ignore */ }
             }
+
+            const aacDecoder = new AACDecoder();
+            aacDecoder.onOutput = audioInit.output;
+            aacDecoder.onError = audioInit.error;
+
+            mediaDecoders.set(channelName, aacDecoder);
+
+            // DEBUG: Log ASC bytes for diagnostics (critical for cross-browser debugging)
+            if (desc && desc.length > 0) {
+              proxyConsole.log(`[Audio] AAC ASC bytes for ${channelName}: [${Array.from(desc).map(b => b.toString(16).padStart(2, '0')).join(' ')}], len=${desc.length}`);
+            } else {
+              console.warn(`[Audio] ⚠️ No ASC description for AAC channel ${channelName}`);
+            }
+
+            aacDecoder.configure({
+              codec: CODEC.AAC,
+              sampleRate: cfg.sampleRate,
+              numberOfChannels: cfg.numberOfChannels,
+              description: desc, // AudioSpecificConfig
+            }).then(() => {
+              aacDecoder.isReadyForAudio = true;
+              proxyConsole.log(`[Audio] AACDecoder configured for ${channelName} — using ${aacDecoder.usingNative ? 'native WebCodecs' : 'FAAD2 WASM'}, state: ${aacDecoder.state}`);
+            }).catch((err) => {
+              console.error(`[Audio] AACDecoder configure failed for ${channelName}:`, err);
+            });
           } else {
-            console.warn(`[Audio] No decoder for audio channel ${channelName}`);
+            // ── Opus path (unchanged) ─────────────────────────────────────────────────
+            const decoder = mediaDecoders.get(channelName);
+            if (decoder) {
+              try {
+                decoder.configure({ ...audioConfig, decoderPort: externalDecoderPort })
+                  .then((configResult) => {
+                    proxyConsole.log(`[Audio] configured successfully for ${channelName}, result:`, configResult, "state:", decoder.state);
+                    return decoder.waitForReady(LIMITS.DECODER_READY_TIMEOUT_MS);
+                  })
+                  .then(() => {
+                    try {
+                      proxyConsole.log(`[Audio] Decoder WASM ready for ${channelName}, sending description chunk`);
+
+                      const dataView = new DataView(desc.buffer, desc.byteOffset, desc.byteLength);
+                      const timestamp = dataView.getUint32(4, false);
+                      const data = desc.slice(9);
+
+                      const chunk = new EncodedAudioChunk({
+                        timestamp: timestamp * TIMESTAMP_US_PER_MS,
+                        type: CHUNK_TYPE.KEY,
+                        data,
+                      });
+                      decoder.decode(chunk);
+                      decoder.isReadyForAudio = true;
+                      proxyConsole.log(`[Audio] Sent description chunk for ${channelName}, now ready for audio packets`);
+
+                      if (decoder._preConfigBuffer && decoder._preConfigBuffer.length > 0) {
+                        proxyConsole.log(`[Audio] Replaying ${decoder._preConfigBuffer.length} pre-config buffered packets for ${channelName}`);
+                        for (const buffered of decoder._preConfigBuffer) {
+                          try {
+                            const bufferedChunk = new EncodedAudioChunk({
+                              timestamp: buffered.timestamp * TIMESTAMP_US_PER_MS,
+                              type: CHUNK_TYPE.KEY,
+                              data: buffered.data,
+                            });
+                            decoder.decode(bufferedChunk);
+                          } catch (err) {
+                            console.warn(`[Audio] Error replaying buffered chunk for ${channelName}:`, err);
+                          }
+                        }
+                        decoder._preConfigBuffer = null;
+                      }
+                    } catch (err) {
+                      console.warn(`[Audio] Error decoding first audio frame (${channelName}):`, err);
+                    }
+                  })
+                  .catch((err) => {
+                    console.error(`[Audio] configure/ready REJECTED for ${channelName}:`, err);
+                  });
+              } catch (err) {
+                console.error(`[Audio] Configure decoder FAIL ${channelName}:`, err);
+              }
+            } else {
+              console.warn(`[Audio] No decoder for audio channel ${channelName}`);
+            }
           }
         }
       }
@@ -1084,184 +1043,6 @@ async function attachWebTransportFromUrl(url, channelName) {
 
   // ── Unidirectional streams: one stream per GOP from the node server ──
   receiveUnidirectional(transport);
-
-  // ── Datagram reader: DISABLED — audio downstream uses uni-streams only ──
-  // receiveDatagrams(transport);
-}
-
-/**
- * Ring buffer that reorders audio datagrams by sequence number.
- *
- * Datagrams may arrive out of order. This buffer holds packets in a fixed-size
- * circular array indexed by (seq % capacity). When the expected next sequence
- * arrives (or a timer fires), it flushes contiguous in-order packets to the
- * output callback.
- *
- * Design:
- *  - capacity = 8 slots  (~160ms of audio at 20ms/frame — generous)
- *  - maxWaitMs = 40ms    (2 frames of jitter tolerance, then force-flush)
- *  - Zero-copy: stores references, no extra ArrayBuffer allocation
- *  - If a packet arrives in-order, it flushes immediately (0ms added latency)
- */
-class DatagramReorderBuffer {
-  /**
-   * @param {function(Uint8Array): void} onFlush — called for each packet, in order
-   * @param {number} capacity — ring buffer size (must be power of 2 for fast mod)
-   * @param {number} maxWaitMs — max time to hold a packet waiting for earlier ones
-   */
-  constructor(onFlush, capacity = 8, maxWaitMs = 40) {
-    this._onFlush = onFlush;
-    this._capacity = capacity;
-    this._mask = capacity - 1;           // fast modulo for power-of-2
-    this._maxWaitMs = maxWaitMs;
-    this._slots = new Array(capacity);   // Uint8Array | null
-    this._seqs = new Uint32Array(capacity); // stored seq per slot
-    this._filled = new Uint8Array(capacity); // 0/1 flag per slot
-    this._nextExpected = -1;             // -1 = not initialized
-    this._flushTimer = null;
-  }
-
-  /**
-   * Insert a datagram payload. Seq is read from the first 4 bytes (big-endian).
-   * @param {Uint8Array} payload — [seq:4][ts:4][frameType:1][audio_data...]
-   */
-  push(payload) {
-    if (payload.byteLength < 9) return;
-
-    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
-    const seq = view.getUint32(0, false); // big-endian
-
-    // Bootstrap: first packet sets the expected baseline
-    if (this._nextExpected === -1) {
-      this._nextExpected = seq;
-    }
-
-    // Drop if too old (behind the window)
-    // Use signed diff to handle uint32 wrap-around
-    const diff = (seq - this._nextExpected) | 0;
-    if (diff < 0) {
-      // Stale packet — already flushed past this seq
-      return;
-    }
-    if (diff >= this._capacity) {
-      // Packet is way ahead — force flush everything and reset
-      this._forceFlushAll();
-      this._nextExpected = seq;
-    }
-
-    // Place in ring buffer
-    const slot = seq & this._mask;
-    this._slots[slot] = payload;
-    this._seqs[slot] = seq;
-    this._filled[slot] = 1;
-
-    // Try to flush contiguous run starting from _nextExpected
-    this._tryFlush();
-
-    // Arm a timer to force-flush if we're stuck waiting for a gap
-    this._armTimer();
-  }
-
-  /** Flush all contiguous packets starting from _nextExpected */
-  _tryFlush() {
-    while (true) {
-      const slot = this._nextExpected & this._mask;
-      if (!this._filled[slot] || this._seqs[slot] !== this._nextExpected) break;
-
-      this._filled[slot] = 0;
-      const pkt = this._slots[slot];
-      this._slots[slot] = null;
-      this._nextExpected = (this._nextExpected + 1) >>> 0; // wrap-safe increment
-      this._onFlush(pkt);
-    }
-
-    // If everything flushed, cancel the timer
-    if (!this._hasBuffered()) {
-      this._cancelTimer();
-    }
-  }
-
-  /** Force flush all buffered packets (in seq order) when the gap is too old */
-  _forceFlushAll() {
-    // Collect all filled slots, sort by seq, flush
-    const pending = [];
-    for (let i = 0; i < this._capacity; i++) {
-      if (this._filled[i]) {
-        pending.push({ seq: this._seqs[i], payload: this._slots[i] });
-        this._filled[i] = 0;
-        this._slots[i] = null;
-      }
-    }
-    pending.sort((a, b) => ((a.seq - b.seq) | 0));
-    for (const p of pending) {
-      this._onFlush(p.payload);
-    }
-    this._cancelTimer();
-  }
-
-  _hasBuffered() {
-    for (let i = 0; i < this._capacity; i++) {
-      if (this._filled[i]) return true;
-    }
-    return false;
-  }
-
-  _armTimer() {
-    if (this._flushTimer !== null) return;
-    this._flushTimer = setTimeout(() => {
-      this._flushTimer = null;
-      // Skip _nextExpected to the lowest buffered seq and flush
-      let minSeq = 0xFFFFFFFF;
-      for (let i = 0; i < this._capacity; i++) {
-        if (this._filled[i] && ((this._seqs[i] - this._nextExpected) | 0) >= 0) {
-          if (((this._seqs[i] - minSeq) | 0) < 0) minSeq = this._seqs[i];
-        }
-      }
-      if (minSeq !== 0xFFFFFFFF) {
-        this._nextExpected = minSeq;
-      }
-      this._tryFlush();
-      // If still buffered, re-arm
-      if (this._hasBuffered()) {
-        this._armTimer();
-      }
-    }, this._maxWaitMs);
-  }
-
-  _cancelTimer() {
-    if (this._flushTimer !== null) {
-      clearTimeout(this._flushTimer);
-      this._flushTimer = null;
-    }
-  }
-}
-
-/**
- * Read audio datagrams from the WebTransport session.
- * Server sends: [channel:1][seq:4][ts:4][frameType:1][media_payload...]
- * We strip the 1-byte channel prefix and push through a reorder buffer
- * that delivers packets to processIncomingMessage in sequence order.
- */
-async function receiveDatagrams(transport) {
-  const reorderBuffer = new DatagramReorderBuffer((payload) => {
-    processIncomingMessage(payload);
-  });
-
-  try {
-    const reader = transport.datagrams.readable.getReader();
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (!value || value.byteLength < 2) continue;
-
-      // Strip 1-byte channel prefix, push rest into reorder buffer
-      const payload = value.slice(1);
-      reorderBuffer.push(payload);
-    }
-  } catch (e) {
-    // Expected when session closes — not an error
-    console.warn('[Datagram] Reader stopped:', e?.message || e);
-  }
 }
 
 async function sendOverStream(frameBytes) {
@@ -1272,10 +1053,10 @@ async function sendOverStream(frameBytes) {
 
   try {
     const len = frameBytes.length;
-    const out = new Uint8Array(4 + len);
+    const out = new Uint8Array(BINARY.LENGTH_PREFIX_SIZE + len);
     const view = new DataView(out.buffer);
     view.setUint32(0, len, false);
-    out.set(frameBytes, 4);
+    out.set(frameBytes, BINARY.LENGTH_PREFIX_SIZE);
     await webTPStreamWriter.write(out);
   } catch (error) {
     console.error(`[sendOverStream] ❌ Failed to send over stream:`, error);
@@ -1302,139 +1083,6 @@ async function readStream(reader) {
 }
 
 // ======================================
-// Audio Reorder Buffer
-// ======================================
-
-/**
- * Lightweight reorder buffer for audio packets.
- *
- * The server broadcasts audio from overlapping GOP tasks, which can cause
- * small out-of-order delivery (typically 2-packet swaps at batch boundaries).
- * This buffer collects a small window of packets and emits them sorted by
- * sequence number, restoring correct order before decoding.
- *
- * Design:
- *  - BUFFER_SIZE = 3: sufficient for the observed 2-packet swap pattern
- *  - FLUSH_TIMEOUT = 60ms (~3 audio frames at 20ms): ensures packets are
- *    not held indefinitely if a true loss occurs
- *  - When the buffer is full OR the next expected seq arrives, packets are
- *    flushed in order immediately (zero added latency in the common path)
- */
-class AudioReorderBuffer {
-  constructor(onEmit) {
-    this._onEmit = onEmit;      // callback(seq, timestamp, data) for each ordered packet
-    this._buffer = [];           // [{seq, timestamp, data}, ...]
-    this._nextExpectedSeq = -1;  // -1 = not initialized
-    this._flushTimer = null;
-    this.BUFFER_SIZE = 3;
-    this.FLUSH_TIMEOUT_MS = 60;
-  }
-
-  /**
-   * Push a packet into the reorder buffer.
-   * @param {number} seq - sequence number
-   * @param {number} timestamp - media timestamp
-   * @param {Uint8Array} data - audio payload
-   */
-  push(seq, timestamp, data) {
-    // First packet: initialize expected sequence
-    if (this._nextExpectedSeq === -1) {
-      this._nextExpectedSeq = seq;
-    }
-
-    // Insert into buffer (keep sorted by seq for efficient flush)
-    this._buffer.push({ seq, timestamp, data });
-
-    // Try to flush consecutive packets starting from _nextExpectedSeq
-    this._tryFlush();
-
-    // If buffer still has items, set a timeout to force-flush
-    // (handles true packet loss — don't hold packets forever)
-    this._resetTimer();
-  }
-
-  /** Emit all consecutive packets starting from _nextExpectedSeq. */
-  _tryFlush() {
-    if (!this._onEmit || this._buffer.length === 0) return;
-
-    // Sort buffer by sequence number
-    this._buffer.sort((a, b) => a.seq - b.seq);
-
-    // Emit consecutive packets from the front
-    while (this._buffer.length > 0) {
-      const head = this._buffer[0];
-
-      if (head.seq === this._nextExpectedSeq) {
-        // Expected packet — emit immediately
-        this._buffer.shift();
-        this._nextExpectedSeq = head.seq + 1;
-        this._onEmit(head.seq, head.timestamp, head.data);
-      } else if (head.seq < this._nextExpectedSeq) {
-        // Duplicate or late packet we already emitted — drop
-        this._buffer.shift();
-      } else if (this._buffer.length >= this.BUFFER_SIZE) {
-        // Buffer full but expected seq hasn't arrived — it's truly lost.
-        // Skip to the smallest seq in the buffer and emit from there.
-        this._nextExpectedSeq = head.seq;
-        // Continue the loop to emit this packet
-      } else {
-        // Gap exists but buffer isn't full yet — wait for more packets
-        break;
-      }
-    }
-  }
-
-  /** Reset the flush timeout timer. */
-  _resetTimer() {
-    if (this._flushTimer !== null) {
-      clearTimeout(this._flushTimer);
-      this._flushTimer = null;
-    }
-    if (this._buffer.length > 0) {
-      this._flushTimer = setTimeout(() => {
-        this._forceFlush();
-      }, this.FLUSH_TIMEOUT_MS);
-    }
-  }
-
-  /** Force-flush all buffered packets (timeout path). */
-  _forceFlush() {
-    this._flushTimer = null;
-    if (!this._onEmit || this._buffer.length === 0) return;
-
-    this._buffer.sort((a, b) => a.seq - b.seq);
-    while (this._buffer.length > 0) {
-      const pkt = this._buffer.shift();
-      if (pkt.seq >= this._nextExpectedSeq) {
-        this._nextExpectedSeq = pkt.seq + 1;
-        this._onEmit(pkt.seq, pkt.timestamp, pkt.data);
-      }
-      // else: stale duplicate — drop
-    }
-  }
-
-  /** Reset state (e.g. on stream restart). */
-  reset() {
-    this._buffer = [];
-    this._nextExpectedSeq = -1;
-    if (this._flushTimer !== null) {
-      clearTimeout(this._flushTimer);
-      this._flushTimer = null;
-    }
-  }
-
-  /** Destroy the buffer — clears timer and prevents any further callbacks. */
-  destroy() {
-    if (this._flushTimer !== null) {
-      clearTimeout(this._flushTimer);
-      this._flushTimer = null;
-    }
-    this._buffer = [];
-    this._onEmit = null;
-  }
-}
-
-// ======================================
 // GOP Stream Receiver (WebTransport unidirectional streams)
 // ======================================
 
@@ -1445,34 +1093,53 @@ class AudioReorderBuffer {
 class GopByteReader {
   constructor(reader) {
     this.reader = reader;
-    this.buf = new Uint8Array(0);
+    this._chunks = [];
+    this._totalBytes = 0;
     this.done = false;
   }
 
-  /**
-   * Read exactly `size` bytes. Returns null if the stream ended.
-   */
   async readExact(size) {
-    while (this.buf.length < size) {
+    while (this._totalBytes < size) {
       if (this.done) return null;
       const { value, done } = await this.reader.read();
-      if (done) {
-        this.done = true;
-        // Stream closed before we got enough bytes
-        return this.buf.length >= size ? this._consume(size) : null;
-      }
+      if (done) { this.done = true; if (this._totalBytes < size) return null; break; }
       const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
-      const merged = new Uint8Array(this.buf.length + chunk.length);
-      merged.set(this.buf, 0);
-      merged.set(chunk, this.buf.length);
-      this.buf = merged;
+      this._chunks.push(chunk);
+      this._totalBytes += chunk.length;
     }
     return this._consume(size);
   }
 
   _consume(size) {
-    const out = this.buf.slice(0, size);
-    this.buf = this.buf.slice(size);
+    if (this._chunks[0].length >= size) {
+      const first = this._chunks[0];
+      if (first.length === size) {
+        this._chunks.shift();
+        this._totalBytes -= size;
+        return first;
+      }
+      const out = new Uint8Array(first.subarray(0, size));
+      this._chunks[0] = first.subarray(size);
+      this._totalBytes -= size;
+      return out;
+    }
+
+    const out = new Uint8Array(size);
+    let offset = 0;
+    while (offset < size) {
+      const chunk = this._chunks[0];
+      const needed = size - offset;
+      if (chunk.length <= needed) {
+        out.set(chunk, offset);
+        offset += chunk.length;
+        this._chunks.shift();
+      } else {
+        out.set(chunk.subarray(0, needed), offset);
+        this._chunks[0] = chunk.subarray(needed);
+        offset += needed;
+      }
+    }
+    this._totalBytes -= size;
     return out;
   }
 }
@@ -1487,12 +1154,12 @@ class GopByteReader {
  */
 function gopChannelToName(channelByte) {
   switch (channelByte) {
-    case 1: return CHANNEL_NAME.CAM_360P;
-    case 2: return CHANNEL_NAME.CAM_720P;
-    case 3: return CHANNEL_NAME.SCREEN_SHARE_720P;
+    case GOP_CHANNEL_BYTE.CAM_360P: return CHANNEL_NAME.CAM_360P;
+    case GOP_CHANNEL_BYTE.CAM_720P: return CHANNEL_NAME.CAM_720P;
+    case GOP_CHANNEL_BYTE.SCREEN_SHARE_720P: return CHANNEL_NAME.SCREEN_SHARE_720P;
     // case 4: return CHANNEL_NAME.SCREEN_SHARE_1080P; // not used yet
-    case 9: return CHANNEL_NAME.CAM_1080P;
-    case 10: return CHANNEL_NAME.CAM_1440P;
+    case GOP_CHANNEL_BYTE.CAM_1080P: return CHANNEL_NAME.CAM_1080P;
+    case GOP_CHANNEL_BYTE.CAM_1440P: return CHANNEL_NAME.CAM_1440P;
     default: return null;
   }
 }
@@ -1503,8 +1170,6 @@ function gopChannelToName(channelByte) {
  * Key: channel byte (u8), Value: latest gopId (u32)
  */
 const activeGopPerChannel = new Map();
-
-
 
 /**
  * Loop over all incoming unidirectional streams from the WebTransport session.
@@ -1558,7 +1223,7 @@ async function readGopStream(receiveStream, gopIndex) {
     const gopMeta = await byteReader.readExact(streamIdLen + 1 + 4 + 2);
     if (!gopMeta) return;
 
-    const streamId = new TextDecoder().decode(gopMeta.subarray(0, streamIdLen));
+    const streamId = _sharedTextDecoder.decode(gopMeta.subarray(0, streamIdLen));
     const dv = new DataView(gopMeta.buffer, gopMeta.byteOffset, gopMeta.byteLength);
     let off = streamIdLen;
     channel = dv.getUint8(off); off += 1;
@@ -1573,7 +1238,7 @@ async function readGopStream(receiveStream, gopIndex) {
     activeGopPerChannel.set(channel, gopId);
 
     // ── 2. Frame loop ────────────────────────────────────────────────────
-    const FRAME_HEADER_SIZE = 13; // sequence(4)+timestamp(4)+frameType(1)+payloadSize(4)
+    const FRAME_HEADER_SIZE = BINARY.GOP_FRAME_HEADER_SIZE;
     let frameCount = 0;
     let wasSuperseded = false;
     while (true) {
@@ -1587,7 +1252,7 @@ async function readGopStream(receiveStream, gopIndex) {
       // offset, payloadSize will be nonsensical. A real frame is never 0 bytes and
       // never exceeds 10 MB (typical 1080p keyframe ~100-400 KB). If this fires,
       // all subsequent reads would also be misaligned → break out of the GOP entirely.
-      if (payloadSize === 0 || payloadSize > 10_000_000) {
+      if (payloadSize === 0 || payloadSize > LIMITS.MAX_PAYLOAD_BYTES) {
         console.warn(`[GOP] ch=${channel} gopId=${gopId} implausible payloadSize=${payloadSize}`);
         break;
       }
@@ -1608,9 +1273,9 @@ async function readGopStream(receiveStream, gopIndex) {
 
       // Reconstruct full packet: [seq:4][ts:4][frameType:1] + media_payload
       // handleBinaryPacket() expects this 9-byte prefix to route to the correct decoder.
-      const fullPacket = new Uint8Array(9 + payload.length);
-      fullPacket.set(headerBytes.subarray(0, 9), 0);  // seq + ts + frameType from FrameHeader
-      fullPacket.set(payload, 9);
+      const fullPacket = new Uint8Array(BINARY.MEDIA_HEADER_SIZE + payload.length);
+      fullPacket.set(headerBytes.subarray(0, BINARY.MEDIA_HEADER_SIZE), 0);  // seq + ts + frameType from FrameHeader
+      fullPacket.set(payload, BINARY.MEDIA_HEADER_SIZE);
       await processIncomingMessage(fullPacket);
     }
 
@@ -1643,96 +1308,6 @@ async function readGopStream(receiveStream, gopIndex) {
   }
 }
 
-/**
- * Handle a single incoming GOP unidirectional stream.
- *
- * Wire format written by GopStreamSender / GopStreamHeaderEncoder:
- *
- *  GOP Header (variable):
- *    [streamIdLen: 2B big-endian]
- *    [streamId:   N bytes UTF-8]
- *    [channel:    1B]
- *    [gopId:      4B big-endian]
- *    [expected:   2B big-endian]
- *
- *  Then, for each frame (FrameHeaderEncoder.SIZE = 13):
- *    [sequence:   4B big-endian]
- *    [timestamp:  4B big-endian]
- *    [frameType:  1B]
- *    [payloadSz:  4B big-endian]
- *    [payload:    payloadSz bytes]  ← same binary packet format as bidi stream
- */
-async function handleGopStream(stream, gopIndex) {
-  const reader = stream.getReader();
-  const byteReader = new GopByteReader(reader);
-
-  try {
-    // ── 1. Parse GOP Header ──────────────────────────────────────────────
-    const streamIdLenBytes = await byteReader.readExact(2);
-    if (!streamIdLenBytes) return;
-    const streamIdLen = new DataView(streamIdLenBytes.buffer).getUint16(0, false);
-
-    // streamId(N) + channel(1) + gopId(4) + expectedFrames(2)
-    const gopMeta = await byteReader.readExact(streamIdLen + 1 + 4 + 2);
-    if (!gopMeta) return;
-
-    const streamId = new TextDecoder().decode(gopMeta.subarray(0, streamIdLen));
-    let off = streamIdLen;
-    const dv = new DataView(gopMeta.buffer, gopMeta.byteOffset, gopMeta.byteLength);
-    const channel = dv.getUint8(off); off += 1;
-    const gopId   = dv.getUint32(off, false); off += 4;
-    const expectedFrames = dv.getUint16(off, false);
-
-    // if (gopIndex <= 3) {
-    //   console.log(`[GOP] #${gopIndex} streamId=${streamId} ch=${channel} gopId=${gopId} expected=${expectedFrames}`);
-    // }
-
-    // ── 2. Read frames until stream ends ─────────────────────────────────
-    const FRAME_HEADER_SIZE = 13; // 4+4+1+4
-    let frameCount = 0;
-
-    while (true) {
-      const headerBytes = await byteReader.readExact(FRAME_HEADER_SIZE);
-      if (!headerBytes) break; // Stream closed — normal end of GOP
-
-      const fv = new DataView(headerBytes.buffer, headerBytes.byteOffset, FRAME_HEADER_SIZE);
-      // const sequence  = fv.getUint32(0, false); // unused on receiver side
-      // const timestamp = fv.getUint32(4, false); // already in payload packet
-      // const frameType = fv.getUint8(8);         // already in payload packet
-      const payloadSize = fv.getUint32(9, false);
-
-      // Guard against binary misalignment: if the frame header was read at a wrong
-      // offset, payloadSize will be nonsensical. A real frame is never 0 bytes and
-      // never exceeds 10 MB (typical 1080p keyframe ~100-400 KB). If this fires,
-      // all subsequent reads would also be misaligned → break out of the GOP entirely.
-      if (payloadSize === 0 || payloadSize > 10_000_000) {
-        console.warn(`[GOP] ch=${channel} gopId=${gopId} implausible payloadSize=${payloadSize}, skipping frame`);
-        break;
-      }
-
-      const payload = await byteReader.readExact(payloadSize);
-      if (!payload) break;
-
-      frameCount++;
-      // Reconstruct full packet: [seq:4][ts:4][frameType:1] + media_payload
-      // The FrameHeader contains seq/ts/frameType; payload is raw media data.
-      // handleBinaryPacket() expects the 9-byte prefix to route to the correct decoder.
-      const fullPacket = new Uint8Array(9 + payload.length);
-      fullPacket.set(headerBytes.subarray(0, 9), 0);  // seq + ts + frameType from FrameHeader
-      fullPacket.set(payload, 9);
-      await processIncomingMessage(fullPacket);
-    }
-
-    // if (gopIndex <= 3 || frameCount !== expectedFrames) {
-    //   proxyConsole.log(`[GOP] #${gopIndex} done: ch=${channel} gopId=${gopId} frames=${frameCount}/${expectedFrames}`);
-    // }
-  } catch (err) {
-    proxyConsole.error(`[GOP] handleGopStream #${gopIndex} error:`, err);
-  } finally {
-    reader.cancel().catch(() => {});
-  }
-}
-
 async function processIncomingMessage(message) {
   // Get raw bytes for inspection
   let bytes;
@@ -1746,18 +1321,18 @@ async function processIncomingMessage(message) {
 
   // Only attempt JSON parsing if data starts with '{' (0x7B)
   // DecoderConfigs arrive rarely (once per session) — skip JSON parse for binary packets
-  if (bytes.length > 0 && bytes[0] === 0x7B) {
+  if (bytes.length > 0 && bytes[0] === BINARY.JSON_OPEN_BRACE) {
     try {
       const text = _sharedTextDecoder.decode(bytes); // Reuse singleton to reduce GC pressure
       const json = JSON.parse(text);
       // Only log DecoderConfigs parsing — avoid per-packet log spam in hot path
-      if (json.type === 'DecoderConfigs') {
+      if (json.type === SERVER_MSG.DECODER_CONFIGS) {
         proxyConsole.log(`[processIncomingMessage] Received DecoderConfigs`);
         handleStreamConfigs(json);
         return;
       }
       // ── Subscriber downlink congestion stats ──
-      if (json.type === 'subscriber_connection_stats') {
+      if (json.type === SERVER_MSG.SUBSCRIBER_CONNECTION_STATS) {
         evaluateDownlinkCongestion(json);
         return;
       }
@@ -1770,7 +1345,7 @@ async function processIncomingMessage(message) {
   // Binary media packet
   const buf = (message instanceof ArrayBuffer)
     ? message
-    : bytes.buffer.byteLength === bytes.length
+    : (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength)
       ? bytes.buffer
       : bytes.slice().buffer;
   handleBinaryPacket(buf);
@@ -1780,22 +1355,22 @@ async function handleBinaryPacket(dataBuffer) {
   const dataView = new DataView(dataBuffer);
   const sequenceNumber = dataView.getUint32(0, false);
   const timestamp = dataView.getUint32(4, false);
-  const frameType = dataView.getUint8(8);
+  const frameType = dataView.getUint8(BINARY.MEDIA_HEADER_SIZE - 1);
   // Use a Uint8Array VIEW instead of ArrayBuffer.slice(9) to avoid a deep copy
   // of every frame payload. ArrayBuffer.slice() memcpy's the entire payload
   // (100-400 KB per 720p frame) which wastes memory and CPU on Safari 15.
   // If transfer to an external worker is needed, decodeVideoExternal() will do
   // a targeted slice() of just that path.
-  const data = new Uint8Array(dataBuffer, 9);
+  const data = new Uint8Array(dataBuffer, BINARY.MEDIA_HEADER_SIZE);
 
   // ── Video frame types ──
   // When videoDecoderPort is set (iOS 15), all video decoding is offloaded
   // to the external video-decoder-worker via MessagePort.  Keyframe tracking
   // still happens here so we don't send delta frames before a keyframe.
 
-  if (frameType === 0 || frameType === 1) {
+  if (frameType === FRAME_TYPE.CAM_360P_KEY || frameType === FRAME_TYPE.CAM_360P_DELTA) {
     // 360p video
-    const type = frameType === 0 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
+    const type = frameType === FRAME_TYPE.CAM_360P_KEY ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
     if (type === CHUNK_TYPE.KEY) setKeyFrameReceived(CHANNEL_NAME.CAM_360P, true);
 
     if (isKeyFrameReceived(CHANNEL_NAME.CAM_360P)) {
@@ -1805,7 +1380,7 @@ async function handleBinaryPacket(dataBuffer) {
         let decoder360p = mediaDecoders.get(CHANNEL_NAME.CAM_360P);
         const decoderState = decoder360p ? decoder360p.state : null;
 
-        if (!decoder360p || decoderState === "closed" || decoderState === "unconfigured") {
+        if (!decoder360p || decoderState === DECODER_STATE.CLOSED || decoderState === DECODER_STATE.UNCONFIGURED) {
           // Throttle decoder recreation to avoid spawning multiple WASM instances
           // under rapid error conditions (Safari 15 memory limit critical)
           if (canRecreateDecoder(CHANNEL_NAME.CAM_360P)) {
@@ -1827,9 +1402,9 @@ async function handleBinaryPacket(dataBuffer) {
           const isPolyfill = decoder360p.usingNative === false || !hasNativeVideoDecoder || !(decoder360p instanceof VideoDecoder);
 
           if (isPolyfill) {
-            decoder360p.decode({ type, timestamp: timestamp * 1000, data: new Uint8Array(data) });
+            decoder360p.decode({ type, timestamp: timestamp * TIMESTAMP_US_PER_MS, data: new Uint8Array(data) });
           } else {
-            decoder360p.decode(new EncodedVideoChunk({ timestamp: timestamp * 1000, type, data }));
+            decoder360p.decode(new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data }));
           }
         } catch (err) {
           proxyConsole.error("360p decode error:", err);
@@ -1838,9 +1413,9 @@ async function handleBinaryPacket(dataBuffer) {
       }
     }
     return;
-  } else if (frameType === 2 || frameType === 3) {
+  } else if (frameType === FRAME_TYPE.CAM_720P_KEY || frameType === FRAME_TYPE.CAM_720P_DELTA) {
     // 720p video
-    const type = frameType === 2 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
+    const type = frameType === FRAME_TYPE.CAM_720P_KEY ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
     if (type === CHUNK_TYPE.KEY) setKeyFrameReceived(CHANNEL_NAME.CAM_720P, true);
 
     if (isKeyFrameReceived(CHANNEL_NAME.CAM_720P)) {
@@ -1850,7 +1425,7 @@ async function handleBinaryPacket(dataBuffer) {
         let decoder720p = mediaDecoders.get(CHANNEL_NAME.CAM_720P);
         const decoderState = decoder720p ? decoder720p.state : null;
 
-        if (!decoder720p || decoderState === "closed" || decoderState === "unconfigured") {
+        if (!decoder720p || decoderState === DECODER_STATE.CLOSED || decoderState === DECODER_STATE.UNCONFIGURED) {
           // Throttle decoder recreation to avoid spawning multiple WASM instances
           if (canRecreateDecoder(CHANNEL_NAME.CAM_720P)) {
             decoder720p = await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_720P);
@@ -1871,9 +1446,9 @@ async function handleBinaryPacket(dataBuffer) {
           const isPolyfill = decoder720p.usingNative === false || !hasNativeVideoDecoder || !(decoder720p instanceof VideoDecoder);
 
           if (isPolyfill) {
-            decoder720p.decode({ type, timestamp: timestamp * 1000, data: new Uint8Array(data) });
+            decoder720p.decode({ type, timestamp: timestamp * TIMESTAMP_US_PER_MS, data: new Uint8Array(data) });
           } else {
-            decoder720p.decode(new EncodedVideoChunk({ timestamp: timestamp * 1000, type, data }));
+            decoder720p.decode(new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data }));
           }
         } catch (err) {
           proxyConsole.error("720p decode error:", err);
@@ -1882,9 +1457,9 @@ async function handleBinaryPacket(dataBuffer) {
       }
     }
     return;
-  } else if (frameType === 13 || frameType === 14) {
+  } else if (frameType === FRAME_TYPE.CAM_1080P_KEY || frameType === FRAME_TYPE.CAM_1080P_DELTA) {
     // 1080p video
-    const type = frameType === 13 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
+    const type = frameType === FRAME_TYPE.CAM_1080P_KEY ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
     if (type === CHUNK_TYPE.KEY) setKeyFrameReceived(CHANNEL_NAME.CAM_1080P, true);
 
     if (isKeyFrameReceived(CHANNEL_NAME.CAM_1080P)) {
@@ -1894,7 +1469,7 @@ async function handleBinaryPacket(dataBuffer) {
         let decoder1080p = mediaDecoders.get(CHANNEL_NAME.CAM_1080P);
         const decoderState = decoder1080p ? decoder1080p.state : null;
 
-        if (!decoder1080p || decoderState === "closed" || decoderState === "unconfigured") {
+        if (!decoder1080p || decoderState === DECODER_STATE.CLOSED || decoderState === DECODER_STATE.UNCONFIGURED) {
           decoder1080p = new VideoDecoder(createVideoInit(CHANNEL_NAME.CAM_1080P));
           mediaDecoders.set(CHANNEL_NAME.CAM_1080P, decoder1080p);
           const config1080p = mediaConfigs.get(CHANNEL_NAME.CAM_1080P);
@@ -1905,7 +1480,7 @@ async function handleBinaryPacket(dataBuffer) {
         }
 
         try {
-          decoder1080p.decode(new EncodedVideoChunk({ timestamp: timestamp * 1000, type, data }));
+          decoder1080p.decode(new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data }));
         } catch (err) {
           proxyConsole.error("1080p decode error:", err);
           setKeyFrameReceived(CHANNEL_NAME.CAM_1080P, false);
@@ -1913,9 +1488,9 @@ async function handleBinaryPacket(dataBuffer) {
       }
     }
     return;
-  } else if (frameType === 15 || frameType === 16) {
+  } else if (frameType === FRAME_TYPE.CAM_1440P_KEY || frameType === FRAME_TYPE.CAM_1440P_DELTA) {
     // 1440p video
-    const type = frameType === 15 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
+    const type = frameType === FRAME_TYPE.CAM_1440P_KEY ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
     if (type === CHUNK_TYPE.KEY) setKeyFrameReceived(CHANNEL_NAME.CAM_1440P, true);
 
     if (isKeyFrameReceived(CHANNEL_NAME.CAM_1440P)) {
@@ -1925,7 +1500,7 @@ async function handleBinaryPacket(dataBuffer) {
         let decoder1440p = mediaDecoders.get(CHANNEL_NAME.CAM_1440P);
 
         try {
-          decoder1440p.decode(new EncodedVideoChunk({ timestamp: timestamp * 1000, type, data }));
+          decoder1440p.decode(new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data }));
         } catch (err) {
           proxyConsole.error("1440p decode error:", err);
           setKeyFrameReceived(CHANNEL_NAME.CAM_1440P, false);
@@ -1933,9 +1508,9 @@ async function handleBinaryPacket(dataBuffer) {
       }
     }
     return;
-  } else if (frameType === 4 || frameType === 5) {
+  } else if (frameType === FRAME_TYPE.SCREEN_SHARE_KEY || frameType === FRAME_TYPE.SCREEN_SHARE_DELTA) {
     // Screen share 720p
-    const type = frameType === 4 ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
+    const type = frameType === FRAME_TYPE.SCREEN_SHARE_KEY ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
     if (type === CHUNK_TYPE.KEY) setKeyFrameReceived(CHANNEL_NAME.SCREEN_SHARE_720P, true);
 
     if (isKeyFrameReceived(CHANNEL_NAME.SCREEN_SHARE_720P)) {
@@ -1945,7 +1520,7 @@ async function handleBinaryPacket(dataBuffer) {
         let videoDecoderScreenShare720p = mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P);
         const decoderState = videoDecoderScreenShare720p ? videoDecoderScreenShare720p.state : null;
 
-        if (!videoDecoderScreenShare720p || decoderState === "closed" || decoderState === "unconfigured") {
+        if (!videoDecoderScreenShare720p || decoderState === DECODER_STATE.CLOSED || decoderState === DECODER_STATE.UNCONFIGURED) {
           // Recreate decoder when closed (e.g. after decode error from GOP interleaving)
           if (canRecreateDecoder(CHANNEL_NAME.SCREEN_SHARE_720P)) {
             videoDecoderScreenShare720p = await createVideoDecoderWithFallback(CHANNEL_NAME.SCREEN_SHARE_720P);
@@ -1963,7 +1538,7 @@ async function handleBinaryPacket(dataBuffer) {
 
         try {
           if (data.byteLength === 0) return;
-          const encodedChunk = new EncodedVideoChunk({ timestamp: timestamp * 1000, type, data });
+          const encodedChunk = new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data });
           videoDecoderScreenShare720p.decode(encodedChunk);
         } catch (error) {
           proxyConsole.error("Screen share video decode error:", error);
@@ -1972,134 +1547,46 @@ async function handleBinaryPacket(dataBuffer) {
       }
     }
     return;
-  } else if (frameType === 6) {
+  } else if (frameType === FRAME_TYPE.AUDIO) {
     if (!self._audioPacketCount) self._audioPacketCount = 0;
     self._audioPacketCount++;
 
+    // ── Forward to dedicated audio decoder worker ──
+    // Audio decoding is offloaded to a separate thread (audio-decoder-worker)
+    // so that video decode (which can block 10-50ms on Android) never
+    // delays audio data delivery to the AudioWorklet.
+    if (audioDecoderPort) {
+      const audioPayload = data.slice(); // isolated copy
+      audioDecoderPort.postMessage(
+        { type: MSG.DECODE, timestamp: timestamp * TIMESTAMP_US_PER_MS, data: audioPayload },
+        [audioPayload.buffer]
+      );
+      return;
+    }
+
+    // ── Legacy fallback: decode inline (when audioDecoderPort is not available) ──
     let audioDecoder = mediaDecoders.get(
       subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_48K : CHANNEL_NAME.SCREEN_SHARE_AUDIO
     );
 
     if (!audioDecoder) {
-      if (self._audioPacketCount <= 3) console.error('[Audio] audioDecoder is NULL');
+      if (self._audioPacketCount <= 3) console.error('[Audio] audioDecoder is NULL'); // first 3 packets only
       return;
     }
 
-    // Buffer packets arriving before the description chunk is sent, then
-    // replay them in order once the description is processed.
-    // (Previously these were hard-dropped, causing silent audio at stream start.)
     if (!audioDecoder.isReadyForAudio) {
       return;
     }
 
-    // ── Audio delivery ──
-    // With single persistent uni-stream (both publisher→server and server→subscriber),
-    // QUIC guarantees in-order delivery, so reorder buffer is unnecessary.
-    const AUDIO_REORDER_ENABLED = false;
-    if (!AUDIO_REORDER_ENABLED) {
-      // Direct path — no buffering, lower latency
-      if (!self._audioRxTotal) { self._audioRxTotal = 0; self._audioRxLost = 0; }
-      self._audioRxTotal++;
-
-      // Seq gap detection
-      if (self._lastAudioSeq === undefined) {
-        self._lastAudioSeq = sequenceNumber;
-      } else {
-        const expected = self._lastAudioSeq + 1;
-        if (sequenceNumber !== expected) {
-          const lost = sequenceNumber - expected;
-          if (lost > 0) self._audioRxLost += lost;
-          console.warn(`[Audio RX] PACKET LOSS: expected=${expected}, got=${sequenceNumber}, lost=${lost}`);
-        }
-        self._lastAudioSeq = sequenceNumber;
-      }
-
-      // Periodic summary
-      // if (self._audioRxTotal % 500 === 0) {
-      //   const lossRate = self._audioRxLost > 0 ? ((self._audioRxLost / (self._audioRxTotal + self._audioRxLost)) * 100).toFixed(2) : '0.00';
-      //   proxyConsole.log(`[Audio RX] total=${self._audioRxTotal} lost=${self._audioRxLost} rate=${lossRate}% lastSeq=${sequenceNumber}`);
-      // }
-
-      // Decode directly
-      const decoder = mediaDecoders.get(
-        subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_48K : CHANNEL_NAME.SCREEN_SHARE_AUDIO
-      );
-      if (!decoder || !decoder.isReadyForAudio) return;
-
-      if (decoder.usingNative !== undefined) {
-        try {
-          decoder.decode({ type: 'key', timestamp: timestamp * 1000, data: data.slice() });
-        } catch (err) { console.error('[Audio] AAC decode error:', err); }
-      } else {
-        try {
-          decoder.decode(new EncodedAudioChunk({ timestamp: timestamp * 1000, type: 'key', data: data.slice() }));
-        } catch (err) { console.error('[Audio] decode error:', err); }
-      }
-      return;
+    if (audioDecoder.usingNative !== undefined) {
+      try {
+        audioDecoder.decode({ type: CHUNK_TYPE.KEY, timestamp: timestamp * TIMESTAMP_US_PER_MS, data: data.slice() });
+      } catch (err) { console.error('[Audio] AAC decode error:', err); }
+    } else {
+      try {
+        audioDecoder.decode(new EncodedAudioChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type: CHUNK_TYPE.KEY, data: data.slice() }));
+      } catch (err) { console.error('[Audio] decode error:', err); }
     }
-
-    // ── Reorder buffer path (AUDIO_REORDER_ENABLED = true) ──
-    // Lazily create the reorder buffer on first audio packet.
-    // The onEmit callback fires packets in correct sequence order.
-    if (!self._audioReorderBuffer) {
-      self._audioReorderBuffer = new AudioReorderBuffer((seq, ts, audioPayload) => {
-        // ── Packet loss detection (after reordering) ──
-        if (!self._audioRxTotal) { self._audioRxTotal = 0; self._audioRxLost = 0; }
-        self._audioRxTotal++;
-        if (self._lastAudioSeq === undefined) {
-          self._lastAudioSeq = seq;
-        } else {
-          const expected = self._lastAudioSeq + 1;
-          if (seq !== expected) {
-            const lost = seq - expected;
-            self._audioRxLost += lost;
-            console.warn(`[Audio RX] PACKET LOSS: expected=${expected}, got=${seq}, lost=${lost}`);
-          }
-          self._lastAudioSeq = seq;
-        }
-
-        // Periodic summary log
-        // if (self._audioRxTotal % 500 === 0) {
-        //   const lossRate = self._audioRxLost > 0 ? ((self._audioRxLost / (self._audioRxTotal + self._audioRxLost)) * 100).toFixed(2) : '0.00';
-        //   proxyConsole.log(`[Audio RX] total=${self._audioRxTotal} lost=${self._audioRxLost} rate=${lossRate}% lastSeq=${seq}`);
-        // }
-
-        // Resolve decoder at emit time (may have been recreated)
-        const decoder = mediaDecoders.get(
-          subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_48K : CHANNEL_NAME.SCREEN_SHARE_AUDIO
-        );
-        if (!decoder || !decoder.isReadyForAudio) return;
-
-        if (decoder.usingNative !== undefined) {
-          // AACDecoder path — pass plain object with copied data
-          try {
-            decoder.decode({
-              type: 'key',
-              timestamp: ts * 1000,
-              data: audioPayload, // already an isolated copy from push()
-            });
-          } catch (err) {
-            console.error('[Audio] AAC decode error:', err);
-          }
-        } else {
-          // Opus path — use EncodedAudioChunk
-          try {
-            decoder.decode(new EncodedAudioChunk({
-              timestamp: ts * 1000,
-              type: CHUNK_TYPE.KEY,
-              data: audioPayload,
-            }));
-          } catch (err) {
-            console.error('[Audio] decode error:', err);
-          }
-        }
-      });
-      // proxyConsole.log('[Audio] 🔄 AudioReorderBuffer initialized (bufferSize=3, timeout=60ms)');
-    }
-
-    // Push into reorder buffer — data.slice() creates an isolated copy
-    // since `data` is a view into the shared dataBuffer
-    self._audioReorderBuffer.push(sequenceNumber, timestamp, data.slice());
   }
 }
 
@@ -2115,15 +1602,15 @@ function setupVideoDecoderPort(port) {
   port.onmessage = (e) => {
     const msg = e.data;
     switch (msg.type) {
-      case "ready":
+      case MSG.READY:
         proxyConsole.log("[Worker] Video decoder worker is ready");
         break;
 
-      case "configured":
+      case MSG.CONFIGURED:
         proxyConsole.log(`[Worker] External video decoder configured for ${msg.channelName}`);
         break;
 
-      case "videoData": {
+      case MSG.VIDEO_DATA: {
         // msg.frame = { format: 'yuv420', yPlane, uPlane, vPlane, width, height }
         const frame = msg.frame;
         if (frame && frame.yPlane && frame.uPlane && frame.vPlane) {
@@ -2131,7 +1618,7 @@ function setupVideoDecoderPort(port) {
           // The video-decoder-worker already copies into preallocated buffers;
           // wrapping in another new Uint8Array() here is wasteful on Safari 15.
           self.postMessage({
-            type: "videoData",
+            type: MSG.VIDEO_DATA,
             frame,
             quality: msg.channelName,
           });
@@ -2139,7 +1626,7 @@ function setupVideoDecoderPort(port) {
         break;
       }
 
-      case "error":
+      case MSG.ERROR:
         console.error(`[Worker] Video decoder worker error (${msg.channelName}):`, msg.message);
         // Reset keyframe flag so decoder waits for next keyframe
         if (msg.channelName) {
@@ -2163,11 +1650,11 @@ function decodeVideoExternal(channelName, type, timestamp, data) {
   // which also had to copy the 9-byte header region).
   const isolated = data.slice(); // Uint8Array.slice → new ArrayBuffer, payload only
   videoDecoderPort.postMessage({
-    type: "decode",
+    type: MSG.DECODE,
     channelName,
     chunk: {
       type,
-      timestamp: timestamp * 1000,
+      timestamp: timestamp * TIMESTAMP_US_PER_MS,
       data: isolated,
     },
   }, [isolated.buffer]);
@@ -2179,7 +1666,7 @@ function decodeVideoExternal(channelName, type, timestamp, data) {
 function configureVideoExternal(channelName, config) {
   if (!videoDecoderPort) return;
   videoDecoderPort.postMessage({
-    type: "configure",
+    type: MSG.CONFIGURE,
     channelName,
     config,
   });
@@ -2195,16 +1682,22 @@ async function initializeDecoders() {
 
   switch (subscribeType) {
     case STREAM_TYPE.CAMERA: {
-      // ── Audio decoder (always local) ──
-      const micAudioDecoder = new OpusAudioDecoder(audioInit);
-      const audioConfigPromise = micAudioDecoder.configure({ sampleRate: 48000, numberOfChannels: 1, decoderPort: externalDecoderPort });
-      mediaDecoders.set(CHANNEL_NAME.MIC_48K, micAudioDecoder);
+      // ── Audio decoder ──
+      // When audioDecoderPort is active, audio decoding is handled by
+      // the dedicated audio-decoder-worker — skip local decoder creation.
+      if (!audioDecoderPort) {
+        const micAudioDecoder = new OpusAudioDecoder(audioInit);
+        const audioConfigPromise = micAudioDecoder.configure({ sampleRate: AUDIO_FORMAT.SAMPLE_RATE_48K, numberOfChannels: AUDIO_FORMAT.MONO_CHANNELS, decoderPort: externalDecoderPort });
+        mediaDecoders.set(CHANNEL_NAME.MIC_48K, micAudioDecoder);
+        await audioConfigPromise;
+        proxyConsole.log('[Audio] OpusDecoder configured, state:', micAudioDecoder.state,
+          'mode:', micAudioDecoder.useInlineDecoder ? 'inline' : 'worker');
+      } else {
+        proxyConsole.log('[Audio] Audio decoding offloaded to audio-decoder-worker');
+      }
 
       // ── Video decoders ──
       if (videoDecoderPort) {
-        // iOS 15 path: video decoding is offloaded to external worker.
-        // No local H264Decoder instances needed — the external worker
-        // creates them when it receives "configure" commands.
         proxyConsole.log('[Worker] Video decoding offloaded to external video decoder worker');
       } else {
         // Normal path: create local video decoders (native or WASM fallback)
@@ -2214,10 +1707,6 @@ async function initializeDecoders() {
         mediaDecoders.set(CHANNEL_NAME.CAM_360P, decoder360p);
         mediaDecoders.set(CHANNEL_NAME.CAM_720P, decoder720p);
       }
-
-      await audioConfigPromise;
-      proxyConsole.log('[Audio] OpusDecoder configured, state:', micAudioDecoder.state,
-        'mode:', micAudioDecoder.useInlineDecoder ? 'inline' : 'worker');
       break;
     }
 
@@ -2229,7 +1718,11 @@ async function initializeDecoders() {
         const screenDecoder = await createVideoDecoderWithFallback(CHANNEL_NAME.SCREEN_SHARE_720P);
         mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_720P, screenDecoder);
       }
-      mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_AUDIO, new OpusAudioDecoder(audioInit));
+      if (!audioDecoderPort) {
+        mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_AUDIO, new OpusAudioDecoder(audioInit));
+      } else {
+        proxyConsole.log('[Audio] Screen share audio decoding offloaded to audio-decoder-worker');
+      }
       proxyConsole.warn(
         "Initialized screen share decoders:",
         mediaDecoders,
@@ -2242,10 +1735,15 @@ async function initializeDecoders() {
     }
 
     default: {
-      // ── Audio decoder (always local) ──
-      const defaultMicAudioDecoder = new OpusAudioDecoder(audioInit);
-      const audioConfigPromise = defaultMicAudioDecoder.configure({ sampleRate: 48000, numberOfChannels: 1, decoderPort: externalDecoderPort });
-      mediaDecoders.set(CHANNEL_NAME.MIC_48K, defaultMicAudioDecoder);
+      // ── Audio decoder ──
+      if (!audioDecoderPort) {
+        const defaultMicAudioDecoder = new OpusAudioDecoder(audioInit);
+        const audioConfigPromise = defaultMicAudioDecoder.configure({ sampleRate: AUDIO_FORMAT.SAMPLE_RATE_48K, numberOfChannels: AUDIO_FORMAT.MONO_CHANNELS, decoderPort: externalDecoderPort });
+        mediaDecoders.set(CHANNEL_NAME.MIC_48K, defaultMicAudioDecoder);
+        await audioConfigPromise;
+      } else {
+        proxyConsole.log('[Audio] Audio decoding offloaded to audio-decoder-worker');
+      }
 
       // ── Video decoders ──
       if (videoDecoderPort) {
@@ -2257,8 +1755,6 @@ async function initializeDecoders() {
         mediaDecoders.set(CHANNEL_NAME.CAM_360P, decoder360p);
         mediaDecoders.set(CHANNEL_NAME.CAM_720P, decoder720p);
       }
-
-      await audioConfigPromise;
       break;
     }
   }
@@ -2316,19 +1812,19 @@ async function handleWebRTCBitrateSwitch(targetChannelName) {
 
     if (currentChannel && currentChannel.readyState === "open") {
       proxyConsole.log(`[Bitrate] Sending "pause" to currentQuality`);
-      currentChannel.send(encoder.encode("pause"));
+      currentChannel.send(encoder.encode(BITRATE_CMD.PAUSE));
     }
 
     if (targetChannel.readyState === "open") {
       proxyConsole.log(`[Bitrate] Sending "resume" to ${targetChannelName}`);
-      targetChannel.send(encoder.encode("resume"));
+      targetChannel.send(encoder.encode(BITRATE_CMD.RESUME));
     }
 
     currentVideoChannel = targetChannelName;
     setKeyFrameReceived(targetChannelName, false);
 
     self.postMessage({
-      type: "bitrateChanged",
+      type: MSG.BITRATE_CHANGED,
       quality: targetChannelName,
     });
 
@@ -2336,7 +1832,7 @@ async function handleWebRTCBitrateSwitch(targetChannelName) {
   } catch (err) {
     proxyConsole.error(`[Bitrate] Failed to switch to ${targetChannelName}:`, err);
     self.postMessage({
-      type: "error",
+      type: MSG.ERROR,
       message: `Failed to switch bitrate: ${err.message}`,
     });
   }
@@ -2356,19 +1852,19 @@ async function handleWebTransportBitrateSwitch(targetChannelName) {
 
     if (currentStream && currentStream.writer) {
       proxyConsole.log(`[Bitrate] Sending "pause" to cam_${currentVideoChannel}`);
-      await currentStream.writer.write(encoder.encode("pause"));
+      await currentStream.writer.write(encoder.encode(BITRATE_CMD.PAUSE));
     }
 
     if (targetStream && targetStream.writer) {
       proxyConsole.log(`[Bitrate] Sending "resume" to cam_${quality}`);
-      await targetStream.writer.write(encoder.encode("resume"));
+      await targetStream.writer.write(encoder.encode(BITRATE_CMD.RESUME));
     }
 
     currentVideoChannel = quality;
     setKeyFrameReceived(quality, false);
 
     self.postMessage({
-      type: "bitrateChanged",
+      type: MSG.BITRATE_CHANGED,
       quality,
     });
 
@@ -2376,7 +1872,7 @@ async function handleWebTransportBitrateSwitch(targetChannelName) {
   } catch (err) {
     proxyConsole.error(`[Bitrate] Failed to switch to ${quality}:`, err);
     self.postMessage({
-      type: "error",
+      type: MSG.ERROR,
       message: `Failed to switch bitrate: ${err.message}`,
     });
   }
@@ -2399,8 +1895,8 @@ function resetDecoders() {
   clearInterval(audioIntervalID);
 
   self.postMessage({
-    type: "log",
-    event: "reset",
+    type: MSG.LOG,
+    event: MSG.RESET_EVENT,
     message: "Reset all decoders",
   });
 }
@@ -2412,15 +1908,10 @@ function stopAll() {
     videoJitterBuffer = null;
   }
 
-  // Destroy audio reorder buffer (prevent lingering flush timer + post-destroy callbacks)
-  if (self._audioReorderBuffer) {
-    self._audioReorderBuffer.destroy();
-    self._audioReorderBuffer = null;
-  }
-  self._lastAudioSeq = undefined;
+
 
   if (workletPort) {
-    workletPort.postMessage({ type: "stop" });
+    workletPort.postMessage({ type: MSG.STOP_EVENT });
     workletPort = null;
   }
 
@@ -2453,7 +1944,7 @@ function stopAll() {
   // Close external video decoder port
   if (videoDecoderPort) {
     try {
-      videoDecoderPort.postMessage({ type: "resetAll" });
+      videoDecoderPort.postMessage({ type: MSG.RESET_ALL });
       videoDecoderPort.close();
     } catch { }
     videoDecoderPort = null;
@@ -2484,8 +1975,8 @@ function stopAll() {
   }
 
   self.postMessage({
-    type: "log",
-    event: "stop",
+    type: MSG.LOG,
+    event: MSG.STOP_EVENT,
     message: "Stopped all media operations",
   });
 }
@@ -2509,7 +2000,7 @@ class LengthDelimitedReader {
 
   appendBuffer(newData) {
     // Guard against unbounded memory growth on stalled/slow streams (Safari 15 critical)
-    const MAX_BUFFER_BYTES = 5 * 1024 * 1024; // 5 MB
+    const MAX_BUFFER_BYTES = LIMITS.MAX_BUFFER_BYTES;
     if (this.buffer.length + newData.length > MAX_BUFFER_BYTES) {
       console.error('[LDReader] Buffer overflow (>' + MAX_BUFFER_BYTES + ' bytes), resetting. Possible stall?');
       this.buffer = new Uint8Array(0);
@@ -2522,13 +2013,13 @@ class LengthDelimitedReader {
 
   async readMessage() {
     while (true) {
-      if (this.buffer.length >= 4) {
-        const view = new DataView(this.buffer.buffer, this.buffer.byteOffset, 4);
+      if (this.buffer.length >= BINARY.LENGTH_PREFIX_SIZE) {
+        const view = new DataView(this.buffer.buffer, this.buffer.byteOffset, BINARY.LENGTH_PREFIX_SIZE);
         const messageLength = view.getUint32(0, false);
 
-        const totalLength = 4 + messageLength;
+        const totalLength = BINARY.LENGTH_PREFIX_SIZE + messageLength;
         if (this.buffer.length >= totalLength) {
-          const message = this.buffer.slice(4, totalLength);
+          const message = this.buffer.slice(BINARY.LENGTH_PREFIX_SIZE, totalLength);
           this.buffer = this.buffer.slice(totalLength);
 
           return message;

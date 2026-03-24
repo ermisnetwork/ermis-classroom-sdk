@@ -10,6 +10,7 @@ import { SubRoom } from "./SubRoom";
 import { Publisher } from "../media/publisher/Publisher";
 import { Subscriber } from "../media/subscriber/Subscriber";
 import { AudioMixer } from "../media/audioMixer/AudioMixer";
+import { AudioMixerCompat } from "../media/audioMixer/AudioMixerCompat";
 import { StreamTypes, PinType, ChannelName } from "../types/media/publisher.types";
 import type {
   RoomConfig,
@@ -54,7 +55,7 @@ export class Room extends EventEmitter {
   currentSubRoom: SubRoom | null = null;
 
   // Media management
-  audioMixer: AudioMixer | null = null;
+  audioMixer: AudioMixer | AudioMixerCompat | null = null;
   pinnedParticipant: Participant | null = null;
   pinnedPinType: PinType | null = null; // Track the type of pin (User or ScreenShare)
 
@@ -1551,7 +1552,19 @@ export class Room extends EventEmitter {
   ): Promise<void> {
     // Initialize audio mixer
     if (!this.audioMixer) {
-      this.audioMixer = new AudioMixer();
+      // iOS 15: use AudioMixerCompat with <audio> element + outputDestination
+      const ua = navigator.userAgent;
+      const isIOS = /iPad|iPhone|iPod/.test(ua) ||
+        (ua.includes('Macintosh') && navigator.maxTouchPoints > 0);
+      const isSafari = /Safari/.test(ua) && !/Chrome|CriOS|FxiOS/.test(ua);
+      const isIOS15 = isIOS && isSafari && typeof VideoDecoder === 'undefined';
+
+      if (isIOS15) {
+        log('[Room] iOS 15 detected — using AudioMixerCompat');
+        this.audioMixer = new AudioMixerCompat();
+      } else {
+        this.audioMixer = new AudioMixer();
+      }
       await this.audioMixer.initialize();
     }
 

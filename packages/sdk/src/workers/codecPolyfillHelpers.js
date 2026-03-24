@@ -28,19 +28,16 @@ export function convertYUV420toRGBA(yPlane, uPlane, vPlane, width, height) {
       const v = vPlane[uvIndex] - 128;
       
       // BT.601 conversion
-      let r = y + 1.402 * v;
-      let g = y - 0.344136 * u - 0.714136 * v;
-      let b = y + 1.772 * u;
-      
-      // Clamp to 0-255
-      r = Math.max(0, Math.min(255, r));
-      g = Math.max(0, Math.min(255, g));
-      b = Math.max(0, Math.min(255, b));
+      const r = y + 1.402 * v;
+      const g = y - 0.344136 * u - 0.714136 * v;
+      const b = y + 1.772 * u;
       
       const rgbaIndex = yIndex * 4;
-      rgba[rgbaIndex] = r;
-      rgba[rgbaIndex + 1] = g;
-      rgba[rgbaIndex + 2] = b;
+      // Fast clamp to 0-255
+      rgba[rgbaIndex] = r < 0 ? 0 : (r > 255 ? 255 : r | 0);
+      rgba[rgbaIndex + 1] = g < 0 ? 0 : (g > 255 ? 255 : g | 0);
+      rgba[rgbaIndex + 2] = b < 0 ? 0 : (b > 255 ? 255 : b | 0);
+
       rgba[rgbaIndex + 3] = 255;
     }
   }

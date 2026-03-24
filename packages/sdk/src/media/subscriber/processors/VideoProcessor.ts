@@ -84,6 +84,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
   private canvas: OffscreenCanvas | HTMLCanvasElement | null = null;
   private gl: WebGL2RenderingContext | null = null;
   private ctx2d: CanvasRenderingContext2D | null = null; // 2D fallback
+  private cachedImageData: ImageData | null = null; // Cached image data for 2D fallback
   private yuvProgram: WebGLProgram | null = null;
   private rgbaProgram: WebGLProgram | null = null; // RGBA program
   private textures: {
@@ -435,9 +436,14 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
     if (this.canvas!.width !== width || this.canvas!.height !== height) {
       this.canvas!.width = width;
       this.canvas!.height = height;
+      this.cachedImageData = null; // Invalidate cache on resize
     }
 
-    const imageData = ctx.createImageData(width, height);
+    if (!this.cachedImageData) {
+      this.cachedImageData = ctx.createImageData(width, height);
+    }
+    
+    const imageData = this.cachedImageData;
     const rgba = imageData.data;
     const uvWidth = width >> 1;
 
@@ -451,19 +457,15 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
         const v = vPlane[uvIndex] - 128;
 
         // BT.601 conversion (same as stream-poc2)
-        let r = y + 1.402 * v;
-        let g = y - 0.344136 * u - 0.714136 * v;
-        let b = y + 1.772 * u;
+        const r = y + 1.402 * v;
+        const g = y - 0.344136 * u - 0.714136 * v;
+        const b = y + 1.772 * u;
 
-        // Clamp to 0-255
-        r = Math.max(0, Math.min(255, r));
-        g = Math.max(0, Math.min(255, g));
-        b = Math.max(0, Math.min(255, b));
-
+        // Fast clamp to 0-255 and assign
         const rgbaIndex = yIndex * 4;
-        rgba[rgbaIndex] = r;
-        rgba[rgbaIndex + 1] = g;
-        rgba[rgbaIndex + 2] = b;
+        rgba[rgbaIndex] = r < 0 ? 0 : (r > 255 ? 255 : r | 0);
+        rgba[rgbaIndex + 1] = g < 0 ? 0 : (g > 255 ? 255 : g | 0);
+        rgba[rgbaIndex + 2] = b < 0 ? 0 : (b > 255 ? 255 : b | 0);
         rgba[rgbaIndex + 3] = 255;
       }
     }
@@ -577,7 +579,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
           this.initWebGL(yuvFrame.width, yuvFrame.height);
         }
 
-        if (this.useWebGL && this.gl && this.canvas) {
+        if (this.canvas) {
           // Render YUV to canvas via WebGL (synchronous)
           this.renderYUV420(yuvFrame);
 
@@ -761,6 +763,7 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       // Cleanup 2D context
       this.ctx2d = null;
       this.canvas = null;
+      this.cachedImageData = null;
       this.webglInitialized = false;
       this.useWebGL = false;
 

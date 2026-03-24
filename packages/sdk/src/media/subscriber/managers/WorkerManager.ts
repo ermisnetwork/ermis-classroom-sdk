@@ -41,6 +41,11 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
   // Video decoder worker (iOS 15 — offloads tinyh264 WASM to separate thread)
   private videoDecoderWorker: Worker | null = null;
   private videoDecoderChannel: MessageChannel | null = null;
+  // Audio decoder worker — isolates audio decoding from video to prevent
+  // pitch distortion on Android Chrome when heavy video decode blocks the
+  // media worker's event loop.
+  private audioDecoderWorker: Worker | null = null;
+  private audioDecoderChannel: MessageChannel | null = null;
   // private videoFrameCount = 0; // DEBUG: Count video frames
 
   constructor(workerUrl: string, subscriberId: string, protocol: "webrtc" | "webtransport" | "websocket") {
@@ -69,7 +74,12 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
    * We detect by capability (VideoDecoder presence) rather than UA version
    * string to be future-proof and avoid fragile version parsing.
    */
-  private needsExternalDecoderWorker(): boolean {
+  /**
+   * Detect if the current device is iOS 15 (or older) Safari.
+   * Public so that Subscriber can query it to choose the correct
+   * audio worklet file (lite vs full).
+   */
+  needsExternalDecoderWorker(): boolean {
     if (typeof navigator === 'undefined') return false;
     const ua = navigator.userAgent;
     const isIOS = /iPad|iPhone|iPod/.test(ua) ||
@@ -122,7 +132,7 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       // and bridged to the media worker via MessagePorts.
       let decoderPort: MessagePort | undefined;
       let videoDecoderPort: MessagePort | undefined;
-      const transferables: Transferable[] = [channelPort];
+      const transferables: Transferable[] = [];
 
       if (this.needsExternalDecoderWorker()) {
         console.warn('[WorkerManager] Creating external decoder worker (iOS 15 compat)');
@@ -187,23 +197,84 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
         transferables.push(videoDecoderPort);
       }
 
-      // Send init message with subscriberId, subscribeType, and audioEnabled
-      // ⚠️ CRITICAL: Worker expects FLAT structure, not nested in 'data'
-      this.worker.postMessage(
-        {
-          type: "init",
-          subscriberId: this.subscriberId,
-          subscribeType: subscribeType,
-          audioEnabled: audioEnabled, // Pass audio enabled state to worker
-          initialQuality: initialQuality,
-          port: channelPort,
-          decoderPort: decoderPort,
-          videoDecoderPort: videoDecoderPort,
-          enableLogging,
-          protocol: this.protocol,
-        },
-        transferables
-      );
+      // ── Audio decoder worker ──
+      // On iOS 15 we skip the separate audio decoder worker entirely
+      // and send channelPort (workletPort) directly to the media-worker,
+      // matching the simpler pipeline of merge-support-ios15 branch.
+      const isLegacyAudio = this.needsExternalDecoderWorker();
+
+      if (!isLegacyAudio) {
+        // Normal path: isolate audio decoding on a dedicated thread
+        const audioDecoderTimestamp = Date.now();
+        this.audioDecoderWorker = new Worker(
+          `${this.workerUrl.replace(/media-worker[^/]*\.js/, 'audio-decoder-worker.js')}?t=${audioDecoderTimestamp}`,
+          { type: 'module' }
+        );
+        this.audioDecoderChannel = new MessageChannel();
+
+        this.audioDecoderWorker.onerror = (e: ErrorEvent) => {
+          console.error('[WorkerManager] Audio decoder worker error:', e.message);
+        };
+
+        const audioWorkerTransferables: Transferable[] = [
+          channelPort,
+          this.audioDecoderChannel.port2,
+        ];
+        const audioWorkerInitMsg: Record<string, unknown> = {
+          type: 'init',
+          workletPort: channelPort,
+          audioDecoderPort: this.audioDecoderChannel.port2,
+        };
+        if (decoderPort) {
+          audioWorkerInitMsg.decoderPort = decoderPort;
+          const idx = transferables.indexOf(decoderPort);
+          if (idx !== -1) transferables.splice(idx, 1);
+          audioWorkerTransferables.push(decoderPort);
+        }
+        this.audioDecoderWorker.postMessage(audioWorkerInitMsg, audioWorkerTransferables);
+
+        const audioDecoderPort = this.audioDecoderChannel.port1;
+        transferables.push(audioDecoderPort);
+
+        log('[WorkerManager] Audio decoder worker created and initialized');
+
+        // Send init to media-worker WITH audioDecoderPort
+        this.worker.postMessage(
+          {
+            type: "init",
+            subscriberId: this.subscriberId,
+            subscribeType: subscribeType,
+            audioEnabled: audioEnabled,
+            initialQuality: initialQuality,
+            audioDecoderPort: audioDecoderPort,
+            videoDecoderPort: videoDecoderPort,
+            enableLogging,
+            protocol: this.protocol,
+          },
+          transferables
+        );
+      } else {
+        // ── iOS 15 legacy path ──
+        // No audio decoder worker — send workletPort directly to media-worker.
+        // Media-worker will decode audio inline and send PCM via workletPort.
+        log('[WorkerManager] iOS 15 detected — skipping audio decoder worker, using inline decode');
+        transferables.push(channelPort);
+
+        this.worker.postMessage(
+          {
+            type: "init",
+            subscriberId: this.subscriberId,
+            subscribeType: subscribeType,
+            audioEnabled: audioEnabled,
+            initialQuality: initialQuality,
+            port: channelPort,
+            videoDecoderPort: videoDecoderPort,
+            enableLogging,
+            protocol: this.protocol,
+          },
+          transferables
+        );
+      }
 
       this.isInitialized = true;
       this.emit("workerReady", undefined);
@@ -402,6 +473,13 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
    * Terminate the worker
    */
   terminate(): void {
+    if (this.audioDecoderWorker) {
+      this.audioDecoderWorker.terminate();
+      this.audioDecoderWorker = null;
+    }
+    if (this.audioDecoderChannel) {
+      this.audioDecoderChannel = null;
+    }
     if (this.videoDecoderWorker) {
       this.videoDecoderWorker.terminate();
       this.videoDecoderWorker = null;

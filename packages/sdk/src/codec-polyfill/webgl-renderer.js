@@ -54,6 +54,7 @@ export class WebGLRenderer {
         this.textures = {};
         this.initialized = false;
         this.useWebGLForVideoFrame = false; // Use 2D for VideoFrame by default (more efficient)
+        this.cachedImageData = null;
         
         this._init();
     }
@@ -284,7 +285,11 @@ export class WebGLRenderer {
      * Render YUV420 using Canvas 2D (fallback)
      */
     _renderYUV420_2D(yPlane, uPlane, vPlane, width, height) {
-        const imageData = this.ctx2d.createImageData(width, height);
+        if (!this.cachedImageData || this.cachedImageData.width !== width || this.cachedImageData.height !== height) {
+            this.cachedImageData = this.ctx2d.createImageData(width, height);
+        }
+        
+        const imageData = this.cachedImageData;
         const rgba = imageData.data;
         
         const uvWidth = width >> 1;
@@ -299,19 +304,15 @@ export class WebGLRenderer {
                 const v = vPlane[uvIndex] - 128;
                 
                 // BT.601 conversion
-                let r = y + 1.402 * v;
-                let g = y - 0.344136 * u - 0.714136 * v;
-                let b = y + 1.772 * u;
+                const r = y + 1.402 * v;
+                const g = y - 0.344136 * u - 0.714136 * v;
+                const b = y + 1.772 * u;
                 
-                // Clamp
-                r = Math.max(0, Math.min(255, r));
-                g = Math.max(0, Math.min(255, g));
-                b = Math.max(0, Math.min(255, b));
-                
+                // Fast clamp
                 const rgbaIndex = yIndex * 4;
-                rgba[rgbaIndex] = r;
-                rgba[rgbaIndex + 1] = g;
-                rgba[rgbaIndex + 2] = b;
+                rgba[rgbaIndex] = r < 0 ? 0 : (r > 255 ? 255 : r | 0);
+                rgba[rgbaIndex + 1] = g < 0 ? 0 : (g > 255 ? 255 : g | 0);
+                rgba[rgbaIndex + 2] = b < 0 ? 0 : (b > 255 ? 255 : b | 0);
                 rgba[rgbaIndex + 3] = 255;
             }
         }
@@ -371,6 +372,7 @@ export class WebGLRenderer {
             gl.deleteProgram(this.yuvProgram);
             gl.deleteProgram(this.rgbaProgram);
         }
+        this.cachedImageData = null;
     }
 }
 

@@ -74,13 +74,13 @@ const LEVEL_ICONS: Record<QualityLevel, string> = {
 };
 
 const CHANNEL_LABELS: Record<string, string> = {
-  microphone: '🎤 Mic',
+  mic_48k: '🎤 Mic',
   screen_share_audio: '🔊 Screen Audio',
   livestream_audio: '🔊 Live Audio',
-  video_360p: '📹 Cam 360p',
-  video_720p: '📹 Cam 720p',
-  video_1080p: '📹 Cam 1080p',
-  video_1440p: '📹 Cam 1440p',
+  cam_360p: '📹 Cam 360p',
+  cam_720p: '📹 Cam 720p',
+  cam_1080p: '📹 Cam 1080p',
+  cam_1440p: '📹 Cam 1440p',
   screen_share_720p: '🖥 Screen 720p',
   screen_share_1080p: '🖥 Screen 1080p',
   livestream_720p: '📡 Live 720p',
