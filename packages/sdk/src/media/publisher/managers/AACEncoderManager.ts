@@ -128,7 +128,10 @@ export class AACEncoderManager extends EventEmitter<{
       (globalThis as any).AudioContext || (globalThis as any).webkitAudioContext;
     this.audioContext =
       audioContext ??
-      new AudioContextClass({ sampleRate: AAC_CONFIG.SAMPLE_RATE, latencyHint: "interactive" });
+      new AudioContextClass({
+        latencyHint: "interactive",
+        sampleRate: AAC_CONFIG.SAMPLE_RATE,
+      });
 
     // Start the encoder (native or worker) early so configure() can run in
     // parallel with AudioWorklet module loading.
@@ -275,7 +278,7 @@ export class AACEncoderManager extends EventEmitter<{
     try {
       const support = await g.AudioEncoder.isConfigSupported({
         codec: "mp4a.40.2",
-        sampleRate: AAC_CONFIG.SAMPLE_RATE,
+        sampleRate: this.audioContext?.sampleRate || AAC_CONFIG.SAMPLE_RATE,
         numberOfChannels: AAC_CONFIG.CHANNEL_COUNT,
         bitrate: AAC_CONFIG.BITRATE,
       });
@@ -316,7 +319,7 @@ export class AACEncoderManager extends EventEmitter<{
 
     this._nativeEncoder.configure({
       codec: "mp4a.40.2",
-      sampleRate: AAC_CONFIG.SAMPLE_RATE,
+      sampleRate: this.audioContext!.sampleRate,
       numberOfChannels: AAC_CONFIG.CHANNEL_COUNT,
       bitrate: AAC_CONFIG.BITRATE,
     });
@@ -529,7 +532,7 @@ export class AACEncoderManager extends EventEmitter<{
           const AudioDataClass = (globalThis as any).AudioData;
           const audioData = new AudioDataClass({
             format: "f32-planar",
-            sampleRate: AAC_CONFIG.SAMPLE_RATE,
+            sampleRate: this.audioContext!.sampleRate,
             numberOfFrames: frameSize,
             numberOfChannels: numChannels,
             timestamp,
@@ -543,7 +546,7 @@ export class AACEncoderManager extends EventEmitter<{
             {
               type: "encode",
               pcm: frame,
-              sampleRate: AAC_CONFIG.SAMPLE_RATE,
+              sampleRate: this.audioContext!.sampleRate,
               numberOfFrames: frameSize,
               numberOfChannels: numChannels,
               timestamp,
@@ -561,7 +564,7 @@ export class AACEncoderManager extends EventEmitter<{
   private _computeTimestampUs(): number {
     if (this.baseTimestampUs === 0) return 0;
     return Math.floor(
-      this.baseTimestampUs + (this.samplesSent * 1_000_000) / AAC_CONFIG.SAMPLE_RATE,
+      this.baseTimestampUs + (this.samplesSent * 1_000_000) / (this.audioContext?.sampleRate ?? AAC_CONFIG.SAMPLE_RATE),
     );
   }
 }

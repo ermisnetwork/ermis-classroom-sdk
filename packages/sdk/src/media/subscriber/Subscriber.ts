@@ -215,6 +215,13 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       this.protocol,
     );
 
+    // iOS 15: override worklet URL to use lite version (plain array buffers,
+    // smaller sizes, no softClip/crossfade — prevents crackling on older chips)
+    if (this.workerManager.needsExternalDecoderWorker()) {
+      this.config.audioWorkletUrl = "/workers/audio-worklet-lite.js";
+      log('[Subscriber] iOS 15 detected — using audio-worklet-lite.js');
+    }
+
     // Polyfill manager
     this.polyfillManager = new PolyfillManager(this.config.mstgPolyfillUrl);
 

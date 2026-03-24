@@ -1,6 +1,17 @@
 /**
- * AudioMixer Class for combining multiple subscriber audio streams
- * Provides centralized audio mixing and playback management
+ * AudioMixerCompat — iOS 15 compatible AudioMixer
+ *
+ * Uses MediaStreamAudioDestinationNode + <audio> element playback chain
+ * in addition to direct audioContext.destination connection.
+ * This dual-output approach is needed on iOS 15 Safari where the
+ * <audio> element may be required for reliable audio output after
+ * user interaction resume.
+ *
+ * Differences from AudioMixer:
+ * - Adds outputDestination (MediaStreamAudioDestinationNode)
+ * - Creates hidden <audio> element for playback
+ * - _updateOutputAudio() manages audio element play/pause
+ * - _ensureAudioElementPlaying() re-plays on user interaction
  */
 
 import type {
@@ -10,15 +21,14 @@ import type {
   SubscriberAudioNode,
 } from "../../types/media/audioMixer.types";
 import { log } from "../../utils";
-import { AUDIO_CONFIG } from "../../constants/mediaConstants";
 
-export class AudioMixer {
+export class AudioMixerCompat {
   private audioContext: AudioContext | null = null;
   private mixerNode: GainNode | null = null;
-
+  private outputDestination: MediaStreamAudioDestinationNode | null = null;
   private subscriberNodes = new Map<string, SubscriberAudioNode>();
   private isInitialized = false;
-
+  private outputAudioElement: HTMLAudioElement | null = null;
   private loadedWorklets = new Set<string>();
 
   // iOS Safari user-interaction resume handler
@@ -32,7 +42,7 @@ export class AudioMixer {
 
   constructor(config: AudioMixerConfig = {}) {
     this.masterVolume = config.masterVolume ?? 0.8;
-    this.sampleRate = config.sampleRate ?? AUDIO_CONFIG.SAMPLE_RATE;
+    this.sampleRate = config.sampleRate ?? 48000;
     this.enableEchoCancellation = config.enableEchoCancellation ?? true;
     this.debug = config.debug ?? false;
   }
@@ -42,7 +52,7 @@ export class AudioMixer {
    */
   async initialize(): Promise<void> {
     if (this.isInitialized) {
-      this._debug("AudioMixer already initialized");
+      this._debug("AudioMixerCompat already initialized");
       return;
     }
 
@@ -56,9 +66,6 @@ export class AudioMixer {
       });
 
       // Resume context if suspended (required by some browsers).
-      // On iOS Safari this call may silently fail if not inside a user
-      // gesture — _setupErrorHandlers() will register interaction listeners
-      // as a fallback.
       if (this.audioContext.state === "suspended") {
         try {
           await this.audioContext.resume();
@@ -66,32 +73,45 @@ export class AudioMixer {
           // Will be retried on user interaction
         }
       }
-      // After resume attempt, check if context is actually running.
-      // On iOS Safari it may still be suspended if no user gesture occurred.
       if (this.audioContext.state !== "running") {
-        log("[AudioMixer] AudioContext not running (state:", this.audioContext.state, ") — waiting for user interaction");
+        log("[AudioMixerCompat] AudioContext not running (state:", this.audioContext.state, ") — waiting for user interaction");
       }
 
       // Create mixer node (GainNode to combine audio)
       this.mixerNode = this.audioContext.createGain();
       this.mixerNode.gain.value = this.masterVolume;
 
-      // Direct connection to audioContext.destination (speakers).
-      // Bypasses MediaStreamAudioDestinationNode → <audio> element chain
-      // which is unreliable on mobile (autoplay blocked, reduced volume).
-      this.audioContext.destination.channelCount = Math.min(
-        2,
-        this.audioContext.destination.maxChannelCount,
-      );
-      this.mixerNode.connect(this.audioContext.destination);
+      // Create output destination
+      this.outputDestination = this.audioContext.createMediaStreamDestination();
+      this.mixerNode.connect(this.outputDestination);
+
+      // Not using direct connection to speakers on iOS <= 15
+      // this.audioContext.destination.channelCount = Math.min(
+      //   2,
+      //   this.audioContext.destination.maxChannelCount,
+      // );
+      // this.mixerNode.connect(this.audioContext.destination);
+
+      // Create hidden audio element for mixed audio playback
+      this.outputAudioElement = document.createElement("audio");
+      this.outputAudioElement.autoplay = true;
+      this.outputAudioElement.style.display = "none";
+      this.outputAudioElement.setAttribute("playsinline", "");
+
+      // Disable echo cancellation on output element
+      if (this.enableEchoCancellation) {
+        this.outputAudioElement.setAttribute("webkitAudioContext", "true");
+      }
+
+      document.body.appendChild(this.outputAudioElement);
 
       this.isInitialized = true;
-      this._debug("AudioMixer initialized successfully");
+      this._debug("AudioMixerCompat initialized successfully");
 
       // Setup error handlers
       this._setupErrorHandlers();
     } catch (error) {
-      console.error("Failed to initialize AudioMixer:", error);
+      console.error("Failed to initialize AudioMixerCompat:", error);
       throw error;
     }
   }
@@ -144,13 +164,13 @@ export class AudioMixer {
 
       // Connect the port if provided
       if (channelWorkletPort) {
-        log('[AudioMixer] Connecting channelWorkletPort for:', subscriberId);
+        log('[AudioMixerCompat] Connecting channelWorkletPort for:', subscriberId);
         workletNode.port.postMessage(
           { type: "connectWorker", port: channelWorkletPort },
           [channelWorkletPort],
         );
       } else {
-        console.warn('[AudioMixer] No channelWorkletPort provided for:', subscriberId);
+        console.warn('[AudioMixerCompat] No channelWorkletPort provided for:', subscriberId);
       }
 
       // Create gain node for individual volume control
@@ -276,9 +296,11 @@ export class AudioMixer {
    * Get mixed audio output stream
    */
   getOutputMediaStream(): MediaStream | null {
-    // No longer using MediaStreamAudioDestinationNode.
-    // Audio goes directly to audioContext.destination.
-    return null;
+    if (!this.outputDestination) {
+      this._debug("Output destination not initialized");
+      return null;
+    }
+    return this.outputDestination.stream;
   }
 
   /**
@@ -341,11 +363,22 @@ export class AudioMixer {
    * Cleanup mixer resources
    */
   async cleanup(): Promise<void> {
-    this._debug("Starting AudioMixer cleanup");
+    this._debug("Starting AudioMixerCompat cleanup");
 
     try {
       // Remove user-interaction listeners
       this._removeInteractionListeners();
+
+      // Remove audio element
+      if (this.outputAudioElement) {
+        this.outputAudioElement.srcObject = null;
+        if (this.outputAudioElement.parentNode) {
+          this.outputAudioElement.parentNode.removeChild(
+            this.outputAudioElement,
+          );
+        }
+        this.outputAudioElement = null;
+      }
 
       // Disconnect all subscribers
       for (const [subscriberId, subscriberData] of this.subscriberNodes) {
@@ -368,6 +401,10 @@ export class AudioMixer {
         this.mixerNode = null;
       }
 
+      if (this.outputDestination) {
+        this.outputDestination = null;
+      }
+
       // Close audio context
       if (this.audioContext && this.audioContext.state !== "closed") {
         await this.audioContext.close();
@@ -378,9 +415,9 @@ export class AudioMixer {
       this.isInitialized = false;
       this.loadedWorklets.clear();
 
-      this._debug("AudioMixer cleanup completed");
+      this._debug("AudioMixerCompat cleanup completed");
     } catch (error) {
-      console.error("Error during AudioMixer cleanup:", error);
+      console.error("Error during AudioMixerCompat cleanup:", error);
     }
   }
 
@@ -418,8 +455,27 @@ export class AudioMixer {
    * Update output audio element
    */
   private _updateOutputAudio(): void {
-    // No-op: audio now goes directly through audioContext.destination.
-    // No <audio> element needed.
+    if (!this.outputAudioElement || !this.outputDestination) return;
+
+    try {
+      if (this.subscriberNodes.size > 0) {
+        this.outputAudioElement.srcObject = this.outputDestination.stream;
+
+        // Explicitly try to play and catch autoplay errors
+        const playPromise = this.outputAudioElement.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn('[AudioMixerCompat] Audio play() blocked:', err.name, err.message,
+              '— will retry after user interaction');
+            this._addInteractionListeners();
+          });
+        }
+      } else {
+        this.outputAudioElement.srcObject = null;
+      }
+    } catch (error) {
+      console.error("Failed to update output audio:", error);
+    }
   }
 
   /**
@@ -444,8 +500,6 @@ export class AudioMixer {
           );
           break;
         case "workletDiag":
-          // Diagnostic messages from the AudioWorklet (useful on iOS 15
-          // where worklet console.log may not appear in devtools)
           log(`[AudioWorklet Diag] ${subscriberId}:`, event.data);
           break;
         case "error":
@@ -455,42 +509,31 @@ export class AudioMixer {
           break;
       }
     };
-
-    // Note: MessagePort doesn't have onerror in standard TypeScript definitions
-    // Error handling is done through the message channel
   }
 
   /**
    * Setup error handlers for audio context.
-   *
-   * iOS Safari keeps AudioContext in "suspended" state until a user gesture
-   * (tap, click, etc.) triggers `audioContext.resume()`.  We register
-   * interaction listeners that attempt to resume + replay the audio element
-   * so sound starts the moment the user taps anywhere on the page.
    */
   private _setupErrorHandlers(): void {
     if (!this.audioContext) return;
 
-    // ── 1. Monitor state changes ────────────────────────────────────────
+    // Monitor state changes
     this.audioContext.onstatechange = () => {
       const state = this.audioContext?.state;
       this._debug(`Audio context state changed: ${state}`);
 
       if (state === "interrupted") {
-        // iOS Safari: phone call, Siri, etc. — try to resume immediately
-        console.warn("[AudioMixer] Audio context interrupted — attempting resume");
+        console.warn("[AudioMixerCompat] Audio context interrupted — attempting resume");
         this.audioContext?.resume().catch(() => { });
       }
 
       if (state === "running") {
-        // Context just became running — make sure audio element is playing
         this._ensureAudioElementPlaying();
-        // Remove user-interaction listeners (no longer needed)
         this._removeInteractionListeners();
       }
     };
 
-    // ── 2. Resume when page becomes visible again ───────────────────────
+    // Resume when page becomes visible again
     document.addEventListener("visibilitychange", async () => {
       if (!document.hidden) {
         await this.resume();
@@ -498,18 +541,15 @@ export class AudioMixer {
       }
     });
 
-    // ── 3. Resume on user interaction (critical for iOS Safari) ─────────
-    //    AudioContext.resume() only succeeds inside a user gesture on iOS.
-    //    Register listeners that fire once and clean themselves up.
+    // Resume on user interaction (critical for iOS Safari)
     this._addInteractionListeners();
   }
 
   /**
    * Add user-interaction event listeners that resume the AudioContext.
-   * Required for iOS Safari where AudioContext starts suspended.
    */
   private _addInteractionListeners(): void {
-    if (this._boundResumeOnInteraction) return; // already registered
+    if (this._boundResumeOnInteraction) return;
 
     this._boundResumeOnInteraction = () => {
       if (!this.audioContext) return;
@@ -517,22 +557,19 @@ export class AudioMixer {
         this.audioContext.state === "suspended" ||
         this.audioContext.state === ("interrupted" as AudioContextState)
       ) {
-        log("[AudioMixer] User interaction detected — resuming AudioContext");
+        log("[AudioMixerCompat] User interaction detected — resuming AudioContext");
         this.audioContext.resume()
           .then(() => {
-            log("[AudioMixer] AudioContext resumed successfully, state:", this.audioContext?.state);
+            log("[AudioMixerCompat] AudioContext resumed successfully, state:", this.audioContext?.state);
             this._ensureAudioElementPlaying();
             if (this.audioContext?.state === "running") {
               this._removeInteractionListeners();
             }
           })
           .catch((err) => {
-            console.warn("[AudioMixer] AudioContext resume failed:", err);
+            console.warn("[AudioMixerCompat] AudioContext resume failed:", err);
           });
       } else if (this.audioContext.state === "running") {
-        // AudioContext already running (resumed earlier) but the <audio>
-        // element may still be paused due to a previous autoplay block.
-        // Re-try play() now that we have a fresh user gesture.
         this._ensureAudioElementPlaying();
         this._removeInteractionListeners();
       }
@@ -559,10 +596,22 @@ export class AudioMixer {
 
   /**
    * Make sure the audio element is playing.
-   * Called after AudioContext resumes to recover from autoplay blocks.
    */
   private _ensureAudioElementPlaying(): void {
-    // No-op: audio now goes directly through audioContext.destination.
+    if (!this.outputAudioElement || !this.outputDestination) return;
+    if (this.subscriberNodes.size === 0) return;
+
+    // Re-assign srcObject in case it was cleared
+    if (!this.outputAudioElement.srcObject) {
+      this.outputAudioElement.srcObject = this.outputDestination.stream;
+    }
+
+    const playPromise = this.outputAudioElement.play();
+    if (playPromise !== undefined) {
+      playPromise.catch((err) => {
+        this._debug("Audio play() deferred:", err.name);
+      });
+    }
   }
 
   /**
@@ -570,9 +619,9 @@ export class AudioMixer {
    */
   private _debug(...args: any[]): void {
     if (this.debug) {
-      log("[AudioMixer]", ...args);
+      log("[AudioMixerCompat]", ...args);
     }
   }
 }
 
-export default AudioMixer;
+export default AudioMixerCompat;

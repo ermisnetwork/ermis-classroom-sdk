@@ -340,7 +340,7 @@ class JitterResistantProcessor extends AudioWorkletProcessor {
     }
 
     // Soft clip to prevent digital distortion
-    // this._softClip(output, outputChannels, outputLength);
+    this._softClip(output, outputChannels, outputLength);
 
     return true;
   }
