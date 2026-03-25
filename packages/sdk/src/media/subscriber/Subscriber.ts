@@ -166,7 +166,7 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
     // Set protocol and subscribeType
     this.protocol = this.config.protocol;
-    // this.protocol = "webtransport";
+    // this.protocol = "webtransport"; // force webtransport
     this.subscribeType = this.config.subscribeType;
 
     // Generate unique ID

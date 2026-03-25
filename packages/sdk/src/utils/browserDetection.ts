@@ -44,7 +44,7 @@ export function isWebRTCSupported(): boolean {
 
 /**
  * Determine which transport to use based on browser capabilities
- * Priority: WebTransport (if supported and not Safari) > WebRTC
+ * Pure capability detection: WebTransport if available > WebRTC fallback
  * @returns Transport recommendation with details
  */
 export function determineTransport(): TransportRecommendation {
@@ -60,49 +60,32 @@ export function determineTransport(): TransportRecommendation {
     webRTCSupported,
   };
 
-  // Safari always uses WebRTC (WebTransport not well supported)
-  if (safariDetected || iosSafariDetected) {
-    if (!webRTCSupported) {
-      console.warn("Safari detected but WebRTC not supported");
-      return {
-        useWebRTC: false,
-        reason:
-          "Safari detected but WebRTC not supported, falling back to WebTransport",
-        browserInfo,
-      };
-    }
-    return {
-      useWebRTC: true,
-      reason: "Safari browser detected, using WebRTC for better compatibility",
-      browserInfo,
-    };
-  }
-
-  // Other browsers: prefer WebTransport if available
+  // Prefer WebTransport if natively supported (any browser)
   if (webTransportSupported) {
+    log(`[BrowserDetection] Native WebTransport available — using WebTransport`);
     return {
       useWebRTC: false,
-      reason: "WebTransport supported, using for optimal performance",
+      reason: "Native WebTransport supported, using for optimal performance",
       browserInfo,
     };
   }
 
-  // Fallback to WebRTC if WebTransport not supported
+  // Fallback to WebRTC
   if (webRTCSupported) {
     return {
       useWebRTC: true,
-      reason: "WebTransport not supported, falling back to WebRTC",
+      reason: "WebTransport not available, falling back to WebRTC",
       browserInfo,
     };
   }
 
-  // Neither supported - this should rarely happen
+  // Neither supported
   console.error(
     "Neither WebTransport nor WebRTC is supported in this browser",
   );
   return {
-    useWebRTC: false,
-    reason: "No transport supported, attempting WebTransport as last resort",
+    useWebRTC: true,
+    reason: "No transport supported, attempting WebRTC as last resort",
     browserInfo,
   };
 }
