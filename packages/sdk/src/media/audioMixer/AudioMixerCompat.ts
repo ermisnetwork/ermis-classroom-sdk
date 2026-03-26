@@ -41,7 +41,7 @@ export class AudioMixerCompat {
   private debug: boolean;
 
   constructor(config: AudioMixerConfig = {}) {
-    this.masterVolume = config.masterVolume ?? 0.8;
+    this.masterVolume = config.masterVolume ?? 1.0;
     this.sampleRate = config.sampleRate ?? 48000;
     this.enableEchoCancellation = config.enableEchoCancellation ?? true;
     this.debug = config.debug ?? false;

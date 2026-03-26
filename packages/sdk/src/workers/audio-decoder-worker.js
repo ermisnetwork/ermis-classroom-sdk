@@ -43,6 +43,15 @@ function handleAudioOutput(audioData) {
       audioData.copyTo(monoChannel, { planeIndex: 0, format: "f32-planar" });
       channelData.push(monoChannel);
       channelData.push(new Float32Array(monoChannel)); // duplicate for stereo
+      // const MONO_GAIN = Math.SQRT1_2; // ≈ 0.7071
+      // const left = new Float32Array(audioData.numberOfFrames);
+      // const right = new Float32Array(audioData.numberOfFrames);
+      // for (let i = 0; i < monoChannel.length; i++) {
+      //   left[i] = monoChannel[i] * MONO_GAIN;
+      //   right[i] = monoChannel[i] * MONO_GAIN;
+      // }
+      // channelData.push(left);
+      // channelData.push(right);
     } else {
       for (let i = 0; i < audioData.numberOfChannels; i++) {
         const channel = new Float32Array(audioData.numberOfFrames);
@@ -60,6 +69,7 @@ function handleAudioOutput(audioData) {
           sampleRate: audioData.sampleRate,
           numberOfFrames: audioData.numberOfFrames,
           numberOfChannels: audioData.numberOfChannels,
+          // numberOfChannels: channelData.length, // actual output channels (always 2 after mono→stereo)
         },
         channelData.map((c) => c.buffer)
       );

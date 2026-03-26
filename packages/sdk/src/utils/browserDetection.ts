@@ -127,6 +127,15 @@ export function logTransportInfo(): BrowserInfo {
 }
 
 /**
+ * Check if VideoTrackGenerator (standard W3C API) is supported
+ * Safari 18+, Chrome 94+ — produces MediaStreamTrack from VideoFrame stream
+ * @returns true if supported, false otherwise
+ */
+export function hasVideoTrackGenerator(): boolean {
+  return typeof (globalThis as any).VideoTrackGenerator === 'function';
+}
+
+/**
  * Browser detection utilities namespace
  */
 export const BrowserDetection = {
@@ -134,6 +143,7 @@ export const BrowserDetection = {
   isIOSSafari,
   isWebTransportSupported,
   isWebRTCSupported,
+  hasVideoTrackGenerator,
   determineTransport,
   getBrowserInfo,
   logTransportInfo,

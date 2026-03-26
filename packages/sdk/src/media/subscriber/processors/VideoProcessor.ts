@@ -11,6 +11,7 @@
 
 import EventEmitter from "../../../events/EventEmitter";
 import { log } from "../../../utils";
+import { isSafari } from "../../../utils/browserDetection";
 
 // YUV to RGB WebGL shaders
 const VERTEX_SHADER = `#version 300 es
@@ -76,9 +77,13 @@ interface YUV420Frame {
  * VideoProcessor class
  */
 export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
-  private videoGenerator: MediaStreamTrackGenerator | null = null;
+  private videoGenerator: MediaStreamTrackGenerator | null = null; // MSTG (non-standard Chrome)
   private videoWriter: WritableStreamDefaultWriter<VideoFrame> | null = null;
   private mediaStream: MediaStream | null = null;
+
+  // VideoTrackGenerator Worker (standard W3C API — worker-only)
+  private vtgWorker: Worker | null = null;
+  private useVTGWorker = false;
 
   // WebGL rendering for YUV420 (WASM decoder)
   private canvas: OffscreenCanvas | HTMLCanvasElement | null = null;
@@ -133,72 +138,98 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
   }
 
   // Jitter buffer - smooths bursty frame delivery into adaptive-rate output
-  private jitterBufferEnabled = false;
   private jitterBuffer: VideoFrame[] = [];
   private playbackTimer: ReturnType<typeof setTimeout> | null = null;
   private playbackTimerActive = false;
   private playbackIntervalMs = 50; // 20fps output rate
   private targetBufferSize = 3; // Aim to keep ~3 frames buffered (150ms at 20fps)
-  private maxBufferSize = 15; // Drop oldest frames if buffer exceeds this
-  // private isWriting = false; // Guard against overlapping writes
-
-  // Diagnostics
-  private lastFrameArrivalTime = 0;
-  private frameArrivalGaps: number[] = [];
-
-  /**
-   * Enable jitter buffer for smooth playback
-   * @param fps - Target output framerate (used to calculate playback interval)
-   */
-  enableJitterBuffer(fps: number = 20): void {
-    this.jitterBufferEnabled = true;
-    this.playbackIntervalMs = Math.round(1000 / fps);
-    this.targetBufferSize = Math.max(2, Math.ceil(fps * 0.15)); // ~150ms worth of frames
-    this.maxBufferSize = fps; // 1 second max
-    log(`[VideoProcessor] Jitter buffer enabled: ${fps}fps, interval=${this.playbackIntervalMs}ms, targetBuffer=${this.targetBufferSize}`);
-  }
 
   /**
    * Initialize video system
+   * Note: returns MediaStream synchronously for non-VTG paths.
+   * VTG worker path emits "initialized" asynchronously after worker responds.
    */
-  init(): MediaStream {
+  init(): MediaStream | undefined {
     try {
       log("[VideoProcessor] Initializing video system...");
 
-      // Check for full pipeline support: MediaStreamTrackGenerator + VideoFrame(canvas)
-      const hasTrackGenerator = typeof MediaStreamTrackGenerator === "function";
+      // Priority 1: VideoTrackGenerator via Dedicated Worker (Safari 18+)
+      // VTG is worker-only by spec — cannot be created on main thread.
+      // We spawn a dedicated worker that creates VTG and transfers the track back.
+      // This eliminates canvas.captureStream() polling → significantly reduces heat.
+      //
+      // Why isSafari(): On Safari, "MSTG" is actually a polyfill that uses
+      // canvas.captureStream() internally — still hot! VTG worker is truly native.
+      // On Chrome, MSTG is native and efficient — no need for VTG worker.
+      const isSafariBrowser = isSafari();
+      const hasMSTG = typeof MediaStreamTrackGenerator === "function";
       const hasVideoFrameCanvas = this.isVideoFrameWithCanvasSupported();
 
-      if (hasTrackGenerator && hasVideoFrameCanvas) {
+      // Safari 18+ with VideoFrame & VideoDecoder → try VTG worker
+      if (isSafariBrowser && typeof VideoFrame !== 'undefined' && typeof VideoDecoder !== 'undefined') {
+        log("[VideoProcessor] Attempting VideoTrackGenerator via Worker...");
+        try {
+          this.vtgWorker = new Worker(`/workers/video-track-worker.js`);
+
+          this.vtgWorker.onmessage = (e: MessageEvent) => {
+            const { type } = e.data;
+            if (type === 'ready') {
+              // Track transferred from worker
+              const track = e.data.track as MediaStreamTrack;
+              this.mediaStream = new MediaStream([track]);
+              this.useVTGWorker = true;
+              log("[VideoProcessor] VideoTrackGenerator worker ready — track received");
+              this.emit("initialized", { stream: this.mediaStream });
+            } else if (type === 'error') {
+              console.warn("[VideoProcessor] VTG worker error:", e.data.message);
+              // Worker failed — fallback to canvas capture
+              this.vtgWorker?.terminate();
+              this.vtgWorker = null;
+              this.initCanvasCaptureFallback();
+            }
+          };
+
+          this.vtgWorker.onerror = (err: ErrorEvent) => {
+            console.warn("[VideoProcessor] VTG worker load error:", err.message);
+            this.vtgWorker = null;
+            this.initCanvasCaptureFallback();
+          };
+
+          // Tell worker to create VTG
+          this.vtgWorker.postMessage({ type: 'init' });
+
+          // Don't return mediaStream yet — it will be set asynchronously
+          // when the worker sends back the track via "ready" message.
+          // We also need WebGL for YUV420 frames → VideoFrame conversion
+          return undefined as any;
+
+        } catch (workerError) {
+          console.warn("[VideoProcessor] Failed to create VTG worker:", workerError);
+          this.vtgWorker = null;
+          // Fall through to other paths
+        }
+      }
+
+      // Priority 2: MediaStreamTrackGenerator (non-standard Chrome)
+      if (hasMSTG && hasVideoFrameCanvas) {
         log("[VideoProcessor] Creating MediaStreamTrackGenerator...");
-        // Create video track generator
         this.videoGenerator = new MediaStreamTrackGenerator({
           kind: "video",
         });
 
         this.videoWriter = this.videoGenerator.writable.getWriter();
-
-        // Create MediaStream with video track only
         this.mediaStream = new MediaStream([this.videoGenerator]);
-      } else {
-        log("[VideoProcessor] Using canvas.captureStream() fallback.");
-        this.useCanvasCapture = true;
-
-        // Create fallback canvas immediately
-        const width = 640; // Default width
-        const height = 480; // Default height
-        this.initWebGL(width, height);
-
-        if (this.canvas && 'captureStream' in this.canvas) {
-          // Cast to any because TS might not know captureStream exists on HTMLCanvasElement in all envs or it might be OffscreenCanvas type intersection issue
-          this.mediaStream = (this.canvas as any).captureStream(30); // 30 FPS
-        } else {
-          throw new Error("Canvas captureStream not supported");
-        }
       }
 
-      log("[VideoProcessor] Video system initialized");
-      this.emit("initialized", { stream: this.mediaStream! });
+      // Priority 3: canvas.captureStream() fallback
+      if (!this.mediaStream) {
+        this.initCanvasCaptureFallback();
+      }
+
+      if (this.mediaStream && !this.useCanvasCapture) {
+        log("[VideoProcessor] Video system initialized");
+        this.emit("initialized", { stream: this.mediaStream! });
+      }
 
       return this.mediaStream!;
 
@@ -209,6 +240,27 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       this.emit("error", { error: err, context: "init" });
       throw err;
     }
+  }
+
+  /**
+   * Initialize canvas.captureStream() fallback
+   */
+  private initCanvasCaptureFallback(): void {
+    log("[VideoProcessor] Using canvas.captureStream() fallback.");
+    this.useCanvasCapture = true;
+
+    const width = 640;
+    const height = 480;
+    this.initWebGL(width, height);
+
+    if (this.canvas && 'captureStream' in this.canvas) {
+      this.mediaStream = (this.canvas as any).captureStream(30);
+    } else {
+      throw new Error("Canvas captureStream not supported");
+    }
+
+    log("[VideoProcessor] Video system initialized (canvas fallback)");
+    this.emit("initialized", { stream: this.mediaStream! });
   }
 
   /**
@@ -559,6 +611,20 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
       return;
     }
 
+    // === VTG Worker path: zero-copy transfer VideoFrame to dedicated worker ===
+    // Safari 18 uses native VideoDecoder → frames are always native VideoFrame.
+    // YUV420 only comes from WASM decoder (iOS 15) which doesn't have VTG.
+    // So VTG path = pure VideoFrame transfer, NO rendering, NO conversion.
+    if (this.useVTGWorker && this.vtgWorker) {
+      if (typeof VideoFrame !== 'undefined' && frame instanceof VideoFrame) {
+        this.vtgWorker.postMessage({ type: 'frame', frame }, [frame as any]);
+        this.frameCount++;
+        this.emit("frameProcessed", undefined);
+      }
+      return;
+    }
+
+    // === Non-VTG paths (MSTG / canvas capture) ===
     // Skip if already writing (backpressure) - ONLY for VideoFrame generator mode
     // For manual canvas render, we can just draw immediately as it's sync
     if (!this.useCanvasCapture && this.isWriting) {
@@ -777,7 +843,19 @@ export class VideoProcessor extends EventEmitter<VideoProcessorEvents> {
         this.videoWriter = null;
       }
 
-      // Stop video generator
+      // Terminate VTG worker
+      if (this.vtgWorker) {
+        try {
+          this.vtgWorker.postMessage({ type: 'close' });
+          this.vtgWorker.terminate();
+        } catch {
+          // Worker might already be terminated
+        }
+        this.vtgWorker = null;
+        this.useVTGWorker = false;
+      }
+
+      // Stop video generator (non-standard MSTG)
       if (this.videoGenerator) {
         try {
           if (this.videoGenerator.stop) {
