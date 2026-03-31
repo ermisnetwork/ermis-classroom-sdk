@@ -7,7 +7,7 @@ import type {
 } from "../../../types/media/publisher.types";
 import { log } from "../../../utils";
 // @ts-ignore - JavaScript module without types
-import { H264Encoder, isNativeH264EncoderSupported } from "../../../codec-polyfill/video-codec-polyfill.js";
+// import { H264Encoder, isNativeH264EncoderSupported } from "../../../codec-polyfill/video-codec-polyfill.js";
 
 // Detect if native VideoEncoder is available
 const HAS_NATIVE_VIDEO_ENCODER = typeof VideoEncoder !== 'undefined';
@@ -225,6 +225,64 @@ export class VideoEncoderManager extends EventEmitter<{
   private encoderWorker: Worker | null = null;
   private workerProxies = new Map<string, WorkerEncoderProxy>();
 
+  /** Encoders currently being recreated — prevents storm of parallel recreations */
+  private _recreatingEncoders = new Set<string>();
+  /** Number of recreation attempts per encoder name */
+  private _recreationAttempts = new Map<string, number>();
+  /** Max times we will attempt to recreate a single encoder before giving up */
+  private static readonly MAX_RECREATION_ATTEMPTS = 3;
+
+  /**
+   * H.264-only fallback chain (server decoder only accepts H.264 Annex B).
+   * Ordered from most-compatible (Constrained Baseline) to higher profiles.
+   * VP8/VP9 are intentionally excluded.
+   */
+  private static readonly CODEC_FALLBACK_CHAIN: string[] = [
+    'avc1.42e01f', // H.264 Constrained Baseline Profile 3.1 — max compat
+    'avc1.4d001f', // H.264 Main Profile 3.1
+    'avc1.640c1f', // H.264 High Profile 3.1
+  ];
+
+  /**
+   * Find the first H.264 codec string the browser can encode.
+   * Uses 'no-preference' for the isConfigSupported() probe because:
+   *  - It is the most permissive mode (software + hardware both qualify).
+   *  - We always attempt to create the actual encoder with 'prefer-hardware'
+   *    regardless, so the probe only needs to confirm codec support.
+   * Returns null when nothing works — caller must fall back to WASM encoder.
+   */
+  static async findSupportedCodec(
+    config: VideoEncoderConfig,
+    preferredCodec?: string,
+  ): Promise<string | null> {
+    if (typeof VideoEncoder === 'undefined' || typeof VideoEncoder.isConfigSupported !== 'function') {
+      return null;
+    }
+
+    // Build the chain: caller's preferred codec first, then H.264 fallbacks
+    const chain: string[] = preferredCodec
+      ? [preferredCodec, ...VideoEncoderManager.CODEC_FALLBACK_CHAIN.filter(c => c !== preferredCodec)]
+      : VideoEncoderManager.CODEC_FALLBACK_CHAIN;
+
+    for (const codec of chain) {
+      try {
+        // Probe with 'no-preference' — most permissive, confirms codec support
+        // independent of whether hardware acceleration is available.
+        const testConfig = { ...config, codec, hardwareAcceleration: 'no-preference' } as VideoEncoderConfig;
+        const support = await VideoEncoder.isConfigSupported(testConfig);
+        if (support.supported) {
+          log(`[VideoEncoder] ✅ Codec probed OK: ${codec}`);
+          return codec;
+        }
+        log(`[VideoEncoder] ⚠️ Codec not supported: ${codec}`);
+      } catch {
+        log(`[VideoEncoder] ⚠️ isConfigSupported threw for codec: ${codec}`);
+      }
+    }
+
+    return null;
+  }
+
   /**
    * Create video encoder for specific quality
    *
@@ -251,15 +309,6 @@ export class VideoEncoderManager extends EventEmitter<{
       throw new Error(`Encoder ${name} already exists`);
     }
 
-    // Configure encoder with optimal settings
-    // Use Annex B format for WASM decoder compatibility (SPS/PPS inline with start codes)
-    const encoderConfig: VideoEncoderConfig = {
-      ...config,
-      latencyMode: "realtime",
-      hardwareAcceleration: "prefer-hardware",
-      avc: { format: 'annexb' },
-    } as VideoEncoderConfig;
-
     let encoder: any;
     let isWasmEncoder = false;
 
@@ -272,60 +321,118 @@ export class VideoEncoderManager extends EventEmitter<{
       } as EncodedVideoChunkMetadata;
       onOutput(chunk, enrichedMetadata);
     };
+
+    // Error handler: log, emit, and trigger auto-recreation for native encoders.
+    // The encoder is now in 'closed' state after this fires — we must recreate
+    // before any future encodeFrame() calls, otherwise every frame throws
+    // InvalidStateError: Cannot call 'encode' on a closed codec.
     const wrappedOnError = (error: Error) => {
       console.error(`[VideoEncoder] ❌ ${name} error:`, error);
-      this.emit("encoderError", { name, error });
+      this.emit('encoderError', { name, error });
       onError(error);
+
+      // Schedule async recreation so the encoder doesn't stay permanently closed
+      const encoderObj = this.encoders.get(name);
+      if (encoderObj && !encoderObj.isWasmEncoder) {
+        this._scheduleRecreation(name, encoderObj, encoderObj.config);
+      }
     };
 
     if (HAS_NATIVE_VIDEO_ENCODER) {
-      // Use native VideoEncoder
-      encoder = new VideoEncoder({
-        output: wrappedOnOutput,
-        error: wrappedOnError,
-      });
+      // We probe with 'no-preference' (most permissive). The actual encoder
+      // is always created with 'prefer-hardware' — lower latency, lower CPU.
+      // If hardware encoding fails at runtime, auto-recreation in wrappedOnError
+      // will retry and eventually fall back to 'no-preference'.
+      const supportedCodec = await VideoEncoderManager.findSupportedCodec(
+        { ...config, width: config.width, height: config.height } as VideoEncoderConfig,
+        config.codec,
+      );
 
-      encoder.configure(encoderConfig);
-      log(`[VideoEncoder] Created native encoder "${name}" for ${channelName}:`, encoderConfig);
-    } else {
-      // Fallback to WASM H264Encoder via Worker thread (iOS 15 Safari, etc.)
-      log(`[VideoEncoder] Native VideoEncoder not available, using Worker-based WASM encoder for "${name}"`);
+      if (!supportedCodec) {
+        console.warn(
+          `[VideoEncoder] No supported native codec found for "${name}", falling back to WASM encoder`,
+        );
+        // Fall through to WASM branch below
+      } else {
+        // Always prefer hardware on first attempt — best performance.
+        // Recreation path handles the fallback to 'no-preference' if needed.
+        const encoderConfig: VideoEncoderConfig = {
+          ...config,
+          codec: supportedCodec,
+          latencyMode: 'realtime',
+          hardwareAcceleration: 'prefer-hardware',
+          avc: { format: 'annexb' },
+        } as VideoEncoderConfig;
 
-      if (!this.encoderWorker) {
-        this.initEncoderWorker();
-      }
+        encoder = new VideoEncoder({ output: wrappedOnOutput, error: wrappedOnError });
+        encoder.configure(encoderConfig);
 
-      const proxy = new WorkerEncoderProxy(this.encoderWorker!, name);
-      this.workerProxies.set(name, proxy);
+        log(
+          `[VideoEncoder] Created native encoder "${name}" (codec: ${supportedCodec}, hw: prefer-hardware):`,
+          encoderConfig,
+        );
 
-      proxy.onOutput = (chunk: any, metadata: any) => {
-        const enrichedMetadata = {
-          ...metadata,
-          encoderName: name,
+        // Store encoder info + callbacks for recreation after crash
+        this.encoders.set(name, {
+          encoder,
           channelName,
-        };
-        onOutput(chunk, enrichedMetadata as EncodedVideoChunkMetadata);
-      };
-      proxy.onError = wrappedOnError;
+          config: encoderConfig,
+          metadataReady: false,
+          videoDecoderConfig: null,
+          isWasmEncoder: false,
+          onOutput: wrappedOnOutput,
+          onError: wrappedOnError,
+        } as VideoEncoderObject);
 
-      await proxy.configure({
-        width: encoderConfig.width,
-        height: encoderConfig.height,
-        bitrate: encoderConfig.bitrate,
-        framerate: encoderConfig.framerate,
-        keyFrameInterval: 60,
-      });
-
-      encoder = proxy;
-      isWasmEncoder = true;
-      log(`[VideoEncoder] Created Worker encoder "${name}" for ${channelName}:`, encoderConfig);
+        this.frameCounters.set(name, 0);
+        this.keyframeIntervals.set(name, gopSize ?? this.defaultKeyframeInterval);
+        this._recreationAttempts.set(name, 0);
+        log(`[VideoEncoder] Keyframe interval for "${name}": ${gopSize ?? this.defaultKeyframeInterval}`);
+        this.emit('encoderCreated', { name, channelName, config: encoderConfig });
+        return encoder;
+      }
     }
 
-    // Store encoder info + callbacks for recreation after crash
+    // WASM fallback (iOS 15 Safari OR when no native codec is supported)
+    log(`[VideoEncoder] Using Worker-based WASM encoder for "${name}"`);
+
+    if (!this.encoderWorker) {
+      this.initEncoderWorker();
+    }
+
+    const wasmConfig: VideoEncoderConfig = {
+      ...config,
+      latencyMode: 'realtime',
+      hardwareAcceleration: 'prefer-hardware',
+      avc: { format: 'annexb' },
+    } as VideoEncoderConfig;
+
+    const proxy = new WorkerEncoderProxy(this.encoderWorker!, name);
+    this.workerProxies.set(name, proxy);
+
+    proxy.onOutput = (chunk: any, metadata: any) => {
+      const enrichedMetadata = { ...metadata, encoderName: name, channelName };
+      onOutput(chunk, enrichedMetadata as EncodedVideoChunkMetadata);
+    };
+    proxy.onError = wrappedOnError;
+
+    await proxy.configure({
+      width: wasmConfig.width,
+      height: wasmConfig.height,
+      bitrate: wasmConfig.bitrate,
+      framerate: wasmConfig.framerate,
+      keyFrameInterval: 60,
+    });
+
+    encoder = proxy;
+    isWasmEncoder = true;
+    log(`[VideoEncoder] Created Worker encoder "${name}" for ${channelName}:`, wasmConfig);
+
+    // Store encoder info + callbacks
     this.encoders.set(name, {
-      encoder: encoder,
+      encoder,
       channelName,
-      config: encoderConfig,
+      config: wasmConfig,
       metadataReady: false,
       videoDecoderConfig: null,
       isWasmEncoder,
@@ -333,13 +440,11 @@ export class VideoEncoderManager extends EventEmitter<{
       onError: wrappedOnError,
     } as VideoEncoderObject);
 
-    // Initialize per-encoder keyframe state
     this.frameCounters.set(name, 0);
     this.keyframeIntervals.set(name, gopSize ?? this.defaultKeyframeInterval);
+    this._recreationAttempts.set(name, 0);
     log(`[VideoEncoder] Keyframe interval for "${name}": ${gopSize ?? this.defaultKeyframeInterval}`);
-
-    this.emit("encoderCreated", { name, channelName, config: encoderConfig });
-
+    this.emit('encoderCreated', { name, channelName, config: wasmConfig });
     return encoder;
   }
 
@@ -459,7 +564,7 @@ export class VideoEncoderManager extends EventEmitter<{
       : Array.from(this.encoders.entries());
 
     if (targetEncoders.length === 0) {
-      console.warn("[VideoEncoder] No encoders available");
+      console.warn('[VideoEncoder] No encoders available');
       frame.close?.();
       return;
     }
@@ -468,12 +573,19 @@ export class VideoEncoderManager extends EventEmitter<{
     const isImageDataFallback = frame && frame.type === 'imagedata' && frame.data;
     const isRealVideoFrame = typeof VideoFrame !== 'undefined' && frame instanceof VideoFrame;
 
-    // Per-encoder keyframe decision is made inside the loop below
-
     // Encode frame for each encoder — each has its own frame counter + keyframe interval
     for (let i = 0; i < targetEncoders.length; i++) {
       const [name, encoderObj] = targetEncoders[i];
       const isLastEncoder = i === targetEncoders.length - 1;
+
+      // Without this guard, every frame throws InvalidStateError spam after a
+      // configure() error closes the encoder internally.
+      if (!encoderObj.isWasmEncoder && encoderObj.encoder.state === 'closed') {
+        this._scheduleRecreation(name, encoderObj, encoderObj.config);
+        // Still need to close cloned frames if this wasn't the last encoder
+        // (no clone was made yet, so nothing to close here)
+        continue;
+      }
 
       // Increment per-encoder frame counter
       const count = (this.frameCounters.get(name) ?? 0) + 1;
@@ -481,7 +593,7 @@ export class VideoEncoderManager extends EventEmitter<{
       const interval = this.keyframeIntervals.get(name) ?? this.defaultKeyframeInterval;
       const isKeyFrame = count % interval === 0;
 
-      // Check if encoder has capacity - but ALWAYS encode keyframes
+      // Check if encoder has capacity — but ALWAYS encode keyframes
       const isQueueFull = encoderObj.encoder.encodeQueueSize > VIDEO_CONFIG.MAX_QUEUE_SIZE;
       if (isQueueFull && !isKeyFrame) {
         console.warn(
@@ -491,9 +603,8 @@ export class VideoEncoderManager extends EventEmitter<{
       }
 
       try {
-        if ((encoderObj as any).isWasmEncoder) {
+        if (encoderObj.isWasmEncoder) {
           // WASM encoder: pass frame directly (handles both VideoFrame and ImageData-like)
-          // WASM encoder's encode() handles the conversion internally
           (encoderObj.encoder as any).encode(frame, isKeyFrame);
         } else if (isRealVideoFrame) {
           // Native encoder: requires real VideoFrame
@@ -501,21 +612,22 @@ export class VideoEncoderManager extends EventEmitter<{
           const frameToEncode = isLastEncoder ? frame : new VideoFrame(frame);
           encoderObj.encoder.encode(frameToEncode, { keyFrame: isKeyFrame });
 
-          // Close cloned frames
+          // Close cloned frames immediately after encode()
           if (!isLastEncoder) {
             frameToEncode.close();
           }
         } else if (isImageDataFallback) {
-          // iOS 15 fallback with native encoder - this shouldn't happen
-          // because native VideoEncoder isn't available on iOS 15
-          console.warn(`[VideoEncoder] ${name}: Native encoder received ImageData fallback - skipping`);
+          // iOS 15 fallback with native encoder — shouldn't normally happen
+          console.warn(`[VideoEncoder] ${name}: Native encoder received ImageData fallback — skipping`);
         }
       } catch (error) {
-        console.error(
-          `[VideoEncoder] Failed to encode frame with ${name}:`,
-          error,
-        );
-        this.emit("encodeError", { name, error });
+        console.error(`[VideoEncoder] Failed to encode frame with ${name}:`, error);
+        this.emit('encodeError', { name, error });
+
+        // If the encoder died mid-flight, schedule recreation
+        if (!encoderObj.isWasmEncoder) {
+          this._scheduleRecreation(name, encoderObj, encoderObj.config);
+        }
       }
     }
 
@@ -544,55 +656,89 @@ export class VideoEncoderManager extends EventEmitter<{
       ...config,
     };
 
-    try {
-      // Check encoder state — if closed (Safari kills encoders during lag),
-      // recreate instead of trying to reconfigure a dead encoder
-      const encoderState = encoderObj.encoder.state;
-      if (encoderState === 'closed') {
-        console.warn(
-          `[VideoEncoder] ⚠️ ${name} is CLOSED — recreating encoder`,
-        );
-        await this._recreateEncoder(name, encoderObj, newConfig);
-        return;
-      }
+    // If encoder is already closed, go through the standard recreation path
+    // (debounced, attempt-tracked) instead of calling _recreateEncoder directly.
+    if (encoderObj.encoder.state === 'closed') {
+      console.warn(`[VideoEncoder] ⚠️ ${name} is CLOSED — scheduling recreation`);
+      // Update stored config so recreation uses the new bitrate/framerate
+      encoderObj.config = newConfig;
+      this._scheduleRecreation(name, encoderObj, newConfig);
+      return;
+    }
 
+    try {
       // Flush existing frames
       await encoderObj.encoder.flush();
 
-      // Reconfigure
+      // Reconfigure live encoder
       encoderObj.encoder.configure(newConfig);
       encoderObj.config = newConfig;
       encoderObj.metadataReady = false;
 
       log(`[VideoEncoder] Reconfigured ${name}:`, newConfig);
-      this.emit("encoderReconfigured", { name, config: newConfig });
+      this.emit('encoderReconfigured', { name, config: newConfig });
     } catch (error) {
-      // If reconfigure fails (encoder in bad state), try recreation
-      console.warn(
-        `[VideoEncoder] ⚠️ ${name} reconfigure failed, attempting recreation:`,
-        error,
-      );
-      try {
-        await this._recreateEncoder(name, encoderObj, newConfig);
-      } catch (recreateError) {
-        console.error(
-          `[VideoEncoder] ❌ ${name} recreation also failed:`,
-          recreateError,
-        );
-        throw recreateError;
-      }
+      // Encoder entered a bad state during flush/configure — schedule recreation
+      console.warn(`[VideoEncoder] ⚠️ ${name} reconfigure failed, scheduling recreation:`, error);
+      encoderObj.config = newConfig;
+      this._scheduleRecreation(name, encoderObj, newConfig);
     }
   }
 
   /**
+   * Schedule a debounced async recreation for a native encoder.
+   * If a recreation is already in progress for this encoder, or the max
+   * number of attempts has been exceeded, this is a no-op.
+   */
+  private _scheduleRecreation(
+    name: string,
+    encoderObj: VideoEncoderObject,
+    config: VideoEncoderConfig,
+  ): void {
+    if (encoderObj.isWasmEncoder) return;
+    if (this._recreatingEncoders.has(name)) return; // already in progress
+
+    const attempts = this._recreationAttempts.get(name) ?? 0;
+    if (attempts >= VideoEncoderManager.MAX_RECREATION_ATTEMPTS) {
+      if (attempts === VideoEncoderManager.MAX_RECREATION_ATTEMPTS) {
+        console.error(
+          `[VideoEncoder] ❌ ${name} hit max recreation attempts (${VideoEncoderManager.MAX_RECREATION_ATTEMPTS}), giving up`,
+        );
+        this._recreationAttempts.set(name, attempts + 1); // prevent re-logging
+      }
+      return;
+    }
+
+    // Increment BEFORE calling _recreateEncoder so the attempt number is
+    // consistent whether recreation succeeds or fails.
+    const nextAttempt = attempts + 1;
+    this._recreationAttempts.set(name, nextAttempt);
+
+    this._recreatingEncoders.add(name);
+    this._recreateEncoder(name, encoderObj, config, nextAttempt)
+      .then(() => {
+        this._recreationAttempts.set(name, 0); // reset on success
+      })
+      .catch((err) => {
+        console.error(`[VideoEncoder] ❌ ${name} recreation failed (attempt ${nextAttempt}):`, err);
+        // Keep nextAttempt in the map so the next _scheduleRecreation call
+        // sees the incremented counter and eventually gives up.
+      })
+      .finally(() => {
+        this._recreatingEncoders.delete(name);
+      });
+  }
+
+  /**
    * Recreate a native VideoEncoder that has been closed or errored.
-   * Uses the stored onOutput/onError callbacks from the original creation.
+   * Tries each codec in the fallback chain until one succeeds.
    * WASM encoders are NOT recreated (worker handles its own lifecycle).
    */
   private async _recreateEncoder(
     name: string,
     encoderObj: VideoEncoderObject,
     config: VideoEncoderConfig,
+    attempt: number,
   ): Promise<void> {
     if (encoderObj.isWasmEncoder) {
       console.warn(`[VideoEncoder] ${name} is WASM — cannot recreate, skipping`);
@@ -604,29 +750,38 @@ export class VideoEncoderManager extends EventEmitter<{
       return;
     }
 
-    // Create fresh native VideoEncoder
+    log(`[VideoEncoder] 🔄 Recreating "${name}" (attempt ${attempt}/${VideoEncoderManager.MAX_RECREATION_ATTEMPTS})...`);
+
+    // Re-probe codec with no-preference (most permissive) to find a working codec.
+    const supportedCodec = await VideoEncoderManager.findSupportedCodec(config, config.codec);
+    if (!supportedCodec) {
+      throw new Error(`[VideoEncoder] ${name}: no supported codec found during recreation`);
+    }
+
+    // Attempt 1: retry with prefer-hardware (may have been a transient glitch).
+    // Attempt 2+: fall back to no-preference (hardware is truly unavailable).
+    const hardwareAcceleration = attempt <= 1 ? 'prefer-hardware' : 'no-preference';
+    log(`[VideoEncoder] 🔄 "${name}" attempt ${attempt}: hw=${hardwareAcceleration}`);
+
+    const encoderConfig: VideoEncoderConfig = {
+      ...config,
+      codec: supportedCodec,
+      latencyMode: 'realtime',
+      hardwareAcceleration: hardwareAcceleration as VideoEncoderConfig['hardwareAcceleration'],
+      avc: { format: 'annexb' },
+    } as VideoEncoderConfig;
+
     const newEncoder = new VideoEncoder({
       output: encoderObj.onOutput,
       error: encoderObj.onError,
     });
-
-    const encoderConfig: VideoEncoderConfig = {
-      ...config,
-      latencyMode: 'realtime',
-      hardwareAcceleration: 'prefer-hardware',
-      avc: { format: 'annexb' },
-    } as VideoEncoderConfig;
-
     newEncoder.configure(encoderConfig);
 
-    // Replace old encoder in the map
     encoderObj.encoder = newEncoder as any;
     encoderObj.config = encoderConfig;
     encoderObj.metadataReady = false;
 
-    log(
-      `[VideoEncoder] ✅ ${name} RECREATED successfully (was closed/errored)`,
-    );
+    log(`[VideoEncoder] ✅ ${name} RECREATED (codec: ${supportedCodec}, hw: ${hardwareAcceleration})`);
     this.emit('encoderReconfigured', { name, config: encoderConfig });
   }
 
@@ -774,6 +929,8 @@ export class VideoEncoderManager extends EventEmitter<{
     this.encoders.clear();
     this.frameCounters.clear();
     this.keyframeIntervals.clear();
+    this._recreationAttempts.clear();
+    this._recreatingEncoders.clear();
 
     // Terminate encoder worker if it exists
     if (this.encoderWorker) {
