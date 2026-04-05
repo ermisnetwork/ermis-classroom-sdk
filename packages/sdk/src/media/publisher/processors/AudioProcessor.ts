@@ -9,6 +9,25 @@ import { AACEncoderManager } from "../managers/AACEncoderManager";
 import { StreamManager } from "../transports/StreamManager";
 import { log } from "../../../utils";
 
+// ---------------------------------------------------------------------------
+// Silence Suppression / VAD (Voice Activity Detection)
+//
+// Uses Web Audio API AnalyserNode to measure RMS audio level in real-time.
+// When audio is below the audible threshold for a sustained period, chunks
+// are suppressed (not sent) to save bandwidth.
+//
+// - SILENCE_THRESHOLD_DB:  Below this dB level → considered silent.  -50 dB is
+//                          well below normal speech (~-30 to -10 dB).
+// - SILENCE_HOLD_MS:       After voice stops, keep sending for this long to
+//                          avoid clipping tail-end of words.
+// - KEEPALIVE_INTERVAL_MS: Send one frame periodically during silence so the
+//                          subscriber's decoder stays primed and timing stays
+//                          in sync.
+// ---------------------------------------------------------------------------
+const SILENCE_THRESHOLD_DB  = -50;
+const SILENCE_HOLD_MS       = 300;
+const KEEPALIVE_INTERVAL_MS = 5_000;
+
 /** Union type of all supported encoder managers */
 type AnyEncoderManager = AudioEncoderManager | AACEncoderManager;
 
@@ -65,6 +84,19 @@ export class AudioProcessor extends EventEmitter<{
   // Keep stream reference to prevent garbage collection
   private audioStream: MediaStream | null = null;
 
+  // ── Silence suppression (VAD) ────────────────────────────────────────
+  private _vadEnabled = false;
+  private _vadAudioCtx: AudioContext | null = null;
+  private _vadSource: MediaStreamAudioSourceNode | null = null;
+  private _vadAnalyser: AnalyserNode | null = null;
+  private _vadTimeDomain: Float32Array | null = null;
+  /** true while audio level is above threshold (or within hold period) */
+  private _isSpeaking = true;
+  /** Timestamp (ms) when voice was last detected above threshold */
+  private _lastVoiceTime = 0;
+  /** Timestamp (ms) when the last keepalive frame was sent during silence */
+  private _lastKeepaliveTime = 0;
+
   constructor(
     audioEncoderManager: AnyEncoderManager,
     streamManager: StreamManager,
@@ -115,6 +147,35 @@ export class AudioProcessor extends EventEmitter<{
       if (!this.micEnabled) {
         // log(`[AudioProcessor] ⏭️ Skipping audio chunk - mic is disabled`);
         return;
+      }
+
+      // ── Silence suppression (VAD) ──────────────────────────────────
+      if (this._vadEnabled && this._vadAnalyser) {
+        const speaking = this._detectVoice();
+        const now = performance.now();
+
+        if (speaking) {
+          this._lastVoiceTime = now;
+          if (!this._isSpeaking) {
+            this._isSpeaking = true;
+            log(`[AudioProcessor] 🎙️ Voice detected — resuming send`);
+          }
+        } else {
+          // Still within hold period → keep sending
+          if (this._isSpeaking && (now - this._lastVoiceTime > SILENCE_HOLD_MS)) {
+            this._isSpeaking = false;
+            log(`[AudioProcessor] 🔇 Silence detected — suppressing audio`);
+          }
+        }
+
+        if (!this._isSpeaking) {
+          // Send a keepalive frame periodically so subscriber stays in sync
+          if (now - this._lastKeepaliveTime < KEEPALIVE_INTERVAL_MS) {
+            return; // suppress
+          }
+          this._lastKeepaliveTime = now;
+          // log(`[AudioProcessor] 🔇 Sending keepalive frame during silence`);
+        }
       }
 
       // Check if config has been sent
@@ -223,6 +284,9 @@ The above content does NOT show the entire file contents. If you need to view an
         log("[AudioProcessor] Initial mic enabled state:", this.micEnabled);
       }
 
+      // ── Setup VAD analyser ────────────────────────────────────────
+      this._setupVAD(audioStream, audioContext);
+
       await this.audioEncoderManager.initialize(audioStream, audioContext);
 
       log("[AudioProcessor] Initialized successfully");
@@ -270,6 +334,9 @@ The above content does NOT show the entire file contents. If you need to view an
       this.isProcessing = false;
 
       await this.audioEncoderManager.stop();
+
+      // Teardown VAD
+      this._teardownVAD();
 
       // Clear stream reference
       this.audioStream = null;
@@ -364,6 +431,12 @@ The above content does NOT show the entire file contents. If you need to view an
       log(`[AudioProcessor] Audio track enabled set to: ${enabled}`);
     }
 
+    // Reset VAD state when mic is re-enabled so first frame isn't suppressed
+    if (enabled) {
+      this._isSpeaking = true;
+      this._lastVoiceTime = performance.now();
+    }
+
     log(`[AudioProcessor] Microphone ${enabled ? "enabled" : "disabled"}`);
     this.emit("micStateChanged", enabled);
   }
@@ -375,6 +448,33 @@ The above content does NOT show the entire file contents. If you need to view an
    */
   isMicEnabled(): boolean {
     return this.micEnabled;
+  }
+
+  /**
+   * Enable/disable silence suppression (VAD).
+   * When enabled, silent audio will not be sent to save bandwidth.
+   */
+  setVADEnabled(enabled: boolean): void {
+    this._vadEnabled = enabled;
+    if (enabled) {
+      this._isSpeaking = true; // assume speaking until proven otherwise
+      this._lastVoiceTime = performance.now();
+    }
+    log(`[AudioProcessor] VAD ${enabled ? "enabled" : "disabled"}`);
+  }
+
+  /**
+   * Check if VAD (silence suppression) is enabled
+   */
+  isVADEnabled(): boolean {
+    return this._vadEnabled;
+  }
+
+  /**
+   * Check if voice is currently detected
+   */
+  isSpeaking(): boolean {
+    return this._isSpeaking;
   }
 
   /**
@@ -454,5 +554,82 @@ The above content does NOT show the entire file contents. If you need to view an
    */
   getCurrentTimestamp(): number {
     return this.audioEncoderManager.getCurrentTimestamp();
+  }
+
+  // ── VAD internals ──────────────────────────────────────────────────────
+
+  /**
+   * Setup AnalyserNode for real-time audio level detection.
+   * Creates a separate AudioContext (or reuses the provided one) and connects
+   * an AnalyserNode to the mic stream.  The analyser is sampled on each
+   * audioChunk callback — no extra timer needed.
+   */
+  private _setupVAD(audioStream: MediaStream, audioContext?: AudioContext): void {
+    try {
+      const ACtor = (globalThis as any).AudioContext || (globalThis as any).webkitAudioContext;
+      if (!ACtor) {
+        log("[AudioProcessor] AudioContext not available — VAD disabled");
+        this._vadEnabled = false;
+        return;
+      }
+
+      // Reuse existing context or create a lightweight one
+      this._vadAudioCtx = audioContext ?? new ACtor({ sampleRate: 48000 });
+
+      this._vadAnalyser = this._vadAudioCtx!.createAnalyser();
+      // Small FFT for fast RMS calculation — we don't need frequency detail
+      this._vadAnalyser.fftSize = 256;
+      this._vadTimeDomain = new Float32Array(this._vadAnalyser.fftSize);
+
+      this._vadSource = this._vadAudioCtx!.createMediaStreamSource(audioStream);
+      this._vadSource.connect(this._vadAnalyser);
+      // Do NOT connect analyser to destination — we don't want to play back
+
+      this._isSpeaking = true;
+      this._lastVoiceTime = performance.now();
+      this._lastKeepaliveTime = 0;
+
+      log("[AudioProcessor] VAD analyser initialized");
+    } catch (err) {
+      console.warn("[AudioProcessor] Failed to setup VAD analyser:", err);
+      this._vadEnabled = false;
+    }
+  }
+
+  /**
+   * Teardown VAD resources.
+   */
+  private _teardownVAD(): void {
+    this._vadSource?.disconnect();
+    this._vadAnalyser?.disconnect();
+    // Only close the AudioContext if we created it ourselves
+    // (don't close if it was provided externally)
+    this._vadSource = null;
+    this._vadAnalyser = null;
+    this._vadTimeDomain = null;
+    this._vadAudioCtx = null;
+  }
+
+  /**
+   * Detect voice activity by computing RMS of the time-domain signal.
+   * Returns true if audio level is above SILENCE_THRESHOLD_DB.
+   */
+  private _detectVoice(): boolean {
+    if (!this._vadAnalyser || !this._vadTimeDomain) return true; // fail-open
+
+    this._vadAnalyser.getFloatTimeDomainData(this._vadTimeDomain);
+
+    // Compute RMS (Root Mean Square)
+    let sumSq = 0;
+    for (let i = 0; i < this._vadTimeDomain.length; i++) {
+      const v = this._vadTimeDomain[i];
+      sumSq += v * v;
+    }
+    const rms = Math.sqrt(sumSq / this._vadTimeDomain.length);
+
+    // Convert to dB (relative to full-scale 1.0)
+    const db = rms > 0 ? 20 * Math.log10(rms) : -100;
+
+    return db > SILENCE_THRESHOLD_DB;
   }
 }

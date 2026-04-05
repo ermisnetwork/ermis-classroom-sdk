@@ -23,6 +23,7 @@ interface WorkerManagerEvents extends Record<string, unknown> {
   audioToggled: { enabled: boolean };
   frameSkipped: undefined;
   frameResumed: undefined;
+  streamClosed: undefined;  // Transport layer closed — trigger reconnect
   error: { error: Error; context: string };
 }
 
@@ -552,6 +553,11 @@ export class WorkerManager extends EventEmitter<WorkerManagerEvents> {
       case "raptorq-initialized":
         log("[WorkerManager] RaptorQ WASM module initialized in worker");
         this.emit("wasmReady", undefined);
+        break;
+
+      case "stream_closed":
+        log("[WorkerManager] Transport stream closed — notifying subscriber");
+        this.emit("streamClosed", undefined);
         break;
 
       default:

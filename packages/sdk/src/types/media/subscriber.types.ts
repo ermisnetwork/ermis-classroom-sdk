@@ -104,7 +104,8 @@ export type WorkerMessageType =
   | 'audio-toggled'
   | 'skipping'
   | 'resuming'
-  | 'raptorq-initialized';
+  | 'raptorq-initialized'
+  | 'stream_closed';  // Transport layer closed — triggers auto-reconnect
 
 // Remote stream ready event data
 export interface RemoteStreamReadyEvent {

@@ -38,6 +38,7 @@ const MSG = {
   CODEC_RECEIVED: "codecReceived",
   STOP_EVENT: "stop",
   RESET_EVENT: "reset",
+  STREAM_CLOSED: "stream_closed",  // Outgoing: notify main thread that transport closed
   // External decoder worker messages
   READY: "ready",
   CONFIGURED: "configured",
@@ -673,6 +674,7 @@ function attachWebSocket(wsUrl) {
 
   ws.onclose = () => {
     proxyConsole.log(`[WebSocket] Closed!`);
+    self.postMessage({ type: MSG.STREAM_CLOSED });
   };
 
   ws.onerror = (error) => {
@@ -725,6 +727,7 @@ function attachWebRTCDataChannel(channelName, channel) {
 
   channel.onclose = () => {
     proxyConsole.log(`[WebRTC] Data channel closed: ${channelName}`);
+    self.postMessage({ type: MSG.STREAM_CLOSED });
   };
 
   channel.onerror = (error) => {
@@ -1185,6 +1188,7 @@ async function receiveUnidirectional(transport) {
     const { done, value } = await reader.read();
     if (done) {
       console.warn('[GOP] incomingUnidirectionalStreams closed');
+      self.postMessage({ type: MSG.STREAM_CLOSED });
       break;
     }
     // value is a WebTransportReceiveStream (one GOP from the node)
@@ -1332,8 +1336,13 @@ async function processIncomingMessage(message) {
         return;
       }
       // ── Subscriber downlink congestion stats ──
+      // NOTE: Client-side subscriber CC is DISABLED.
+      // Server-side congestion.rs already detects downlink congestion and does
+      // GOP-level frame dropping. Having a second CC here using the same Quinn
+      // stats creates a double-reaction feedback loop (oscillation between quality
+      // levels). Quality switching should be user-driven, not auto-congestion.
       if (json.type === SERVER_MSG.SUBSCRIBER_CONNECTION_STATS) {
-        evaluateDownlinkCongestion(json);
+        // evaluateDownlinkCongestion(json);  // disabled — server handles CC
         return;
       }
     } catch (e) {

@@ -161,8 +161,8 @@ const SUB_STREAMS = {
     width: 1280,
     height: 720,
     bitrate: 800_000,
-    framerate: 30,
-    gopSize: 30,
+    framerate: 15,
+    gopSize: 15,
     channelName: CHANNEL_NAME.CAM_720P,
   },
   CAM_1080P: {
@@ -170,8 +170,8 @@ const SUB_STREAMS = {
     width: 1920,
     height: 1080,
     bitrate: 2_500_000,
-    framerate: 30,
-    gopSize: 30,
+    framerate: 15,
+    gopSize: 15,
     channelName: CHANNEL_NAME.CAM_1080P,
   },
   CAM_1440P: {
@@ -179,8 +179,8 @@ const SUB_STREAMS = {
     width: 2560,
     height: 1440,
     bitrate: 5_000_000,
-    framerate: 30,
-    gopSize: 30,
+    framerate: 15,
+    gopSize: 15,
     channelName: CHANNEL_NAME.CAM_1440P,
   },
   SCREEN_SHARE_AUDIO: {

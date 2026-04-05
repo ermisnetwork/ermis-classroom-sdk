@@ -135,6 +135,13 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
   private maxReconnectDelay: number = TRANSPORT.MAX_RECONNECT_DELAY;
   private isReconnecting = false;
 
+  // Watchdog — safety net for edge case where transport stays open but frames stop
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private lastFrameTime = 0;  // 0 means no frame received yet
+  private isPaused = false;   // true when pauseStream() is active — suppress watchdog
+  private readonly WATCHDOG_TIMEOUT_MS = 15_000;  // 15s without frame → reconnect
+  private readonly WATCHDOG_INTERVAL_MS = 3_000;   // check every 3s
+
   constructor(config: SubscriberConfig) {
     super();
 
@@ -196,18 +203,11 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
   /**
    * Initialize all managers and processors
+   * @param skipVideoProcessor - If true, do NOT create a new VideoProcessor.
+   *   Used during soft reconnect to preserve the existing VideoProcessor
+   *   (and its alive MediaStreamTrackGenerator) so the video track stays alive.
    */
-  private initializeManagers(): void {
-    // Transport manager - only initialize for webtransport protocol
-    // For websocket protocol, connection is handled differently
-    // !! turn off unused WebTransportManager!!!
-    // if (this.protocol === 'webtransport') {
-    //   this.transportManager = new WebTransportManager(this.config.subcribeUrl);
-    // } else {
-    //   this.transportManager = null;
-    //   log(`[Subscriber] Skipping WebTransportManager initialization for protocol: ${this.protocol}`);
-    // }
-
+  private initializeManagers(skipVideoProcessor = false): void {
     // Worker manager
     this.workerManager = new WorkerManager(
       this.config.mediaWorkerUrl,
@@ -225,12 +225,12 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     // Polyfill manager
     this.polyfillManager = new PolyfillManager(this.config.mstgPolyfillUrl);
 
-    // Video processor
-    this.videoProcessor = new VideoProcessor();
-    // Enable jitter buffer for screen share — smooths bursty frame delivery
-    // if (this.subscribeType === 'screen_share') {
-    //   this.videoProcessor.enableJitterBuffer(30); // 30fps
-    // }
+    // Video processor — skip during soft reconnect to preserve existing track
+    if (!skipVideoProcessor) {
+      this.videoProcessor = new VideoProcessor();
+    }
+    // else: keep existing this.videoProcessor alive — its track stays live
+    //   and new worker frames will flow into it automatically
 
     // Audio processor
     this.audioProcessor = new AudioProcessor(
@@ -239,13 +239,17 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     );
 
     // Setup event listeners
-    this.setupManagerListeners();
+    // Pass skipVideoProcessor so we do NOT re-register videoProcessor listeners
+    // (they would accumulate: frameProcessed would fire N times per frame)
+    this.setupManagerListeners(skipVideoProcessor);
   }
 
   /**
    * Setup event listeners for all managers
+   * @param skipVideoProcessor - If true, skip adding listeners to videoProcessor
+   *   (used during soft reconnect to prevent duplicate listener accumulation)
    */
-  private setupManagerListeners(): void {
+  private setupManagerListeners(skipVideoProcessor = false): void {
     // Transport manager events
     if (this.transportManager) {
       this.transportManager.on("connected", () => {
@@ -289,10 +293,21 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       this.workerManager.on("error", ({ error }) => {
         this.handleError(error, "workerMessage");
       });
+
+      // Transport closed — trigger auto-reconnect (subscriber-side connection drop)
+      this.workerManager.on("streamClosed", () => {
+        if (this.isStarted && !this.isReconnecting) {
+          log("[Subscriber] Transport stream closed — auto-reconnecting...");
+          this.reconnect().catch(err => {
+            console.error("[Subscriber] Auto-reconnect failed:", err);
+          });
+        }
+      });
     }
 
     // Video processor events
-    if (this.videoProcessor) {
+    // Only register if we own this videoProcessor instance (i.e. not a soft-reconnect preserve)
+    if (this.videoProcessor && !skipVideoProcessor) {
       this.videoProcessor.on("initialized", ({ stream }) => {
         log("[Subscriber] VideoProcessor initialized with stream:", {
           streamId: this.config.streamId,
@@ -429,6 +444,9 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       this.isStarted = true;
       this.updateConnectionStatus("connected");
       this.emit("started", { subscriber: this });
+
+      // Start watchdog after successfully connected
+      this.startWatchdog();
     } catch (error) {
       this.updateConnectionStatus("failed");
       this.handleError(
@@ -450,6 +468,9 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
     try {
       this.emit("stopping", { subscriber: this });
+
+      // Stop watchdog
+      this.stopWatchdog();
 
       // Emit stream removal event
       if (this.mediaStream) {
@@ -568,8 +589,10 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
     }
 
     try {
+      this.isPaused = true;  // Suspend watchdog — no frames expected while paused
       this.workerManager.pauseStream();
     } catch (error) {
+      this.isPaused = false;
       this.handleError(
         error instanceof Error ? error : new Error("Pause stream failed"),
         "stop"
@@ -587,6 +610,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
     try {
       this.workerManager.resumeStream();
+      this.isPaused = false;
+      this.lastFrameTime = Date.now();  // Reset baseline so watchdog doesn't fire immediately
     } catch (error) {
       this.handleError(
         error instanceof Error ? error : new Error("Resume stream failed"),
@@ -820,6 +845,8 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
    */
   private async handleVideoFrame(frame: VideoFrame): Promise<void> {
     if (this.videoProcessor) {
+      // Update watchdog timestamp on every received frame
+      this.lastFrameTime = Date.now();
       await this.videoProcessor.writeFrame(frame);
       this.emit("videoFrameProcessed", { subscriber: this });
     }
@@ -843,6 +870,76 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
 
     globalEventBus.emit(GlobalEvents.REMOTE_STREAM_READY, eventData);
     log("[Subscriber] ✅ REMOTE_STREAM_READY emitted successfully");
+  }
+
+  /**
+   * Soft cleanup — only kills transport/worker layer, preserves videoProcessor.
+   * This keeps the MediaStreamTrackGenerator alive so the video element
+   * shows the last frame (freeze) instead of going black during reconnect.
+   */
+  private softCleanup(): void {
+    // Stop watchdog
+    this.stopWatchdog();
+    this.lastFrameTime = 0;
+
+    // Kill worker (stops sending frames — video naturally freezes on last frame)
+    if (this.workerManager) {
+      this.workerManager.terminate();
+      this.workerManager = null;
+    }
+
+    // Kill audio processor
+    if (this.audioProcessor) {
+      this.audioProcessor.cleanup();
+      this.audioProcessor = null;
+    }
+
+    // Kill transport manager
+    if (this.transportManager) {
+      this.transportManager.disconnect();
+      this.transportManager = null;
+    }
+
+    // Polyfill manager can be re-used
+    this.polyfillManager = null;
+
+    // ✅ videoProcessor intentionally kept alive — last frame stays visible
+    // Reset pause state — reconnect starts fresh regardless
+    this.isPaused = false;
+
+    log("[Subscriber] softCleanup() done — videoProcessor preserved");
+  }
+
+  /**
+   * Start watchdog timer — safety net for edge cases where transport stays
+   * open but frames stop arriving (e.g. server-side issue).
+   * Fires reconnect if no frame received within WATCHDOG_TIMEOUT_MS.
+   * Does NOT fire while stream is intentionally paused.
+   */
+  private startWatchdog(): void {
+    this.stopWatchdog(); // clear any existing
+    this.lastFrameTime = Date.now(); // treat connect time as baseline
+    this.watchdogTimer = setInterval(() => {
+      // Skip if not active, already reconnecting, no baseline, or intentionally paused
+      if (!this.isStarted || this.isReconnecting || this.lastFrameTime === 0 || this.isPaused) return;
+      const elapsed = Date.now() - this.lastFrameTime;
+      if (elapsed > this.WATCHDOG_TIMEOUT_MS) {
+        log(`[Subscriber] ⏱ Watchdog: no frame for ${elapsed}ms — auto-reconnecting...`);
+        this.reconnect().catch(err => {
+          console.error("[Subscriber] Watchdog auto-reconnect failed:", err);
+        });
+      }
+    }, this.WATCHDOG_INTERVAL_MS);
+  }
+
+  /**
+   * Stop watchdog timer
+   */
+  private stopWatchdog(): void {
+    if (this.watchdogTimer !== null) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
   }
 
   /**
@@ -1004,16 +1101,19 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       return;
     }
 
-    log("[Subscriber] 🔄 Starting reconnection process...");
+    log("[Subscriber] 🔄 Starting soft reconnection (preserving video track)...");
     this.isReconnecting = true;
     this.reconnectAttempts = 0;
 
     try {
-      // Cleanup existing connections but preserve config
-      this.cleanup();
+      // Soft cleanup: kill transport/worker only, keep videoProcessor alive
+      // → video element shows last frame (freeze) instead of going black
+      this.softCleanup();
 
-      // Re-initialize managers
-      this.initializeManagers();
+      // Re-initialize managers — pass skipVideoProcessor=true to preserve
+      // the existing VideoProcessor and its alive MediaStreamTrackGenerator.
+      // New worker frames will flow into the same track automatically.
+      this.initializeManagers(/* skipVideoProcessor= */ true);
 
       // Create a new message channel for worker communication
       const channel = new MessageChannel();
@@ -1037,10 +1137,9 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
         );
       }
 
-      // Initialize video system
-      if (this.videoProcessor) {
-        this.videoProcessor.init();
-      }
+      // ❌ Do NOT call videoProcessor.init() — it's still alive and writing to
+      // the same MediaStreamTrackGenerator. New frames from the new worker will
+      // flow into it automatically, resuming the video without any visible cut.
 
       // Attach streams with retry
       await this.attachStreamsWithRetry();
@@ -1048,9 +1147,12 @@ export class Subscriber extends EventEmitter<SubscriberEvents> {
       this.isStarted = true;
       this.updateConnectionStatus("connected");
 
+      // Restart watchdog
+      this.startWatchdog();
+
       this.emit("reconnected", { subscriber: this });
       globalEventBus.emit(GlobalEvents.SUBSCRIBER_RECONNECTED, { streamId: this.config.streamId });
-      log("[Subscriber] ✅ Reconnection completed successfully");
+      log("[Subscriber] ✅ Soft reconnection completed — video resumes on same track");
     } catch (error) {
       console.error("[Subscriber] ❌ Reconnection failed:", error);
       this.updateConnectionStatus("failed");
