@@ -13,7 +13,7 @@ export interface CopySDKFilesOptions {
   publicDir?: string;
   /**
    * Directories to copy from SDK
-   * @default ['workers', 'raptorQ', 'polyfills', 'opus_decoder']
+   * @default ['workers', 'raptorQ', 'wirehair', 'polyfills', 'opus_decoder']
    */
   directories?: string[];
 }

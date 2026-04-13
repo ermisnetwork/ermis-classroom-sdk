@@ -16,6 +16,7 @@
     },
     "./workers/*": "./src/workers/*",
     "./raptorQ/*": "./src/raptorQ/*",
+    "./wirehair/*": "./src/wirehair/*",
     "./polyfills/*": "./src/polyfills/*",
     "./opus_decoder/*": "./src/opus_decoder/*",
     "./codec-polyfill/*": "./src/codec-polyfill/*"
@@ -27,6 +28,7 @@
     "dist",
     "src/workers",
     "src/raptorQ",
+    "src/wirehair",
     "src/polyfills",
     "src/opus_decoder",
     "src/codec-polyfill",

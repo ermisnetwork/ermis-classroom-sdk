@@ -1127,7 +1127,7 @@ export class StreamManager extends EventEmitter<{
       const view = new DataView(packet.buffer, packet.byteOffset, packet.byteLength);
       const sequenceNumber = view.getUint32(0, false);
 
-      const needFecEncode = frameType !== FrameType.EVENT && frameType !== FrameType.AUDIO;
+      const needFecEncode = frameType !== FrameType.EVENT && frameType !== FrameType.AUDIO && frameType !== FrameType.PUBLISHER_COMMAND;
 
       const transportPacketType = FrameTypeHelper.getTransportPacketType(frameType);
 

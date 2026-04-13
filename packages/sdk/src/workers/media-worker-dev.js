@@ -1,133 +1,133 @@
-import { OpusAudioDecoder } from "../opus_decoder/opusDecoder.js";
-import "../polyfills/audioData.js";
-import "../polyfills/encodedAudioChunk.js";
-import { CHANNEL_NAME, STREAM_TYPE, CHUNK_TYPE, FRAME_TYPE } from "./publisherConstants.js";
-import { H264Decoder, isNativeH264DecoderSupported } from "../codec-polyfill/video-codec-polyfill.js";
-import { AACDecoder } from "../codec-polyfill/audio-codec-polyfill.js";
+import { OpusAudioDecoder } from '../opus_decoder/opusDecoder.js';
+import '../polyfills/audioData.js';
+import '../polyfills/encodedAudioChunk.js';
+import { CHANNEL_NAME, STREAM_TYPE, CHUNK_TYPE, FRAME_TYPE } from './publisherConstants.js';
+import {
+  H264Decoder,
+  isNativeH264DecoderSupported,
+} from '../codec-polyfill/video-codec-polyfill.js';
+import { AACDecoder } from '../codec-polyfill/audio-codec-polyfill.js';
 import raptorqInit, { WasmFecManager } from '../raptorQ/raptorq_wasm.js';
+import wirehairInit, { WasmSwReceiver } from '../wirehair/wirehair_wasm.js';
 
-import CommandSender from "./ClientCommand.js";
+import CommandSender from './ClientCommand.js';
+
+// ── FEC mode ───────────────────────────────────────────────────────────────
+// Switch between FEC engines. Only one is loaded at runtime.
+//   'wirehair'  → Sliding-window FEC (new)
+//   'raptorq'   → Per-frame RaptorQ FEC (legacy)
+const FEC_MODE = 'wirehair';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 // All magic strings/numbers extracted here for maintainability.
 
 // Message types (self.onmessage & postMessage)
 const MSG = {
-  INIT: "init",
-  ATTACH_WEB_SOCKET: "attachWebSocket",
-  ATTACH_WEB_TRANSPORT_URL: "attachWebTransportUrl",
-  ATTACH_STREAM: "attachStream",
-  ATTACH_DATA_CHANNEL: "attachDataChannel",
-  TOGGLE_AUDIO: "toggleAudio",
-  SWITCH_BITRATE: "switchBitrate",
-  START_STREAM: "startStream",
-  STOP_STREAM: "stopStream",
-  PAUSE_STREAM: "pauseStream",
-  RESUME_STREAM: "resumeStream",
-  RESET: "reset",
-  STOP: "stop",
+  INIT: 'init',
+  ATTACH_WEB_SOCKET: 'attachWebSocket',
+  ATTACH_WEB_TRANSPORT_URL: 'attachWebTransportUrl',
+  ATTACH_STREAM: 'attachStream',
+  ATTACH_DATA_CHANNEL: 'attachDataChannel',
+  TOGGLE_AUDIO: 'toggleAudio',
+  SWITCH_BITRATE: 'switchBitrate',
+  START_STREAM: 'startStream',
+  STOP_STREAM: 'stopStream',
+  PAUSE_STREAM: 'pauseStream',
+  RESUME_STREAM: 'resumeStream',
+  RESET: 'reset',
+  STOP: 'stop',
   // Outgoing
-  VIDEO_DATA: "videoData",
-  AUDIO_DATA: "audioData",
-  AUDIO_TOGGLED: "audio-toggled",
-  BITRATE_CHANGED: "bitrateChanged",
-  ERROR: "error",
-  LOG: "log",
-  CONGESTION_LEVEL: "congestionLevel",
-  RAPTORQ_INITIALIZED: "raptorq-initialized",
-  CODEC_RECEIVED: "codecReceived",
-  STOP_EVENT: "stop",
-  RESET_EVENT: "reset",
-  STREAM_CLOSED: "stream_closed",  // Outgoing: notify main thread that transport closed
+  VIDEO_DATA: 'videoData',
+  AUDIO_DATA: 'audioData',
+  AUDIO_TOGGLED: 'audio-toggled',
+  BITRATE_CHANGED: 'bitrateChanged',
+  ERROR: 'error',
+  LOG: 'log',
+  CONGESTION_LEVEL: 'congestionLevel',
+  RAPTORQ_INITIALIZED: 'raptorq-initialized',
+  CODEC_RECEIVED: 'codecReceived',
+  STOP_EVENT: 'stop',
+  RESET_EVENT: 'reset',
+  STREAM_CLOSED: 'stream_closed', // Outgoing: notify main thread that transport closed
   // External decoder worker messages
-  READY: "ready",
-  CONFIGURED: "configured",
-  CONFIGURE: "configure",
-  DECODE: "decode",
-  RESET_ALL: "resetAll",
-  CONFIGURE_DECODER: "configureDecoder",
+  READY: 'ready',
+  CONFIGURED: 'configured',
+  CONFIGURE: 'configure',
+  DECODE: 'decode',
+  RESET_ALL: 'resetAll',
+  CONFIGURE_DECODER: 'configureDecoder',
 };
 
 // JSON message types from server
 const SERVER_MSG = {
-  DECODER_CONFIGS: "DecoderConfigs",
-  STREAM_CONFIG: "StreamConfig",
-  SUBSCRIBER_CONNECTION_STATS: "subscriber_connection_stats",
+  DECODER_CONFIGS: 'DecoderConfigs',
+  STREAM_CONFIG: 'StreamConfig',
+  SUBSCRIBER_CONNECTION_STATS: 'subscriber_connection_stats',
 };
 
 // Protocol identifiers
 const PROTOCOL = {
-  WEBRTC: "webrtc",
-  WEBSOCKET: "websocket",
-  WEBTRANSPORT: "webtransport",
+  WEBRTC: 'webrtc',
+  WEBSOCKET: 'websocket',
+  WEBTRANSPORT: 'webtransport',
 };
 
 // Command types
 const COMMAND_TYPE = {
-  SUBSCRIBER: "subscriber_command",
+  SUBSCRIBER: 'subscriber_command',
 };
 
 // Codec identifiers
 const CODEC = {
-  AAC: "mp4a.40.2",
-  H264_BASELINE: "avc1.42001f",
+  AAC: 'mp4a.40.2',
+  H264_BASELINE: 'avc1.42001f',
 };
 
 // Audio format constants
 const AUDIO_FORMAT = {
-  F32_PLANAR: "f32-planar",
+  F32_PLANAR: 'f32-planar',
   SAMPLE_RATE_48K: 48000,
   MONO_CHANNELS: 1,
 };
 
 // Video frame format
 const VIDEO_FORMAT = {
-  YUV420: "yuv420",
+  YUV420: 'yuv420',
 };
 
 // Media types in stream config
 const MEDIA_TYPE = {
-  VIDEO: "video",
-  AUDIO: "audio",
+  VIDEO: 'video',
+  AUDIO: 'audio',
 };
 
 // Decoder states (WebCodecs API)
 const DECODER_STATE = {
-  CLOSED: "closed",
-  UNCONFIGURED: "unconfigured",
+  CLOSED: 'closed',
+  UNCONFIGURED: 'unconfigured',
 };
 
 // Binary protocol sizes (bytes)
 const BINARY = {
-  JSON_OPEN_BRACE: 0x7B,            // '{' — used to detect JSON vs binary
-  FEC_FLAG: 0xff,                    // FEC packet marker
-  MEDIA_HEADER_SIZE: 9,              // seq(4) + ts(4) + frameType(1)
-  GOP_FRAME_HEADER_SIZE: 13,         // seq(4) + ts(4) + frameType(1) + payloadSize(4)
-  WEBRTC_HEADER_SIZE: 6,             // seq(4) + fec(1) + type(1)
-  LENGTH_PREFIX_SIZE: 4,             // big-endian u32 length prefix
-  STREAM_ID_LEN_SIZE: 2,             // big-endian u16 stream-id length
-  GOP_META_EXTRA: 7,                 // channel(1) + gopId(4) + expected(2)
+  JSON_OPEN_BRACE: 0x7b, // '{' — used to detect JSON vs binary
+  FEC_FLAG: 0xff, // FEC packet marker
+  MEDIA_HEADER_SIZE: 9, // seq(4) + ts(4) + frameType(1)
+  GOP_FRAME_HEADER_SIZE: 13, // seq(4) + ts(4) + frameType(1) + payloadSize(4)
+  WEBRTC_HEADER_SIZE: 6, // seq(4) + fec(1) + type(1)
+  LENGTH_PREFIX_SIZE: 4, // big-endian u32 length prefix
+  STREAM_ID_LEN_SIZE: 2, // big-endian u16 stream-id length
+  GOP_META_EXTRA: 7, // channel(1) + gopId(4) + expected(2)
 };
 
 // Guard limits
 const LIMITS = {
-  MAX_PAYLOAD_BYTES: 10_000_000,     // 10 MB — implausible frame guard
+  MAX_PAYLOAD_BYTES: 10_000_000, // 10 MB — implausible frame guard
   MAX_BUFFER_BYTES: 5 * 1024 * 1024, // 5 MB — LengthDelimitedReader overflow
-  DECODER_READY_TIMEOUT_MS: 5000,    // waitForReady() timeout
+  DECODER_READY_TIMEOUT_MS: 5000, // waitForReady() timeout
 };
 
 // Timestamp conversion
 const TIMESTAMP_US_PER_MS = 1000;
-
-// Congestion level indices
-const CONGESTION_LEVEL = {
-  NORMAL: 0,
-  MILD: 1,
-  MODERATE: 2,
-  SEVERE: 3,
-};
-
-const CONGESTION_LEVEL_NAMES = ['NORMAL', 'MILD', 'MODERATE', 'SEVERE'];
 
 // GOP channel byte → CHANNEL_NAME mapping (MeetingChannel::to_u8() on server)
 const GOP_CHANNEL_BYTE = {
@@ -140,15 +140,15 @@ const GOP_CHANNEL_BYTE = {
 
 // WebRTC DataChannel name prefixes for command routing
 const DC_PREFIX = {
-  VIDEO: "video_",
-  SCREEN_SHARE: "screen_share_",
-  AUDIO: "audio",
+  VIDEO: 'video_',
+  SCREEN_SHARE: 'screen_share_',
+  AUDIO: 'audio',
 };
 
 // Bitrate switch inline command strings
 const BITRATE_CMD = {
-  PAUSE: "pause",
-  RESUME: "resume",
+  PAUSE: 'pause',
+  RESUME: 'resume',
 };
 
 // ── End Constants ──────────────────────────────────────────────────────────
@@ -217,109 +217,8 @@ let protocol = null;
 // WebSocket specific
 let isWebSocket = false;
 
-// ── Downlink Congestion Controller (subscriber side) ──
-// Uses server-sent Quinn stats (server→client path) for quality adaptation.
-//
-// Detection: loss-based only (per GCC / RFC 9002 standards).
-// RTT ratio was removed — it is not a standard signal and produces false
-// positives on low-latency links (e.g. baseRtt=6ms, jitter→20ms = ratio 3x
-// but 0% loss = no congestion). The server-side already does proper BWE-based
-// CC via cwnd/rtt; the client only needs loss for quality ladder decisions.
-//
-// GCC reference thresholds:
-//   >10% loss → reduce (SEVERE)
-//   >5%  loss → moderate degradation
-//   >2%  loss → mild degradation (hold/don't increase)
-//   ≤2%  loss → normal (can increase quality)
-const QUALITY_LADDER = [CHANNEL_NAME.CAM_360P, CHANNEL_NAME.CAM_720P, CHANNEL_NAME.CAM_1080P, CHANNEL_NAME.CAM_1440P];
-let _dlPrevLostPackets = 0;
-let _dlPrevSentPackets = 0;
-let _dlLevel = CONGESTION_LEVEL.NORMAL;
-let _dlRecoveryStartTime = 0;
-const DL_RECOVERY_HOLD_MS = 8000; // 8s hold before upgrading quality
-
-// Loss rate thresholds (per GCC standard)
-const DL_LOSS_MILD = 0.02;     // 2% — hold / don't increase
-const DL_LOSS_MODERATE = 0.05; // 5% — reduce quality
-const DL_LOSS_SEVERE = 0.10;   // 10% — heavy reduction
-
-function evaluateDownlinkCongestion(stats) {
-  // Compute loss rate since last interval
-  const sentDelta = stats.sent_packets - _dlPrevSentPackets;
-  const lostDelta = stats.lost_packets - _dlPrevLostPackets;
-  _dlPrevSentPackets = stats.sent_packets;
-  _dlPrevLostPackets = stats.lost_packets;
-  const lossRate = sentDelta > 0 ? lostDelta / sentDelta : 0;
-
-  // Determine target level (loss-based, per GCC)
-  let target = CONGESTION_LEVEL.NORMAL;
-  if (lossRate >= DL_LOSS_SEVERE) {
-    target = CONGESTION_LEVEL.SEVERE;
-  } else if (lossRate >= DL_LOSS_MODERATE) {
-    target = CONGESTION_LEVEL.MODERATE;
-  } else if (lossRate >= DL_LOSS_MILD) {
-    target = CONGESTION_LEVEL.MILD;
-  }
-
-  const prevLevel = _dlLevel;
-
-  // Degrade immediately
-  if (target > _dlLevel) {
-    _dlLevel = target;
-    _dlRecoveryStartTime = 0;
-    applyDownlinkQuality();
-  }
-  // Recover with hold timer (one step at a time)
-  else if (target < _dlLevel) {
-    if (_dlRecoveryStartTime === 0) {
-      _dlRecoveryStartTime = performance.now();
-    } else if (performance.now() - _dlRecoveryStartTime >= DL_RECOVERY_HOLD_MS) {
-      _dlLevel = Math.max(CONGESTION_LEVEL.NORMAL, _dlLevel - 1);
-      _dlRecoveryStartTime = 0;
-      applyDownlinkQuality();
-    }
-  } else {
-    _dlRecoveryStartTime = 0;
-  }
-
-  // Debug log + forward to audio worklet
-  if (_dlLevel !== prevLevel) {
-    console.warn(
-      `[DownlinkCongestion] ${CONGESTION_LEVEL_NAMES[prevLevel]} → ${CONGESTION_LEVEL_NAMES[_dlLevel]}` +
-      `  (rtt=${stats.rtt_ms.toFixed(1)}ms, loss=${(lossRate*100).toFixed(1)}%)`
-    );
-
-    if (workletPort) {
-      workletPort.postMessage({ type: MSG.CONGESTION_LEVEL, data: _dlLevel });
-    }
-    if (audioDecoderPort) {
-      audioDecoderPort.postMessage({ type: MSG.CONGESTION_LEVEL, data: _dlLevel });
-    }
-  }
-}
-
-function applyDownlinkQuality() {
-  // Only applies to camera subscriptions (screen share has fixed quality)
-  if (subscribeType !== STREAM_TYPE.CAMERA) return;
-
-  const currentIdx = QUALITY_LADDER.indexOf(currentVideoChannel);
-  if (currentIdx === -1) return;
-
-  // Map congestion level to max quality index
-  // NORMAL=3(1440p), MILD=2(1080p), MODERATE=1(720p), SEVERE=0(360p)
-  const maxIdx = Math.max(0, QUALITY_LADDER.length - 1 - _dlLevel);
-  const targetIdx = Math.min(currentIdx, maxIdx);
-
-  if (targetIdx !== currentIdx) {
-    const targetQuality = QUALITY_LADDER[targetIdx];
-    console.warn(`[DownlinkCongestion] Switching quality: ${currentVideoChannel} → ${targetQuality}`);
-    handleBitrateSwitch(targetQuality);
-  }
-}
-
 /** @type {WasmFecManager|null} Single shared FEC manager for all channels */
 let fecManager = null;
-
 function getOrCreateFecManager() {
   if (!fecManager) {
     fecManager = new WasmFecManager();
@@ -329,19 +228,159 @@ function getOrCreateFecManager() {
 
 async function initRaptorQWasm() {
   // Load RaptorQ WASM from local path (served via Service Worker cache)
-  const wasmUrl = "../raptorQ/raptorq_wasm_bg.wasm";
+  const wasmUrl = '../raptorQ/raptorq_wasm_bg.wasm';
   await raptorqInit(wasmUrl);
 }
 
+// ── Wirehair sliding-window FEC ──────────────────────────────────────────
+
+/** @type {Map<string, WasmSwReceiver>} Per-channel Wirehair FEC receivers */
+const wirehairReceivers = new Map();
+/** @type {boolean} */
+let wirehairReady = false;
+
+const WIREHAIR_MAGIC_W = 0x57; // 'W'
+const WIREHAIR_MAGIC_H = 0x48; // 'H'
+const WIREHAIR_LOG_FIRST_N = 10;
+const wirehairLogCounter = new Map(); // channelName -> packet count
+const binaryHeaderLogCounter = new Map(); // frameType -> count
+let unknownFrameTypeLogCount = 0;
+const recoveryWarnCounter = new Map(); // channelName -> count
+const ENABLE_BINARY_HEADER_DEBUG_LOG = false;
+const ENABLE_WIREHAIR_DEBUG_LOG = false;
+const ENABLE_GOP_DEBUG_LOG = false;
+const wirehairErrorInspectCounter = new Map(); // channelName -> count
+
+async function initWirehairWasm() {
+  const wasmUrl = '../wirehair/wirehair_wasm_bg.wasm';
+  await wirehairInit(wasmUrl);
+  wirehairReady = true;
+}
+
+function getOrCreateWirehairReceiver(channelName) {
+  let receiver = wirehairReceivers.get(channelName);
+  if (!receiver) {
+    receiver = createWirehairReceiver(channelName);
+    wirehairReceivers.set(channelName, receiver);
+  }
+  return receiver;
+}
+
+function createWirehairReceiver(channelName) {
+  const isAudio = channelName.includes('mic') || channelName.includes('audio');
+  const isCamera = channelName.includes('cam');
+
+  let symbolBytes;
+  let historySymbols;
+  let maxPending;
+
+  if (isAudio) {
+    symbolBytes = 400;
+    historySymbols = 32;
+    maxPending = 8;
+  } else if (isCamera) {
+    symbolBytes = 800;
+    historySymbols = 64;
+    maxPending = 32;
+  } else {
+    symbolBytes = 1200;
+    historySymbols = 128;
+    maxPending = 64;
+  }
+
+  return new WasmSwReceiver(0, symbolBytes, historySymbols, maxPending);
+}
+
+function resetWirehairReceiver(channelName) {
+  wirehairReceivers.set(channelName, createWirehairReceiver(channelName));
+}
+
+function resetWirehairState() {
+  wirehairReceivers.clear();
+  wirehairLogCounter.clear();
+  wirehairErrorInspectCounter.clear();
+}
+
+function shouldLogWirehair(channelName) {
+  if (!ENABLE_WIREHAIR_DEBUG_LOG) return false;
+  const count = (wirehairLogCounter.get(channelName) || 0) + 1;
+  wirehairLogCounter.set(channelName, count);
+  return count <= WIREHAIR_LOG_FIRST_N;
+}
+
+function shouldLogBinaryHeader(frameType) {
+  const count = (binaryHeaderLogCounter.get(frameType) || 0) + 1;
+  binaryHeaderLogCounter.set(frameType, count);
+  return count <= 10;
+}
+
+function shouldLogUnknownFrameType(_frameType) {
+  if (unknownFrameTypeLogCount >= 3) return false;
+  unknownFrameTypeLogCount += 1;
+  return true;
+}
+
+function shouldLogRecoveryWarn(channelName) {
+  const count = (recoveryWarnCounter.get(channelName) || 0) + 1;
+  recoveryWarnCounter.set(channelName, count);
+  return count <= 3;
+}
+
+function shouldInspectWirehairError(channelName) {
+  const count = (wirehairErrorInspectCounter.get(channelName) || 0) + 1;
+  wirehairErrorInspectCounter.set(channelName, count);
+  return count <= 5;
+}
+
+function inspectWirehairPacket(packet) {
+  const len = packet?.byteLength || 0;
+  if (!packet || len < 8) {
+    return { len, reason: 'too_short_for_common_header' };
+  }
+  const view = new DataView(packet.buffer, packet.byteOffset, packet.byteLength);
+  const magic0 = view.getUint8(0);
+  const magic1 = view.getUint8(1);
+  const version = view.getUint8(2);
+  const kind = view.getUint8(3); // 0=source, 1=repair
+  const streamId = view.getUint32(4, true); // little-endian
+  const hasMagic = magic0 === WIREHAIR_MAGIC_W && magic1 === WIREHAIR_MAGIC_H;
+
+  const base = { len, hasMagic, magic: [magic0, magic1], version, kind, streamId };
+  if (kind === 0) {
+    if (len < 18) return { ...base, reason: 'too_short_for_source_header' };
+    const payloadLen = view.getUint16(16, true);
+    return { ...base, payloadLen, expectedPacketLen: 18 + payloadLen };
+  }
+  if (kind === 1) {
+    if (len < 22) return { ...base, reason: 'too_short_for_repair_header' };
+    const windowSymbols = view.getUint16(16, true);
+    const blockId = view.getUint32(18, true);
+    return { ...base, windowSymbols, blockId, repairPayloadLen: len - 22 };
+  }
+  return { ...base, reason: 'unknown_kind' };
+}
+
+function getWirehairSourceSequence(packet) {
+  if (!packet || packet.byteLength < 18) return null;
+  const view = new DataView(packet.buffer, packet.byteOffset, packet.byteLength);
+  const magic0 = view.getUint8(0);
+  const magic1 = view.getUint8(1);
+  const kind = view.getUint8(3);
+  if (magic0 !== WIREHAIR_MAGIC_W || magic1 !== WIREHAIR_MAGIC_H || kind !== 0) return null;
+  const lo = view.getUint32(8, true);
+  const hi = view.getUint32(12, true);
+  return hi * 4294967296 + lo;
+}
+
 const proxyConsole = {
-  log: () => { },
-  error: () => { },
-  warn: () => { },
-  debug: () => { },
-  info: () => { },
-  trace: () => { },
-  group: () => { },
-  groupEnd: () => { },
+  log: () => {},
+  error: () => {},
+  warn: () => {},
+  debug: () => {},
+  info: () => {},
+  trace: () => {},
+  group: () => {},
+  groupEnd: () => {},
 };
 
 /**
@@ -392,7 +431,7 @@ async function createVideoDecoderWithFallback(channelName) {
       return new VideoDecoder(createVideoInit(channelName));
     }
   } catch (e) {
-    proxyConsole.warn("Native VideoDecoder not available, using polyfill");
+    proxyConsole.warn('Native VideoDecoder not available, using polyfill');
   }
   // console.log(`[VideoDecoder] 🔧 Using WASM decoder (tinyh264) for ${channelName}`);
   return createPolyfillDecoder(channelName);
@@ -412,30 +451,34 @@ const createVideoInit = (channelName) => ({
       } catch (postMessageError) {
         // Transfer failed (can happen on Safari 15) — must close frame to free GPU memory
         console.error('[Worker] VideoFrame transfer FAILED, closing frame:', postMessageError);
-        try { frame.close(); } catch { /* ignore */ }
+        try {
+          frame.close();
+        } catch {
+          /* ignore */
+        }
       }
-    } 
+    }
     // WASM decoder outputs YUV frame object - send YUV directly for WebGL rendering
     else if (frame && frame.yPlane && frame.uPlane && frame.vPlane) {
       // Copy YUV planes for transfer (original data may be reused by decoder)
       const yPlane = new Uint8Array(frame.yPlane);
       const uPlane = new Uint8Array(frame.uPlane);
       const vPlane = new Uint8Array(frame.vPlane);
-      
+
       try {
         // NOTE: Don't use transferables on iOS 15 - it can silently fail
         // Just copy the data instead (slightly slower but more compatible)
-        self.postMessage({ 
-          type: MSG.VIDEO_DATA, 
-          frame: { 
+        self.postMessage({
+          type: MSG.VIDEO_DATA,
+          frame: {
             format: VIDEO_FORMAT.YUV420,
             yPlane: yPlane,
             uPlane: uPlane,
             vPlane: vPlane,
-            width: frame.width, 
-            height: frame.height 
+            width: frame.width,
+            height: frame.height,
           },
-          quality: channelName 
+          quality: channelName,
         });
       } catch (postMessageError) {
         console.error('[Worker] postMessage FAILED:', postMessageError);
@@ -454,7 +497,11 @@ const createVideoInit = (channelName) => ({
     });
     // Attempt to recover by resetting keyframe flag - next keyframe will reinitialize decoder
     setKeyFrameReceived(channelName, false);
-    proxyConsole.warn(`[Recovery] Reset keyframe flag for ${channelName} decoder, waiting for next keyframe`);
+    if (shouldLogRecoveryWarn(channelName)) {
+      proxyConsole.warn(
+        `[Recovery] Reset keyframe flag for ${channelName} decoder, waiting for next keyframe`,
+      );
+    }
   },
 });
 
@@ -465,8 +512,8 @@ const audioInit = {
     // and this callback is NOT used.
     try {
       const channelData = [];
-   
-      // if mono, duplicate to create stereo  
+
+      // if mono, duplicate to create stereo
       if (audioData.numberOfChannels === AUDIO_FORMAT.MONO_CHANNELS) {
         const monoChannel = new Float32Array(audioData.numberOfFrames);
         audioData.copyTo(monoChannel, { planeIndex: 0, format: AUDIO_FORMAT.F32_PLANAR });
@@ -498,7 +545,11 @@ const audioInit = {
       }
     } finally {
       // Must always close AudioData to release underlying memory (Safari 15 critical)
-      try { audioData.close(); } catch { /* ignore */ }
+      try {
+        audioData.close();
+      } catch {
+        /* ignore */
+      }
     }
   },
   error: (e) => {
@@ -511,13 +562,29 @@ const audioInit = {
 // ------------------------------
 
 self.onmessage = async function (e) {
-  const { type, port, quality, readable, writable, channelName, dataChannel, wsUrl, localStreamId } = e.data;
+  const {
+    type,
+    port,
+    quality,
+    readable,
+    writable,
+    channelName,
+    dataChannel,
+    wsUrl,
+    localStreamId,
+  } = e.data;
 
   switch (type) {
     case MSG.INIT:
+      resetWirehairState();
       protocol = e.data.protocol;
       if (protocol === PROTOCOL.WEBRTC) {
-        await initRaptorQWasm();
+        if (FEC_MODE === 'wirehair') {
+          console.log('[Worker] Init with wirehair wasm');
+          await initWirehairWasm();
+        } else {
+          await initRaptorQWasm();
+        }
         this.postMessage({ type: MSG.RAPTORQ_INITIALIZED });
       }
       if (e.data.enableLogging) {
@@ -543,7 +610,9 @@ self.onmessage = async function (e) {
       if (videoDecoderPort) {
         setupVideoDecoderPort(videoDecoderPort);
       }
-      proxyConsole.log(`[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}, initialQuality=${initialQuality}, audioDecoderPort=${!!audioDecoderPort}`);
+      proxyConsole.log(
+        `[Worker] Init with subscribeType=${subscribeType}, audioEnabled=${subscriptionAudioEnabled}, initialQuality=${initialQuality}, audioDecoderPort=${!!audioDecoderPort}`,
+      );
       try {
         await initializeDecoders();
         proxyConsole.log(`[Worker] Decoders initialized successfully`);
@@ -586,6 +655,7 @@ self.onmessage = async function (e) {
 
     case MSG.ATTACH_STREAM:
       if (readable && writable) {
+        resetWirehairState();
         commandSender = new CommandSender({
           localStreamId,
           sendDataFn: sendOverStream,
@@ -622,7 +692,7 @@ self.onmessage = async function (e) {
     case MSG.SWITCH_BITRATE:
       handleBitrateSwitch(quality);
       break;
-    
+
     case MSG.START_STREAM:
       if (commandSender) commandSender.startStream();
       break;
@@ -655,7 +725,7 @@ self.onmessage = async function (e) {
 function attachWebSocket(wsUrl) {
   const ws = new WebSocket(wsUrl);
 
-  ws.binaryType = "arraybuffer";
+  ws.binaryType = 'arraybuffer';
 
   webSocketConnection = ws;
 
@@ -666,7 +736,11 @@ function attachWebSocket(wsUrl) {
       video: true,
       initialQuality: initialQuality,
     };
-    console.warn(`[Worker] 🔊 WebSocket subscribe options:`, JSON.stringify(options), `subscribeType=${subscribeType}, subscriptionAudioEnabled=${subscriptionAudioEnabled}`);
+    console.warn(
+      `[Worker] 🔊 WebSocket subscribe options:`,
+      JSON.stringify(options),
+      `subscribeType=${subscribeType}, subscriptionAudioEnabled=${subscriptionAudioEnabled}`,
+    );
     commandSender.initSubscribeChannelStream(subscribeType, options);
 
     commandSender.startStream();
@@ -704,7 +778,7 @@ function attachWebRTCDataChannel(channelName, channel) {
   webRtcDataChannels.set(channelName, channel);
 
   try {
-    channel.binaryType = "arraybuffer";
+    channel.binaryType = 'arraybuffer';
   } catch (e) {
     // Safari 15: binaryType may already be set before transfer or
     // setting it on a transferred channel may throw TypeMismatchError.
@@ -750,7 +824,11 @@ function attachWebRTCDataChannel(channelName, channel) {
 async function sendOverDataChannel(json) {
   // Send to all video/screen-share DataChannels (pause/resume affects video)
   for (const [name, channel] of webRtcDataChannels) {
-    if ((name.startsWith(DC_PREFIX.VIDEO) || (name.startsWith(DC_PREFIX.SCREEN_SHARE) && !name.includes(DC_PREFIX.AUDIO))) && channel.readyState === 'open') {
+    if (
+      (name.startsWith(DC_PREFIX.VIDEO) ||
+        (name.startsWith(DC_PREFIX.SCREEN_SHARE) && !name.includes(DC_PREFIX.AUDIO))) &&
+      channel.readyState === 'open'
+    ) {
       try {
         channel.send(json);
         proxyConsole.warn(`[WebRTC] Sent command to ${name}: ${json}`);
@@ -762,7 +840,100 @@ async function sendOverDataChannel(json) {
 }
 
 function handleWebRtcMessage(channelName, message) {
-    const { sequenceNumber, isFec, packetType, payload } = parseWebRTCPacket(new Uint8Array(message));
+  const packet = new Uint8Array(message);
+
+  // Config JSON is sent as raw bytes (not FEC-encoded), so bypass FEC
+  // decoding for packets starting with '{' (0x7B).
+  if (packet.length > 0 && packet[0] === BINARY.JSON_OPEN_BRACE) {
+    processIncomingMessage(packet);
+    return;
+  }
+
+  if (FEC_MODE === 'wirehair') {
+    if (!wirehairReady) {
+      if (ENABLE_WIREHAIR_DEBUG_LOG) {
+        console.warn(
+          `[Wirehair] Received packet for ${channelName} but Wirehair WASM is not ready yet, dropping packet`,
+        );
+      }
+      return;
+    }
+    let receiver = getOrCreateWirehairReceiver(channelName);
+    const logEnabled = shouldLogWirehair(channelName);
+
+    // If sender epoch restarted (sequence goes back near zero) while receiver
+    // still expects much larger sequence, reset local FEC state to avoid
+    // InvalidRecoveredSymbol storms from mixed generations.
+    const srcSeq = getWirehairSourceSequence(packet);
+    if (srcSeq !== null) {
+      const nextExpected = receiver.next_expected?.() || 0;
+      if (nextExpected > srcSeq + 256) {
+        resetWirehairReceiver(channelName);
+        receiver = getOrCreateWirehairReceiver(channelName);
+      }
+    }
+
+    try {
+      const frames = receiver.feed_packet(packet);
+
+      const afterState = {
+        pending: receiver.pending_count?.() || 0,
+        nextExpected: receiver.next_expected?.() || 0,
+        bufferedBytes: receiver.buffered_bytes?.() || 0,
+      };
+
+      if (logEnabled) {
+        console.log(`[Wirehair] Result: got ${frames ? frames.length : 0} complete frames`);
+        console.log(
+          `[Wirehair] After: pending=${afterState.pending}, nextExpected=${afterState.nextExpected}, buffered=${afterState.bufferedBytes}B`,
+        );
+      }
+
+      if (frames) {
+        for (let i = 0; i < frames.length; i++) {
+          if (logEnabled) {
+            console.log(`[Wirehair] Frame ${i}: size=${frames[i].length}B`);
+          }
+          processIncomingMessage(frames[i]);
+        }
+      }
+    } catch (e) {
+      // Keep error-level visibility only.
+      console.error(`[Wirehair] feed_packet error on ${channelName}:`, e);
+      if (shouldInspectWirehairError(channelName)) {
+        const diag = inspectWirehairPacket(packet);
+        const first16 = Array.from(packet.slice(0, 16))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(' ');
+        console.error(
+          `[Wirehair] packet diagnostic on ${channelName}:`,
+          diag,
+          `first16=[${first16}]`,
+        );
+      }
+      const msg = typeof e === 'string' ? e : e?.message || String(e);
+      if (msg.includes('InvalidRecoveredSymbol')) {
+        // Desync between old/new FEC generations can produce unrecoverable symbols.
+        // Reset receiver state; keep keyframe gate unchanged to avoid freezing
+        // video when transient FEC errors happen frequently.
+        resetWirehairReceiver(channelName);
+        receiver = getOrCreateWirehairReceiver(channelName);
+        // Try current packet once more with a fresh receiver state.
+        try {
+          const frames = receiver.feed_packet(packet);
+          if (frames) {
+            for (let i = 0; i < frames.length; i++) {
+              processIncomingMessage(frames[i]);
+            }
+          }
+        } catch {
+          // Ignore; wait for next packets/keyframe.
+        }
+      }
+    }
+  } else {
+    // ── Legacy: RaptorQ FEC or raw media ─────────────────────────────
+    const { sequenceNumber, isFec, payload } = parseWebRTCPacket(packet);
 
     if (isFec) {
       const channelFecManager = getOrCreateFecManager(channelName);
@@ -775,11 +946,12 @@ function handleWebRtcMessage(channelName, message) {
     } else {
       processIncomingMessage(payload);
     }
+  }
 }
 
 function parseWebRTCPacket(packet) {
   if (packet.length < BINARY.WEBRTC_HEADER_SIZE) {
-    throw new Error("Invalid packet: too short");
+    throw new Error('Invalid packet: too short');
   }
 
   const view = new DataView(packet.buffer, packet.byteOffset, packet.byteLength);
@@ -805,10 +977,10 @@ function handleStreamConfigs(json) {
   if (json.type !== SERVER_MSG.DECODER_CONFIGS) return;
 
   for (const [key, value] of Object.entries(json)) {
-    if (key === "type") continue;
+    if (key === 'type') continue;
 
     try {
-      const stream = (typeof value === "string") ? JSON.parse(value) : value;
+      const stream = typeof value === 'string' ? JSON.parse(value) : value;
       if (!stream || stream.type !== SERVER_MSG.STREAM_CONFIG) continue;
 
       const channelName = stream.channelName;
@@ -882,7 +1054,9 @@ function handleStreamConfigs(json) {
         // separate thread. Just forward the config and let the audio
         // decoder worker handle decoder creation.
         if (audioDecoderPort) {
-          proxyConsole.log(`[Audio] Forwarding decoder config to audio decoder worker for ${channelName}`);
+          proxyConsole.log(
+            `[Audio] Forwarding decoder config to audio decoder worker for ${channelName}`,
+          );
           // Transfer description as a copy (the port can't transfer views into shared buffers)
           const descCopy = desc ? new Uint8Array(desc) : null;
           audioDecoderPort.postMessage({
@@ -903,7 +1077,11 @@ function handleStreamConfigs(json) {
             const existingDecoder = mediaDecoders.get(channelName);
             // close old Opus decoder if it was already created
             if (existingDecoder && typeof existingDecoder.stop === 'function') {
-              try { existingDecoder.stop(); } catch { /* ignore */ }
+              try {
+                existingDecoder.stop();
+              } catch {
+                /* ignore */
+              }
             }
 
             const aacDecoder = new AACDecoder();
@@ -914,35 +1092,52 @@ function handleStreamConfigs(json) {
 
             // DEBUG: Log ASC bytes for diagnostics (critical for cross-browser debugging)
             if (desc && desc.length > 0) {
-              proxyConsole.log(`[Audio] AAC ASC bytes for ${channelName}: [${Array.from(desc).map(b => b.toString(16).padStart(2, '0')).join(' ')}], len=${desc.length}`);
+              proxyConsole.log(
+                `[Audio] AAC ASC bytes for ${channelName}: [${Array.from(desc)
+                  .map((b) => b.toString(16).padStart(2, '0'))
+                  .join(' ')}], len=${desc.length}`,
+              );
             } else {
               console.warn(`[Audio] ⚠️ No ASC description for AAC channel ${channelName}`);
             }
 
-            aacDecoder.configure({
-              codec: CODEC.AAC,
-              sampleRate: cfg.sampleRate,
-              numberOfChannels: cfg.numberOfChannels,
-              description: desc, // AudioSpecificConfig
-            }).then(() => {
-              aacDecoder.isReadyForAudio = true;
-              proxyConsole.log(`[Audio] AACDecoder configured for ${channelName} — using ${aacDecoder.usingNative ? 'native WebCodecs' : 'FAAD2 WASM'}, state: ${aacDecoder.state}`);
-            }).catch((err) => {
-              console.error(`[Audio] AACDecoder configure failed for ${channelName}:`, err);
-            });
+            aacDecoder
+              .configure({
+                codec: CODEC.AAC,
+                sampleRate: cfg.sampleRate,
+                numberOfChannels: cfg.numberOfChannels,
+                description: desc, // AudioSpecificConfig
+              })
+              .then(() => {
+                aacDecoder.isReadyForAudio = true;
+                proxyConsole.log(
+                  `[Audio] AACDecoder configured for ${channelName} — using ${aacDecoder.usingNative ? 'native WebCodecs' : 'FAAD2 WASM'}, state: ${aacDecoder.state}`,
+                );
+              })
+              .catch((err) => {
+                console.error(`[Audio] AACDecoder configure failed for ${channelName}:`, err);
+              });
           } else {
             // ── Opus path (unchanged) ─────────────────────────────────────────────────
             const decoder = mediaDecoders.get(channelName);
             if (decoder) {
               try {
-                decoder.configure({ ...audioConfig, decoderPort: externalDecoderPort })
+                decoder
+                  .configure({ ...audioConfig, decoderPort: externalDecoderPort })
                   .then((configResult) => {
-                    proxyConsole.log(`[Audio] configured successfully for ${channelName}, result:`, configResult, "state:", decoder.state);
+                    proxyConsole.log(
+                      `[Audio] configured successfully for ${channelName}, result:`,
+                      configResult,
+                      'state:',
+                      decoder.state,
+                    );
                     return decoder.waitForReady(LIMITS.DECODER_READY_TIMEOUT_MS);
                   })
                   .then(() => {
                     try {
-                      proxyConsole.log(`[Audio] Decoder WASM ready for ${channelName}, sending description chunk`);
+                      proxyConsole.log(
+                        `[Audio] Decoder WASM ready for ${channelName}, sending description chunk`,
+                      );
 
                       const dataView = new DataView(desc.buffer, desc.byteOffset, desc.byteLength);
                       const timestamp = dataView.getUint32(4, false);
@@ -955,10 +1150,14 @@ function handleStreamConfigs(json) {
                       });
                       decoder.decode(chunk);
                       decoder.isReadyForAudio = true;
-                      proxyConsole.log(`[Audio] Sent description chunk for ${channelName}, now ready for audio packets`);
+                      proxyConsole.log(
+                        `[Audio] Sent description chunk for ${channelName}, now ready for audio packets`,
+                      );
 
                       if (decoder._preConfigBuffer && decoder._preConfigBuffer.length > 0) {
-                        proxyConsole.log(`[Audio] Replaying ${decoder._preConfigBuffer.length} pre-config buffered packets for ${channelName}`);
+                        proxyConsole.log(
+                          `[Audio] Replaying ${decoder._preConfigBuffer.length} pre-config buffered packets for ${channelName}`,
+                        );
                         for (const buffered of decoder._preConfigBuffer) {
                           try {
                             const bufferedChunk = new EncodedAudioChunk({
@@ -968,13 +1167,19 @@ function handleStreamConfigs(json) {
                             });
                             decoder.decode(bufferedChunk);
                           } catch (err) {
-                            console.warn(`[Audio] Error replaying buffered chunk for ${channelName}:`, err);
+                            console.warn(
+                              `[Audio] Error replaying buffered chunk for ${channelName}:`,
+                              err,
+                            );
                           }
                         }
                         decoder._preConfigBuffer = null;
                       }
                     } catch (err) {
-                      console.warn(`[Audio] Error decoding first audio frame (${channelName}):`, err);
+                      console.warn(
+                        `[Audio] Error decoding first audio frame (${channelName}):`,
+                        err,
+                      );
                     }
                   })
                   .catch((err) => {
@@ -998,7 +1203,6 @@ function handleStreamConfigs(json) {
 // ------------------------------
 // Stream handling (WebTransport)
 // ------------------------------
-
 async function attachWebTransportStream(readable, writable, channelName) {
   webTPStreamReader = readable.getReader();
   webTPStreamWriter = writable.getWriter();
@@ -1006,7 +1210,8 @@ async function attachWebTransportStream(readable, writable, channelName) {
   const options = {
     audio: subscribeType === STREAM_TYPE.CAMERA ? true : subscriptionAudioEnabled,
     video: true,
-    initialQuality: subscribeType === STREAM_TYPE.CAMERA ? (initialQuality || channelName) : channelName,
+    initialQuality:
+      subscribeType === STREAM_TYPE.CAMERA ? initialQuality || channelName : channelName,
   };
   proxyConsole.warn(`[WebTransport] Attached stream, options:`, options);
 
@@ -1036,7 +1241,8 @@ async function attachWebTransportFromUrl(url, channelName) {
   const options = {
     audio: subscribeType === STREAM_TYPE.CAMERA ? true : subscriptionAudioEnabled,
     video: true,
-    initialQuality: subscribeType === STREAM_TYPE.CAMERA ? (initialQuality || channelName) : channelName,
+    initialQuality:
+      subscribeType === STREAM_TYPE.CAMERA ? initialQuality || channelName : channelName,
   };
   commandSender.initSubscribeChannelStream(subscribeType, options);
   commandSender.startStream();
@@ -1105,7 +1311,11 @@ class GopByteReader {
     while (this._totalBytes < size) {
       if (this.done) return null;
       const { value, done } = await this.reader.read();
-      if (done) { this.done = true; if (this._totalBytes < size) return null; break; }
+      if (done) {
+        this.done = true;
+        if (this._totalBytes < size) return null;
+        break;
+      }
       const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
       this._chunks.push(chunk);
       this._totalBytes += chunk.length;
@@ -1157,13 +1367,19 @@ class GopByteReader {
  */
 function gopChannelToName(channelByte) {
   switch (channelByte) {
-    case GOP_CHANNEL_BYTE.CAM_360P: return CHANNEL_NAME.CAM_360P;
-    case GOP_CHANNEL_BYTE.CAM_720P: return CHANNEL_NAME.CAM_720P;
-    case GOP_CHANNEL_BYTE.SCREEN_SHARE_720P: return CHANNEL_NAME.SCREEN_SHARE_720P;
+    case GOP_CHANNEL_BYTE.CAM_360P:
+      return CHANNEL_NAME.CAM_360P;
+    case GOP_CHANNEL_BYTE.CAM_720P:
+      return CHANNEL_NAME.CAM_720P;
+    case GOP_CHANNEL_BYTE.SCREEN_SHARE_720P:
+      return CHANNEL_NAME.SCREEN_SHARE_720P;
     // case 4: return CHANNEL_NAME.SCREEN_SHARE_1080P; // not used yet
-    case GOP_CHANNEL_BYTE.CAM_1080P: return CHANNEL_NAME.CAM_1080P;
-    case GOP_CHANNEL_BYTE.CAM_1440P: return CHANNEL_NAME.CAM_1440P;
-    default: return null;
+    case GOP_CHANNEL_BYTE.CAM_1080P:
+      return CHANNEL_NAME.CAM_1080P;
+    case GOP_CHANNEL_BYTE.CAM_1440P:
+      return CHANNEL_NAME.CAM_1440P;
+    default:
+      return null;
   }
 }
 
@@ -1230,8 +1446,10 @@ async function readGopStream(receiveStream, gopIndex) {
     const streamId = _sharedTextDecoder.decode(gopMeta.subarray(0, streamIdLen));
     const dv = new DataView(gopMeta.buffer, gopMeta.byteOffset, gopMeta.byteLength);
     let off = streamIdLen;
-    channel = dv.getUint8(off); off += 1;
-    gopId = dv.getUint32(off, false); off += 4;
+    channel = dv.getUint8(off);
+    off += 1;
+    gopId = dv.getUint32(off, false);
+    off += 4;
     const expectedFrames = dv.getUint16(off, false);
 
     // Map channel byte → CHANNEL_NAME for keyframe flag reset
@@ -1257,7 +1475,9 @@ async function readGopStream(receiveStream, gopIndex) {
       // never exceeds 10 MB (typical 1080p keyframe ~100-400 KB). If this fires,
       // all subsequent reads would also be misaligned → break out of the GOP entirely.
       if (payloadSize === 0 || payloadSize > LIMITS.MAX_PAYLOAD_BYTES) {
-        console.warn(`[GOP] ch=${channel} gopId=${gopId} implausible payloadSize=${payloadSize}`);
+        if (ENABLE_GOP_DEBUG_LOG) {
+          console.warn(`[GOP] ch=${channel} gopId=${gopId} implausible payloadSize=${payloadSize}`);
+        }
         break;
       }
 
@@ -1278,7 +1498,7 @@ async function readGopStream(receiveStream, gopIndex) {
       // Reconstruct full packet: [seq:4][ts:4][frameType:1] + media_payload
       // handleBinaryPacket() expects this 9-byte prefix to route to the correct decoder.
       const fullPacket = new Uint8Array(BINARY.MEDIA_HEADER_SIZE + payload.length);
-      fullPacket.set(headerBytes.subarray(0, BINARY.MEDIA_HEADER_SIZE), 0);  // seq + ts + frameType from FrameHeader
+      fullPacket.set(headerBytes.subarray(0, BINARY.MEDIA_HEADER_SIZE), 0); // seq + ts + frameType from FrameHeader
       fullPacket.set(payload, BINARY.MEDIA_HEADER_SIZE);
       await processIncomingMessage(fullPacket);
     }
@@ -1296,7 +1516,6 @@ async function readGopStream(receiveStream, gopIndex) {
       // );
       setKeyFrameReceived(channelName, false);
     }
-
   } catch (err) {
     // Suppress errors from cancelled streams (expected when superseded)
     if (activeGopPerChannel.get(channel) !== gopId) {
@@ -1335,16 +1554,6 @@ async function processIncomingMessage(message) {
         handleStreamConfigs(json);
         return;
       }
-      // ── Subscriber downlink congestion stats ──
-      // NOTE: Client-side subscriber CC is DISABLED.
-      // Server-side congestion.rs already detects downlink congestion and does
-      // GOP-level frame dropping. Having a second CC here using the same Quinn
-      // stats creates a double-reaction feedback loop (oscillation between quality
-      // levels). Quality switching should be user-driven, not auto-congestion.
-      if (json.type === SERVER_MSG.SUBSCRIBER_CONNECTION_STATS) {
-        // evaluateDownlinkCongestion(json);  // disabled — server handles CC
-        return;
-      }
     } catch (e) {
       // Not valid JSON — binary data that happens to start with 0x7B.
       // Fall through to binary handling.
@@ -1352,11 +1561,12 @@ async function processIncomingMessage(message) {
   }
 
   // Binary media packet
-  const buf = (message instanceof ArrayBuffer)
-    ? message
-    : (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength)
-      ? bytes.buffer
-      : bytes.slice().buffer;
+  const buf =
+    message instanceof ArrayBuffer
+      ? message
+      : bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+        ? bytes.buffer
+        : bytes.slice().buffer;
   handleBinaryPacket(buf);
 }
 
@@ -1365,6 +1575,27 @@ async function handleBinaryPacket(dataBuffer) {
   const sequenceNumber = dataView.getUint32(0, false);
   const timestamp = dataView.getUint32(4, false);
   const frameType = dataView.getUint8(BINARY.MEDIA_HEADER_SIZE - 1);
+
+  // 🔍 DEBUG: Log parsed header and first raw bytes to verify format
+  {
+    const rawBytes = new Uint8Array(dataBuffer, 0, Math.min(20, dataBuffer.byteLength));
+    const hexDump = Array.from(rawBytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join(' ');
+    const knownFrameTypes = [0, 1, 2, 3, 4, 5, 6, 10, 11, 13, 14, 15, 16, 0xfd, 0xfe, 0xff];
+    const isKnown = knownFrameTypes.includes(frameType);
+    if (ENABLE_BINARY_HEADER_DEBUG_LOG && shouldLogBinaryHeader(frameType)) {
+      console.warn(
+        `[DEBUG handleBinaryPacket] size=${dataBuffer.byteLength}, seq=${sequenceNumber}, ts=${timestamp}, frameType=${frameType} (0x${frameType.toString(16)}), known=${isKnown}, raw=[${hexDump}]`,
+      );
+    }
+    if (!isKnown && shouldLogUnknownFrameType(frameType)) {
+      console.error(
+        `[DEBUG] ❌ UNKNOWN frameType=${frameType} — this frame will be SILENTLY DROPPED! Likely missing 9-byte [seq][ts][type] header.`,
+      );
+    }
+  }
+
   // Use a Uint8Array VIEW instead of ArrayBuffer.slice(9) to avoid a deep copy
   // of every frame payload. ArrayBuffer.slice() memcpy's the entire payload
   // (100-400 KB per 720p frame) which wastes memory and CPU on Safari 15.
@@ -1389,14 +1620,24 @@ async function handleBinaryPacket(dataBuffer) {
         let decoder360p = mediaDecoders.get(CHANNEL_NAME.CAM_360P);
         const decoderState = decoder360p ? decoder360p.state : null;
 
-        if (!decoder360p || decoderState === DECODER_STATE.CLOSED || decoderState === DECODER_STATE.UNCONFIGURED) {
+        if (
+          !decoder360p ||
+          decoderState === DECODER_STATE.CLOSED ||
+          decoderState === DECODER_STATE.UNCONFIGURED
+        ) {
           // Throttle decoder recreation to avoid spawning multiple WASM instances
           // under rapid error conditions (Safari 15 memory limit critical)
           if (canRecreateDecoder(CHANNEL_NAME.CAM_360P)) {
             decoder360p = await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_360P);
             mediaDecoders.set(CHANNEL_NAME.CAM_360P, decoder360p);
             const video360pConfig = mediaConfigs.get(CHANNEL_NAME.CAM_360P);
-            if (video360pConfig) decoder360p.configure(video360pConfig);
+            if (video360pConfig) {
+              decoder360p.configure(video360pConfig);
+            } else {
+              // Decoder config has not arrived yet; wait for next keyframe after config.
+              setKeyFrameReceived(CHANNEL_NAME.CAM_360P, false);
+              return;
+            }
           } else {
             return; // Still in cooldown — drop this frame
           }
@@ -1408,15 +1649,24 @@ async function handleBinaryPacket(dataBuffer) {
           self._decodeCount++;
 
           const hasNativeVideoDecoder = typeof VideoDecoder !== 'undefined';
-          const isPolyfill = decoder360p.usingNative === false || !hasNativeVideoDecoder || !(decoder360p instanceof VideoDecoder);
+          const isPolyfill =
+            decoder360p.usingNative === false ||
+            !hasNativeVideoDecoder ||
+            !(decoder360p instanceof VideoDecoder);
 
           if (isPolyfill) {
-            decoder360p.decode({ type, timestamp: timestamp * TIMESTAMP_US_PER_MS, data: new Uint8Array(data) });
+            decoder360p.decode({
+              type,
+              timestamp: timestamp * TIMESTAMP_US_PER_MS,
+              data: new Uint8Array(data),
+            });
           } else {
-            decoder360p.decode(new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data }));
+            decoder360p.decode(
+              new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data }),
+            );
           }
         } catch (err) {
-          proxyConsole.error("360p decode error:", err);
+          proxyConsole.error('360p decode error:', err);
           setKeyFrameReceived(CHANNEL_NAME.CAM_360P, false);
         }
       }
@@ -1434,14 +1684,18 @@ async function handleBinaryPacket(dataBuffer) {
         let decoder720p = mediaDecoders.get(CHANNEL_NAME.CAM_720P);
         const decoderState = decoder720p ? decoder720p.state : null;
 
-        if (!decoder720p || decoderState === DECODER_STATE.CLOSED || decoderState === DECODER_STATE.UNCONFIGURED) {
+        if (
+          !decoder720p ||
+          decoderState === DECODER_STATE.CLOSED ||
+          decoderState === DECODER_STATE.UNCONFIGURED
+        ) {
           // Throttle decoder recreation to avoid spawning multiple WASM instances
           if (canRecreateDecoder(CHANNEL_NAME.CAM_720P)) {
             decoder720p = await createVideoDecoderWithFallback(CHANNEL_NAME.CAM_720P);
             mediaDecoders.set(CHANNEL_NAME.CAM_720P, decoder720p);
             const config720p = mediaConfigs.get(CHANNEL_NAME.CAM_720P);
             if (config720p) {
-              proxyConsole.log("Decoder error, Configuring 720p decoder with config:", config720p);
+              proxyConsole.log('Decoder error, Configuring 720p decoder with config:', config720p);
               decoder720p.configure(config720p);
             }
           } else {
@@ -1452,15 +1706,24 @@ async function handleBinaryPacket(dataBuffer) {
         try {
           if (data.byteLength === 0) return;
           const hasNativeVideoDecoder = typeof VideoDecoder !== 'undefined';
-          const isPolyfill = decoder720p.usingNative === false || !hasNativeVideoDecoder || !(decoder720p instanceof VideoDecoder);
+          const isPolyfill =
+            decoder720p.usingNative === false ||
+            !hasNativeVideoDecoder ||
+            !(decoder720p instanceof VideoDecoder);
 
           if (isPolyfill) {
-            decoder720p.decode({ type, timestamp: timestamp * TIMESTAMP_US_PER_MS, data: new Uint8Array(data) });
+            decoder720p.decode({
+              type,
+              timestamp: timestamp * TIMESTAMP_US_PER_MS,
+              data: new Uint8Array(data),
+            });
           } else {
-            decoder720p.decode(new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data }));
+            decoder720p.decode(
+              new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data }),
+            );
           }
         } catch (err) {
-          proxyConsole.error("720p decode error:", err);
+          proxyConsole.error('720p decode error:', err);
           setKeyFrameReceived(CHANNEL_NAME.CAM_720P, false);
         }
       }
@@ -1478,20 +1741,26 @@ async function handleBinaryPacket(dataBuffer) {
         let decoder1080p = mediaDecoders.get(CHANNEL_NAME.CAM_1080P);
         const decoderState = decoder1080p ? decoder1080p.state : null;
 
-        if (!decoder1080p || decoderState === DECODER_STATE.CLOSED || decoderState === DECODER_STATE.UNCONFIGURED) {
+        if (
+          !decoder1080p ||
+          decoderState === DECODER_STATE.CLOSED ||
+          decoderState === DECODER_STATE.UNCONFIGURED
+        ) {
           decoder1080p = new VideoDecoder(createVideoInit(CHANNEL_NAME.CAM_1080P));
           mediaDecoders.set(CHANNEL_NAME.CAM_1080P, decoder1080p);
           const config1080p = mediaConfigs.get(CHANNEL_NAME.CAM_1080P);
           if (config1080p) {
-            proxyConsole.log("Configuring 1080p decoder with config:", config1080p);
+            proxyConsole.log('Configuring 1080p decoder with config:', config1080p);
             decoder1080p.configure(config1080p);
           }
         }
 
         try {
-          decoder1080p.decode(new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data }));
+          decoder1080p.decode(
+            new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data }),
+          );
         } catch (err) {
-          proxyConsole.error("1080p decode error:", err);
+          proxyConsole.error('1080p decode error:', err);
           setKeyFrameReceived(CHANNEL_NAME.CAM_1080P, false);
         }
       }
@@ -1509,15 +1778,20 @@ async function handleBinaryPacket(dataBuffer) {
         let decoder1440p = mediaDecoders.get(CHANNEL_NAME.CAM_1440P);
 
         try {
-          decoder1440p.decode(new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data }));
+          decoder1440p.decode(
+            new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data }),
+          );
         } catch (err) {
-          proxyConsole.error("1440p decode error:", err);
+          proxyConsole.error('1440p decode error:', err);
           setKeyFrameReceived(CHANNEL_NAME.CAM_1440P, false);
         }
       }
     }
     return;
-  } else if (frameType === FRAME_TYPE.SCREEN_SHARE_KEY || frameType === FRAME_TYPE.SCREEN_SHARE_DELTA) {
+  } else if (
+    frameType === FRAME_TYPE.SCREEN_SHARE_KEY ||
+    frameType === FRAME_TYPE.SCREEN_SHARE_DELTA
+  ) {
     // Screen share 720p
     const type = frameType === FRAME_TYPE.SCREEN_SHARE_KEY ? CHUNK_TYPE.KEY : CHUNK_TYPE.DELTA;
     if (type === CHUNK_TYPE.KEY) setKeyFrameReceived(CHANNEL_NAME.SCREEN_SHARE_720P, true);
@@ -1529,14 +1803,20 @@ async function handleBinaryPacket(dataBuffer) {
         let videoDecoderScreenShare720p = mediaDecoders.get(CHANNEL_NAME.SCREEN_SHARE_720P);
         const decoderState = videoDecoderScreenShare720p ? videoDecoderScreenShare720p.state : null;
 
-        if (!videoDecoderScreenShare720p || decoderState === DECODER_STATE.CLOSED || decoderState === DECODER_STATE.UNCONFIGURED) {
+        if (
+          !videoDecoderScreenShare720p ||
+          decoderState === DECODER_STATE.CLOSED ||
+          decoderState === DECODER_STATE.UNCONFIGURED
+        ) {
           // Recreate decoder when closed (e.g. after decode error from GOP interleaving)
           if (canRecreateDecoder(CHANNEL_NAME.SCREEN_SHARE_720P)) {
-            videoDecoderScreenShare720p = await createVideoDecoderWithFallback(CHANNEL_NAME.SCREEN_SHARE_720P);
+            videoDecoderScreenShare720p = await createVideoDecoderWithFallback(
+              CHANNEL_NAME.SCREEN_SHARE_720P,
+            );
             mediaDecoders.set(CHANNEL_NAME.SCREEN_SHARE_720P, videoDecoderScreenShare720p);
             const configSS720p = mediaConfigs.get(CHANNEL_NAME.SCREEN_SHARE_720P);
             if (configSS720p) {
-              proxyConsole.log("Recreating screen share 720p decoder with config:", configSS720p);
+              proxyConsole.log('Recreating screen share 720p decoder with config:', configSS720p);
               videoDecoderScreenShare720p.configure(configSS720p);
             }
             // After recreation, wait for next keyframe
@@ -1547,10 +1827,14 @@ async function handleBinaryPacket(dataBuffer) {
 
         try {
           if (data.byteLength === 0) return;
-          const encodedChunk = new EncodedVideoChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type, data });
+          const encodedChunk = new EncodedVideoChunk({
+            timestamp: timestamp * TIMESTAMP_US_PER_MS,
+            type,
+            data,
+          });
           videoDecoderScreenShare720p.decode(encodedChunk);
         } catch (error) {
-          proxyConsole.error("Screen share video decode error:", error);
+          proxyConsole.error('Screen share video decode error:', error);
           setKeyFrameReceived(CHANNEL_NAME.SCREEN_SHARE_720P, false);
         }
       }
@@ -1568,14 +1852,14 @@ async function handleBinaryPacket(dataBuffer) {
       const audioPayload = data.slice(); // isolated copy
       audioDecoderPort.postMessage(
         { type: MSG.DECODE, timestamp: timestamp * TIMESTAMP_US_PER_MS, data: audioPayload },
-        [audioPayload.buffer]
+        [audioPayload.buffer],
       );
       return;
     }
 
     // ── Legacy fallback: decode inline (when audioDecoderPort is not available) ──
     let audioDecoder = mediaDecoders.get(
-      subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_48K : CHANNEL_NAME.SCREEN_SHARE_AUDIO
+      subscribeType === STREAM_TYPE.CAMERA ? CHANNEL_NAME.MIC_48K : CHANNEL_NAME.SCREEN_SHARE_AUDIO,
     );
 
     if (!audioDecoder) {
@@ -1589,12 +1873,26 @@ async function handleBinaryPacket(dataBuffer) {
 
     if (audioDecoder.usingNative !== undefined) {
       try {
-        audioDecoder.decode({ type: CHUNK_TYPE.KEY, timestamp: timestamp * TIMESTAMP_US_PER_MS, data: data.slice() });
-      } catch (err) { console.error('[Audio] AAC decode error:', err); }
+        audioDecoder.decode({
+          type: CHUNK_TYPE.KEY,
+          timestamp: timestamp * TIMESTAMP_US_PER_MS,
+          data: data.slice(),
+        });
+      } catch (err) {
+        console.error('[Audio] AAC decode error:', err);
+      }
     } else {
       try {
-        audioDecoder.decode(new EncodedAudioChunk({ timestamp: timestamp * TIMESTAMP_US_PER_MS, type: CHUNK_TYPE.KEY, data: data.slice() }));
-      } catch (err) { console.error('[Audio] decode error:', err); }
+        audioDecoder.decode(
+          new EncodedAudioChunk({
+            timestamp: timestamp * TIMESTAMP_US_PER_MS,
+            type: CHUNK_TYPE.KEY,
+            data: data.slice(),
+          }),
+        );
+      } catch (err) {
+        console.error('[Audio] decode error:', err);
+      }
     }
   }
 }
@@ -1612,7 +1910,7 @@ function setupVideoDecoderPort(port) {
     const msg = e.data;
     switch (msg.type) {
       case MSG.READY:
-        proxyConsole.log("[Worker] Video decoder worker is ready");
+        proxyConsole.log('[Worker] Video decoder worker is ready');
         break;
 
       case MSG.CONFIGURED:
@@ -1658,15 +1956,18 @@ function decodeVideoExternal(channelName, type, timestamp, data) {
   // data.slice() copies only the payload bytes (vs the old full dataBuffer.slice(9)
   // which also had to copy the 9-byte header region).
   const isolated = data.slice(); // Uint8Array.slice → new ArrayBuffer, payload only
-  videoDecoderPort.postMessage({
-    type: MSG.DECODE,
-    channelName,
-    chunk: {
-      type,
-      timestamp: timestamp * TIMESTAMP_US_PER_MS,
-      data: isolated,
+  videoDecoderPort.postMessage(
+    {
+      type: MSG.DECODE,
+      channelName,
+      chunk: {
+        type,
+        timestamp: timestamp * TIMESTAMP_US_PER_MS,
+        data: isolated,
+      },
     },
-  }, [isolated.buffer]);
+    [isolated.buffer],
+  );
 }
 
 /**
@@ -1686,8 +1987,12 @@ function configureVideoExternal(channelName, config) {
 // ------------------------------
 
 async function initializeDecoders() {
-  proxyConsole.log("Initializing camera decoders for subscribe type:", subscribeType,
-    "videoDecoderPort:", !!videoDecoderPort);
+  proxyConsole.log(
+    'Initializing camera decoders for subscribe type:',
+    subscribeType,
+    'videoDecoderPort:',
+    !!videoDecoderPort,
+  );
 
   switch (subscribeType) {
     case STREAM_TYPE.CAMERA: {
@@ -1696,11 +2001,19 @@ async function initializeDecoders() {
       // the dedicated audio-decoder-worker — skip local decoder creation.
       if (!audioDecoderPort) {
         const micAudioDecoder = new OpusAudioDecoder(audioInit);
-        const audioConfigPromise = micAudioDecoder.configure({ sampleRate: AUDIO_FORMAT.SAMPLE_RATE_48K, numberOfChannels: AUDIO_FORMAT.MONO_CHANNELS, decoderPort: externalDecoderPort });
+        const audioConfigPromise = micAudioDecoder.configure({
+          sampleRate: AUDIO_FORMAT.SAMPLE_RATE_48K,
+          numberOfChannels: AUDIO_FORMAT.MONO_CHANNELS,
+          decoderPort: externalDecoderPort,
+        });
         mediaDecoders.set(CHANNEL_NAME.MIC_48K, micAudioDecoder);
         await audioConfigPromise;
-        proxyConsole.log('[Audio] OpusDecoder configured, state:', micAudioDecoder.state,
-          'mode:', micAudioDecoder.useInlineDecoder ? 'inline' : 'worker');
+        proxyConsole.log(
+          '[Audio] OpusDecoder configured, state:',
+          micAudioDecoder.state,
+          'mode:',
+          micAudioDecoder.useInlineDecoder ? 'inline' : 'worker',
+        );
       } else {
         proxyConsole.log('[Audio] Audio decoding offloaded to audio-decoder-worker');
       }
@@ -1733,12 +2046,12 @@ async function initializeDecoders() {
         proxyConsole.log('[Audio] Screen share audio decoding offloaded to audio-decoder-worker');
       }
       proxyConsole.warn(
-        "Initialized screen share decoders:",
+        'Initialized screen share decoders:',
         mediaDecoders,
-        "video channel",
+        'video channel',
         CHANNEL_NAME.SCREEN_SHARE_720P,
-        "audio channel",
-        CHANNEL_NAME.SCREEN_SHARE_AUDIO
+        'audio channel',
+        CHANNEL_NAME.SCREEN_SHARE_AUDIO,
       );
       break;
     }
@@ -1747,7 +2060,11 @@ async function initializeDecoders() {
       // ── Audio decoder ──
       if (!audioDecoderPort) {
         const defaultMicAudioDecoder = new OpusAudioDecoder(audioInit);
-        const audioConfigPromise = defaultMicAudioDecoder.configure({ sampleRate: AUDIO_FORMAT.SAMPLE_RATE_48K, numberOfChannels: AUDIO_FORMAT.MONO_CHANNELS, decoderPort: externalDecoderPort });
+        const audioConfigPromise = defaultMicAudioDecoder.configure({
+          sampleRate: AUDIO_FORMAT.SAMPLE_RATE_48K,
+          numberOfChannels: AUDIO_FORMAT.MONO_CHANNELS,
+          decoderPort: externalDecoderPort,
+        });
         mediaDecoders.set(CHANNEL_NAME.MIC_48K, defaultMicAudioDecoder);
         await audioConfigPromise;
       } else {
@@ -1812,19 +2129,19 @@ async function handleWebRTCBitrateSwitch(targetChannelName) {
     const currentChannel = webRtcDataChannels.get(currentVideoChannel);
     const targetChannel = webRtcDataChannels.get(targetChannelName);
 
-    if (!targetChannel || targetChannel.readyState !== "open") {
+    if (!targetChannel || targetChannel.readyState !== 'open') {
       proxyConsole.warn(`[Bitrate] Target channel cam_${targetChannelName} not ready.`);
       return;
     }
 
     const encoder = new TextEncoder();
 
-    if (currentChannel && currentChannel.readyState === "open") {
+    if (currentChannel && currentChannel.readyState === 'open') {
       proxyConsole.log(`[Bitrate] Sending "pause" to currentQuality`);
       currentChannel.send(encoder.encode(BITRATE_CMD.PAUSE));
     }
 
-    if (targetChannel.readyState === "open") {
+    if (targetChannel.readyState === 'open') {
       proxyConsole.log(`[Bitrate] Sending "resume" to ${targetChannelName}`);
       targetChannel.send(encoder.encode(BITRATE_CMD.RESUME));
     }
@@ -1899,6 +2216,7 @@ function resetDecoders() {
   // videoCodecReceived = false;
   // audioCodecReceived = false;
   resetAllKeyFrameFlags();
+  resetWirehairState();
 
   clearInterval(videoIntervalID);
   clearInterval(audioIntervalID);
@@ -1906,7 +2224,7 @@ function resetDecoders() {
   self.postMessage({
     type: MSG.LOG,
     event: MSG.RESET_EVENT,
-    message: "Reset all decoders",
+    message: 'Reset all decoders',
   });
 }
 
@@ -1916,8 +2234,6 @@ function stopAll() {
     videoJitterBuffer.destroy();
     videoJitterBuffer = null;
   }
-
-
 
   if (workletPort) {
     workletPort.postMessage({ type: MSG.STOP_EVENT });
@@ -1946,7 +2262,7 @@ function stopAll() {
     try {
       reader.cancel();
       writer.close();
-    } catch { }
+    } catch {}
   }
   channelStreams.clear();
 
@@ -1955,14 +2271,14 @@ function stopAll() {
     try {
       videoDecoderPort.postMessage({ type: MSG.RESET_ALL });
       videoDecoderPort.close();
-    } catch { }
+    } catch {}
     videoDecoderPort = null;
   }
 
   mediaDecoders.forEach((decoder) => {
     try {
       decoder.close();
-    } catch { }
+    } catch {}
   });
   mediaDecoders.clear();
   mediaConfigs.clear();
@@ -1986,7 +2302,7 @@ function stopAll() {
   self.postMessage({
     type: MSG.LOG,
     event: MSG.STOP_EVENT,
-    message: "Stopped all media operations",
+    message: 'Stopped all media operations',
   });
 }
 
@@ -2011,7 +2327,9 @@ class LengthDelimitedReader {
     // Guard against unbounded memory growth on stalled/slow streams (Safari 15 critical)
     const MAX_BUFFER_BYTES = LIMITS.MAX_BUFFER_BYTES;
     if (this.buffer.length + newData.length > MAX_BUFFER_BYTES) {
-      console.error('[LDReader] Buffer overflow (>' + MAX_BUFFER_BYTES + ' bytes), resetting. Possible stall?');
+      console.error(
+        '[LDReader] Buffer overflow (>' + MAX_BUFFER_BYTES + ' bytes), resetting. Possible stall?',
+      );
       this.buffer = new Uint8Array(0);
     }
     const combined = new Uint8Array(this.buffer.length + newData.length);
@@ -2023,7 +2341,11 @@ class LengthDelimitedReader {
   async readMessage() {
     while (true) {
       if (this.buffer.length >= BINARY.LENGTH_PREFIX_SIZE) {
-        const view = new DataView(this.buffer.buffer, this.buffer.byteOffset, BINARY.LENGTH_PREFIX_SIZE);
+        const view = new DataView(
+          this.buffer.buffer,
+          this.buffer.byteOffset,
+          BINARY.LENGTH_PREFIX_SIZE,
+        );
         const messageLength = view.getUint32(0, false);
 
         const totalLength = BINARY.LENGTH_PREFIX_SIZE + messageLength;
@@ -2038,7 +2360,7 @@ class LengthDelimitedReader {
       const { value, done } = await this.reader.read();
       if (done) {
         if (this.buffer.length > 0) {
-          throw new Error("Stream ended with incomplete message");
+          throw new Error('Stream ended with incomplete message');
         }
         return null;
       }
